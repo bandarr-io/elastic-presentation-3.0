@@ -7,76 +7,56 @@ const DEFAULT_TEAM_CONFIG = {
   eyebrow: 'Your Support',
   title: 'Meet Your Elastic Team',
   subtitle: 'Our dedicated team is here to support your success.',
+  // Placeholder roster — replace with the presenting team in Team Settings.
+  // Roles "Account Executive", "Solutions Architect", and "Customer Architect"
+  // are auto-surfaced in the Next Steps contact panel.
   members: [
     {
       id: 'member-1',
-      name: 'Dave Stroth',
-      role: 'Global Public Sector AVP',
-      email: 'dave.stroth@elastic.co',
+      name: 'Team Member',
+      role: 'Account Executive',
+      email: 'ae@example.com',
       color: '#48EFCF',
-      initials: 'DS',
-      photo: 'photos/dave-stroth.jpg'
+      initials: 'AE'
     },
     {
       id: 'member-2',
-      name: 'Greg DeYoung',
+      name: 'Team Member',
       role: 'Regional VP',
-      email: 'greg.deyoung@elastic.co',
+      email: 'rvp@example.com',
       color: '#0B64DD',
-      initials: 'GD',
-      photo: 'photos/greg-deyoung.jpg'
+      initials: 'VP'
     },
     {
       id: 'member-3',
-      name: 'Baha Azarmi',
-      role: 'GM, Observability',
-      email: 'baha@elastic.co',
+      name: 'Team Member',
+      role: 'Account Manager',
+      email: 'am@example.com',
       color: '#F04E98',
-      initials: 'BA',
-      photo: 'photos/baha-azarmi.png'
+      initials: 'AM'
     },
     {
       id: 'member-4',
-      name: 'John Harmon',
-      role: 'Global Public Sector AM',
-      email: 'john.harmon@elastic.co',
+      name: 'Team Member',
+      role: 'SA Manager',
+      email: 'sam@example.com',
       color: '#FEC514',
-      initials: 'JH',
-      photo: 'photos/john-harmon.png'
+      initials: 'SM'
     },
     {
       id: 'member-5',
-      name: 'Bobby Suber',
-      role: 'SA Manager',
-      email: 'bobby.suber@elastic.co',
+      name: 'Team Member',
+      role: 'Solutions Architect',
+      email: 'sa@example.com',
       color: '#FF957D',
-      initials: 'BS',
-      photo: 'photos/bobby-suber.png'
+      initials: 'SA'
     },
     {
       id: 'member-6',
-      name: 'Brent Cox',
-      role: 'Senior Principal SA',
-      email: 'brent.cox@elastic.co',
-      color: '#153385',
-      initials: 'BC',
-      photo: 'photos/brent-cox.jpg'
-    },
-    {
-      id: 'member-7',
-      name: 'Kip Welty',
-      role: 'Public Sector AE',
-      email: 'kip.welty@elastic.co',
-      color: '#48EFCF',
-      initials: 'KW',
-      photo: 'photos/kip-welty.jpg'
-    },
-    {
-      id: 'member-8',
-      name: 'Customer CA',
+      name: 'Team Member',
       role: 'Customer Architect',
-      email: 'ca@elastic.co',
-      color: '#0B64DD',
+      email: 'ca@example.com',
+      color: '#153385',
       initials: 'CA'
     }
   ]
