@@ -1,0 +1,1 @@
+Drop your customer's dashboard screenshots here using the filenames referenced in `src/scenes/SecurityUseCasesScene.jsx` (`DEFAULT_USE_CASES` image paths). Recommended width >= 2048px to avoid blur in the lightbox.

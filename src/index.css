@@ -1,0 +1,75 @@
+/* Space Mono - Google Fonts import must come first */
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap');
+
+/* Inter Variable Font - Single file supports all weights (100-900) */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/Inter-VariableFont_opsz,wght.ttf') format('truetype');
+}
+
+/* Inter Variable Font - Italic */
+@font-face {
+  font-family: 'Inter';
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/Inter-Italic-VariableFont_opsz,wght.ttf') format('truetype');
+}
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+@keyframes glowOnce {
+  0%, 100% {
+    box-shadow: 0 0 0 rgba(11, 100, 221, 0);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(11, 100, 221, 0.6), 0 0 40px rgba(11, 100, 221, 0.4);
+  }
+}
+
+@keyframes glowOnceDark {
+  0%, 100% {
+    box-shadow: 0 0 0 rgba(72, 239, 207, 0);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(72, 239, 207, 0.6), 0 0 40px rgba(72, 239, 207, 0.4);
+  }
+}
+
+.glow-once-light {
+  animation: glowOnce 1.5s ease-in-out 0.3s 1;
+}
+
+.glow-once-dark {
+  animation: glowOnceDark 1.5s ease-in-out 0.3s 1;
+}
+
+.glow-delayed-light {
+  animation: glowOnce 1.5s ease-in-out 3s 1;
+}
+
+.glow-delayed-dark {
+  animation: glowOnceDark 1.5s ease-in-out 3s 1;
+}
