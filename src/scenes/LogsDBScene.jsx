@@ -2,6 +2,7 @@ import { animate } from 'animejs'
 import { useEffect, useRef, useState } from 'react'
 import { useTheme } from '../context/ThemeContext'
 import SceneHeader from '../components/SceneHeader'
+import { resolveIcon } from '../data/iconOptions'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faDatabase,
@@ -95,7 +96,10 @@ function LogsDBScene({ metadata = {} }) {
 
   const titleParts = metadata.titleParts || ['More Data.', 'Lower Cost.', 'Better Visibility.']
   const eyebrow = metadata.eyebrow || 'Store More. Spend Less.'
-  const outcomes = metadata.outcomes || DEFAULT_OUTCOMES
+  const outcomes = (metadata.outcomes || DEFAULT_OUTCOMES).map((item, i) => {
+    const merged = { ...(DEFAULT_OUTCOMES[i] || {}), ...item }
+    return { ...merged, icon: resolveIcon(merged.icon, DEFAULT_OUTCOMES[i]?.icon) }
+  })
   const modes = {
     standard: { ...DEFAULT_MODES.standard, ...(metadata.modes?.standard || {}) },
     logsdb: { ...DEFAULT_MODES.logsdb, ...(metadata.modes?.logsdb || {}) },

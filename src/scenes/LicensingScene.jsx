@@ -33,7 +33,7 @@ import {
   faDiagramProject
 } from '@fortawesome/free-solid-svg-icons'
 
-const freeOpenFeatures = [
+const DEFAULT_FREE_OPEN_FEATURES = [
   { name: 'Elasticsearch', icon: faDatabase, desc: 'Distributed search & analytics' },
   { name: 'Kibana', icon: faChartLine, desc: 'Visualize & explore data' },
   { name: 'Logstash', icon: faGears, desc: 'Ingest & transform data' },
@@ -44,7 +44,7 @@ const freeOpenFeatures = [
   { name: 'Community Support', icon: faUsers, desc: 'Global community' },
 ]
 
-const enterpriseFeatures = [
+const DEFAULT_ENTERPRISE_FEATURES = [
   { name: 'Enterprise Support', icon: faHeadset, desc: '24/7 expert help' },
   { name: 'Cross Cluster Search', icon: faNetworkWired, desc: 'Global data access' },
   { name: 'Searchable Snapshots', icon: faDatabase, desc: 'Cost-effective searchable storage' },
@@ -104,11 +104,38 @@ function useAnimatedCounter(target, duration = 600) {
   return display
 }
 
-function LicensingScene() {
+function LicensingScene({ metadata = {} }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   const [isEnterprise, setIsEnterprise] = useState(false)
   const [hoveredFeature, setHoveredFeature] = useState(null)
+
+  const eyebrow = metadata.eyebrow || 'Licensing'
+  const titlePlain = metadata.titlePlain || 'One License. '
+  const titleAccent = metadata.titleAccent || 'Full Power.'
+  const subtitle = metadata.subtitle || 'One software SKU. No add-ons. No data caps.'
+  const platformUnlockedLabel = metadata.platformUnlockedLabel || 'Platform Unlocked'
+  const noHiddenCostsItems = metadata.noHiddenCostsItems || [
+    'No ingestion charges',
+    'No per-user fees',
+    'No data caps',
+  ]
+  const selectLicenseLabel = metadata.selectLicenseLabel || 'Select License'
+  const freeOpenTierName = metadata.freeOpenTierName || 'Free & Open'
+  const enterpriseTierName = metadata.enterpriseTierName || 'Enterprise'
+  const freeOpenSectionSubtitle = metadata.freeOpenSectionSubtitle || '— Always included'
+  const enterpriseSectionSubtitle = metadata.enterpriseSectionSubtitle || '— Unlock full potential'
+  const footnoteLine1 = metadata.footnoteLine1 || 'Full feature comparison at'
+  const footnoteLine2 = metadata.footnoteLine2 || 'elastic.co/subscriptions'
+
+  const freeOpenFeatures = (metadata.freeOpenFeatures || DEFAULT_FREE_OPEN_FEATURES).map((f, i) => ({
+    ...(DEFAULT_FREE_OPEN_FEATURES[i] || {}),
+    ...f,
+  }))
+  const enterpriseFeatures = (metadata.enterpriseFeatures || DEFAULT_ENTERPRISE_FEATURES).map((f, i) => ({
+    ...(DEFAULT_ENTERPRISE_FEATURES[i] || {}),
+    ...f,
+  }))
 
   const totalFeatures = freeOpenFeatures.length + enterpriseFeatures.length
   const unlockedFeatures = isEnterprise ? totalFeatures : freeOpenFeatures.length
@@ -122,10 +149,10 @@ function LicensingScene() {
       <div className="max-w-7xl px-4 mx-auto w-full h-full flex flex-col">
         {/* Header */}
         <SceneHeader
-          eyebrow="Licensing"
-          titlePlain="One License. "
-          titleAccent="Full Power."
-          subtitle="One software SKU. No add-ons. No data caps."
+          eyebrow={eyebrow}
+          titlePlain={titlePlain}
+          titleAccent={titleAccent}
+          subtitle={subtitle}
         />
 
         {/* Main Content */}
@@ -139,7 +166,7 @@ function LicensingScene() {
                   {displayPercentage}%
                 </div>
                 <div className={`text-xs mt-0.5 ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
-                  Platform Unlocked
+                  {platformUnlockedLabel}
                 </div>
               </div>
 
@@ -183,7 +210,7 @@ function LicensingScene() {
 
               {/* No Hidden Costs */}
               <div className="space-y-1.5">
-                {['No ingestion charges', 'No per-user fees', 'No data caps'].map((text) => (
+                {noHiddenCostsItems.map((text) => (
                   <div key={text} className={`flex items-center gap-2 text-xs ${isDark ? 'text-white/70' : 'text-elastic-dev-blue/70'}`}>
                     <FontAwesomeIcon icon={faInfinity} className={`text-xs ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`} />
                     <span>{text}</span>
@@ -195,7 +222,7 @@ function LicensingScene() {
             {/* License Toggle */}
             <div className={`p-4 rounded-2xl border ${isDark ? 'bg-white/[0.03] border-white/10' : 'bg-white border-elastic-dev-blue/10'}`}>
               <div className={`text-xs uppercase tracking-wider mb-2 ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
-                Select License
+                {selectLicenseLabel}
               </div>
 
               <button
@@ -217,7 +244,7 @@ function LicensingScene() {
                   <div className={`font-bold transition-colors duration-300 ${
                     !isEnterprise ? (isDark ? 'text-elastic-teal' : 'text-elastic-blue') : isDark ? 'text-white' : 'text-elastic-dev-blue'
                   }`}>
-                    Free & Open
+                    {freeOpenTierName}
                   </div>
                 </div>
               </button>
@@ -241,7 +268,7 @@ function LicensingScene() {
                   <div className={`font-bold transition-colors duration-300 ${
                     isEnterprise ? 'text-elastic-pink' : isDark ? 'text-white' : 'text-elastic-dev-blue'
                   }`}>
-                    Enterprise
+                    {enterpriseTierName}
                   </div>
                 </div>
               </button>
@@ -249,8 +276,8 @@ function LicensingScene() {
 
             {/* Footnote */}
             <div className={`p-3 rounded-xl text-xs ${isDark ? 'bg-white/[0.02] text-white/60' : 'bg-elastic-dev-blue/5 text-elastic-dev-blue/60'}`}>
-              <p>Full feature comparison at</p>
-              <p className={`font-medium ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>elastic.co/subscriptions</p>
+              <p>{footnoteLine1}</p>
+              <p className={`font-medium ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>{footnoteLine2}</p>
             </div>
           </div>
 
@@ -260,8 +287,8 @@ function LicensingScene() {
             <div className="flex-shrink-0">
               <div className="flex items-center gap-2 mb-2">
                 <div className={`w-2.5 h-2.5 rounded-full ${isDark ? 'bg-elastic-teal' : 'bg-elastic-blue'}`} />
-                <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>Free & Open</span>
-                <span className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>— Always included</span>
+                <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>{freeOpenTierName}</span>
+                <span className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>{freeOpenSectionSubtitle}</span>
               </div>
               <div className="grid grid-cols-4 gap-2">
                 {freeOpenFeatures.map((feature) => (
@@ -308,8 +335,8 @@ function LicensingScene() {
             <div className="flex-1 min-h-0 flex flex-col">
               <div className="flex items-center gap-2 mb-2 flex-shrink-0">
                 <div className="w-2.5 h-2.5 rounded-full bg-elastic-pink" />
-                <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>Enterprise</span>
-                <span className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>— Unlock full potential</span>
+                <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>{enterpriseTierName}</span>
+                <span className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>{enterpriseSectionSubtitle}</span>
               </div>
               <div className="grid grid-cols-4 gap-2 overflow-hidden">
                 {enterpriseFeatures.map((feature) => (

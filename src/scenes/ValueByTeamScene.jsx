@@ -10,71 +10,74 @@ import {
   faBuildingColumns,
   faStopwatch,
 } from '@fortawesome/free-solid-svg-icons'
+import { resolveIcon } from '../data/iconOptions'
+import { balancedColumns, gridColumnsStyle } from '../utils/layout'
 
-// Use cases by team & department from the platform showcase. Override via metadata.
+// Generic placeholder teams — this scene is intended as a layout template.
+// Override via metadata (Settings → Customizations → By Team).
 const DEFAULT_TEAMS = [
   {
-    id: 'soc',
-    title: 'Security Ops / CTI',
-    tag: 'SOC · Threat Intel',
+    id: 'team-1',
+    title: 'Team One',
+    tag: 'Category · Subtitle',
     icon: faShieldHalved,
     points: [
-      'Near-real-time detection across CrowdStrike, Okta, Azure, Entra, Cloudflare, O365 & more',
-      'ML risk scoring on users, accounts, hosts, IPs and URLs',
-      'AI agents query, build dashboards, correlate threats & collect evidence',
-      'Auto-builds ServiceNow incidents with agent-collected evidence',
+      'Bullet point placeholder one',
+      'Bullet point placeholder two',
+      'Bullet point placeholder three',
+      'Bullet point placeholder four',
     ],
   },
   {
-    id: 'identity',
-    title: 'Identity',
-    tag: 'Accounts & Access',
+    id: 'team-2',
+    title: 'Team Two',
+    tag: 'Category · Subtitle',
     icon: faFingerprint,
     points: [
-      'Account-lockout analysis — location, reason, affected accounts',
-      'User & group-membership change monitoring',
-      'Brute-force, privileged- and service-account detection',
+      'Bullet point placeholder one',
+      'Bullet point placeholder two',
+      'Bullet point placeholder three',
     ],
   },
   {
-    id: 'helpdesk',
-    title: 'Help Desk',
-    tag: 'Frontline Support',
+    id: 'team-3',
+    title: 'Team Three',
+    tag: 'Category · Subtitle',
     icon: faHeadset,
     points: [
-      'Self-service user unlocks',
-      'Authentication investigations',
+      'Bullet point placeholder one',
+      'Bullet point placeholder two',
     ],
   },
   {
-    id: 'webapp',
-    title: 'Web Application',
-    tag: 'WAF Rules',
+    id: 'team-4',
+    title: 'Team Four',
+    tag: 'Category · Subtitle',
     icon: faGlobe,
     points: [
-      'Test, deploy & monitor WAF rules across your organization',
-      'Attack detection — injection, XSS, and threat-correlated rules',
+      'Bullet point placeholder one',
+      'Bullet point placeholder two',
     ],
   },
   {
-    id: 'compliance',
-    title: 'Risk & Compliance',
-    tag: 'Audit-Ready',
+    id: 'team-5',
+    title: 'Team Five',
+    tag: 'Category · Subtitle',
     icon: faClipboardCheck,
     points: [
-      'Compliance adherence + audit evidence (proof validation)',
-      'One-year retention for regulated agencies',
-      'Dashboards mapped to PUB 1075, NIST 800-53 & HIPAA',
+      'Bullet point placeholder one',
+      'Bullet point placeholder two',
+      'Bullet point placeholder three',
     ],
   },
   {
-    id: 'agencies',
-    title: 'New Business Units',
-    tag: 'Newly Onboarded',
+    id: 'team-6',
+    title: 'Team Six',
+    tag: 'Category · Subtitle',
     icon: faBuildingColumns,
     points: [
-      'Policy-adherence monitoring',
-      'Monitoring, alerting & reporting tailored per team',
+      'Bullet point placeholder one',
+      'Bullet point placeholder two',
     ],
   },
 ]
@@ -84,23 +87,30 @@ function ValueByTeamScene({ metadata = {} }) {
   const isDark = theme === 'dark'
   const accent = isDark ? '#48EFCF' : '#0B64DD'
 
-  const teams = metadata.teams || DEFAULT_TEAMS
-  const eyebrow = metadata.eyebrow || 'Value Across the Enterprise'
-  const titlePlain = metadata.titlePlain || 'Every Team,'
-  const titleAccent = metadata.titleAccent || ' One Platform'
+  const teams = (metadata.teams || DEFAULT_TEAMS).slice(0, 6).map((item, i) => {
+    const merged = { ...(DEFAULT_TEAMS[i] || {}), ...item }
+    return { ...merged, icon: resolveIcon(merged.icon, DEFAULT_TEAMS[i]?.icon) }
+  })
+  const eyebrow = metadata.eyebrow || 'Eyebrow text'
+  const titlePlain = metadata.titlePlain || 'Section Title'
+  const titleAccent = metadata.titleAccent || ' Accent'
   const subtitle =
     metadata.subtitle ||
-    'Hundreds of users across Security, Identity, Help Desk, Web Application, Risk & Compliance, and newly onboarded business units — each in its own isolated instance.'
-  const impactStat = metadata.impactStat || '90%'
-  const impactLabel = metadata.impactLabel || 'Less time gathering for investigations'
+    'Subtitle placeholder — a short supporting sentence describing the teams shown below.'
+  const impactStat = metadata.impactStat || '00%'
+  const impactEyebrow = metadata.impactEyebrow || 'Measured Impact'
+  const impactIcon = resolveIcon(metadata.impactIcon, faStopwatch)
+  const impactLabel = metadata.impactLabel || 'Impact label placeholder'
   const impactDetail =
     metadata.impactDetail ||
-    'What took five minutes of manual searching across sources is now collected and presented automatically by AI-driven rules.'
+    'Impact detail placeholder — a sentence expanding on the headline statistic shown at left.'
 
   const headText = isDark ? 'text-white' : 'text-elastic-dark-ink'
   const mutedText = isDark ? 'text-white/65' : 'text-elastic-dark-ink/70'
   const tagText = isDark ? 'text-white/45' : 'text-elastic-dark-ink/50'
   const cardBg = isDark ? 'bg-white/[0.04] border-white/10' : 'bg-white/90 border-elastic-dev-blue/10'
+
+  const cardCols = balancedColumns(teams.length, 3)
 
   return (
     <div className="flex flex-col h-full w-full px-8 py-6 overflow-hidden">
@@ -113,9 +123,9 @@ function ValueByTeamScene({ metadata = {} }) {
         />
 
         <div className="flex-1 min-h-0 flex flex-col gap-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {teams.map((t) => (
-              <div key={t.id} className={`rounded-2xl border p-6 flex flex-col gap-4 ${cardBg}`}>
+          <div className="grid gap-5" style={{ gridTemplateColumns: gridColumnsStyle(cardCols) }}>
+            {teams.map((t, i) => (
+              <div key={i} className={`rounded-2xl border p-6 flex flex-col gap-4 ${cardBg}`}>
                 <div className="flex items-center gap-3.5">
                   <span
                     className="w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0"
@@ -129,7 +139,7 @@ function ValueByTeamScene({ metadata = {} }) {
                   </div>
                 </div>
                 <ul className="space-y-2.5">
-                  {t.points.map((pt, i) => (
+                  {t.points.slice(0, 3).map((pt, i) => (
                     <li key={i} className="flex items-start gap-2.5">
                       <span
                         className="mt-[7px] w-1.5 h-1.5 rounded-full shrink-0"
@@ -149,7 +159,7 @@ function ValueByTeamScene({ metadata = {} }) {
               style={{ backgroundColor: accent }}
             >
               <FontAwesomeIcon
-                icon={faStopwatch}
+                icon={impactIcon}
                 className="text-xl"
                 style={{ color: isDark ? '#0B1628' : '#fff' }}
               />
@@ -165,7 +175,7 @@ function ValueByTeamScene({ metadata = {} }) {
                 className="text-xs font-semibold uppercase tracking-wider mb-0.5"
                 style={{ color: accent }}
               >
-                Measured Impact
+                {impactEyebrow}
               </p>
               <p className={`font-bold text-base md:text-lg leading-tight ${headText}`}>{impactLabel}</p>
               <p className={`text-xs md:text-sm leading-snug ${mutedText}`}>{impactDetail}</p>

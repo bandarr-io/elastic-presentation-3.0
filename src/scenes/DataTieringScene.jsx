@@ -22,14 +22,14 @@ import {
 // CONFIGURATION
 // ============================================================================
 
-const dataTiers = [
+const DEFAULT_TIERS = [
   { id: 'hot', name: 'Hot', icon: faFire, color: '#F04E98', costSymbol: '$$$', costPerGB: 0.50, latencyShort: 'Now', volume: 10, description: 'Real-time analytics', retention: '1-7 days', storage: 'NVMe SSD', latency: 'Milliseconds', useCase: 'Active investigations' },
   { id: 'warm', name: 'Warm', icon: faThermometerHalf, color: '#FF957D', costSymbol: '$$', costPerGB: 0.20, latencyShort: 'In a second', volume: 20, description: 'Recent historical', retention: '1-4 weeks', storage: 'SSD', latency: 'Sub-second', useCase: 'Trend analysis' },
   { id: 'cold', name: 'Cold', icon: faThermometerQuarter, color: '#0B64DD', costSymbol: '$', costPerGB: 0.05, latencyShort: 'In a minute', volume: 30, description: 'Searchable archives', retention: '1-12 months', storage: 'HDD', latency: 'Seconds', useCase: 'Audit trails' },
   { id: 'frozen', name: 'Frozen', icon: faSnowflake, color: '#48EFCF', costSymbol: '¢', costPerGB: 0.01, latencyShort: 'In minutes', volume: 40, description: 'Long-term compliance', retention: '1-7+ years', storage: 'Object Storage', latency: 'Minutes', useCase: 'Forensics' },
 ]
 
-const ELASTIC_DISPLAY = {
+const DEFAULT_ELASTIC_DISPLAY = {
   hot: {
     costSymbol: '$$$$',
     latencyShort: 'Milliseconds',
@@ -60,7 +60,7 @@ const ELASTIC_DISPLAY = {
   },
 }
 
-const TRADITIONAL_DISPLAY = {
+const DEFAULT_TRADITIONAL_DISPLAY = {
   hot: {
     costSymbol: '$$$$$',
     latencyShort: 'Seconds',
@@ -95,7 +95,7 @@ const TRADITIONAL_DISPLAY = {
   },
 }
 
-const SIMPLIFIED_DISPLAY = {
+const DEFAULT_SIMPLIFIED_DISPLAY = {
   hot: {
     name: 'Index',
     icon: faServer,
@@ -126,9 +126,73 @@ const SIMPLIFIED_DISPLAY = {
     costSymbol: '¢',
     latencyShort: '1–365+ Days',
     subtitle: 'Full search across all archives',
-    keyBenefit: 'Snapshots searchable without restore',
+    keyBenefit: 'Searchable snapshots without restore',
   },
 }
+
+const DEFAULT_SUBTITLES = {
+  default: {
+    accent: 'Hot, warm, cold, frozen.',
+    plain: ' One platform across every stage — pick a path on the right to compare.',
+  },
+  elastic: {
+    accent: 'No more restores. No more rehydration.',
+    plain: ' — Search everything, instantly.',
+  },
+  simplified: {
+    accent: 'Index. Search. Store.',
+    plain: " — One platform, every stage of your data's life.",
+  },
+  traditional: {
+    accent: 'Restores required. Data invisible until rehydrated.',
+    plain: ' Resulting in hours to days of waiting.',
+  },
+}
+
+const DEFAULT_TRADITIONAL_OVERLAYS = {
+  cold: { title: 'Restore', subtitle: 'On Request' },
+  frozen: { title: 'Manual', subtitle: 'Rehydration' },
+}
+
+const DEFAULT_DATA_FLOW = {
+  newestLabel: 'Newest Data →',
+  oldestLabel: 'Oldest Data →',
+}
+
+const DEFAULT_COMPARISON_SIMPLIFIED = [
+  { title: 'Index', description: 'Real-time ingest with millisecond search response' },
+  { title: 'Search', description: 'Sub-second queries across recent historical data' },
+  { title: 'Store', description: 'Cost-efficient object storage, single replica' },
+  { title: 'Searchable', description: 'Full search across snapshots — no rehydration needed' },
+]
+
+const DEFAULT_COMPARISON_ELASTIC = [
+  { title: 'Searchable Snapshots', description: 'Cold & Frozen data queryable without restore' },
+  { title: 'Unlimited Lookback', description: 'Query years of historical data instantly' },
+  { title: '50% Storage Savings', description: 'Cold tier uses object store for replicas' },
+  { title: 'Never Delete Data', description: 'Frozen tier so cheap you can keep everything' },
+]
+
+const DEFAULT_COMPARISON_TRADITIONAL = [
+  { title: '24+ Hour Restores', description: 'Cold data requires support ticket to access' },
+  { title: 'Data Invisible', description: "Frozen data can't be searched until rehydrated" },
+  { title: 'Limited Lookback', description: 'No visibility into historical data' },
+  { title: 'Forced Deletion', description: 'Cost forces deletion of valuable data' },
+]
+
+const DEFAULT_ARCHITECTURE_PATTERNS = [
+  { id: 'all', label: 'All Tiers' },
+  { id: 'hot-cold-frozen', label: 'Hot → Cold → Frozen' },
+  { id: 'hot-frozen', label: 'Hot → Frozen' },
+]
+
+const DEFAULT_NAV = {
+  traditional: 'Traditional',
+  elastic: 'Elastic ILM',
+  simplified: 'Index / Search / Store',
+}
+
+const TIER_IDS = ['hot', 'warm', 'cold', 'frozen']
 
 const TIER_CONFIG = [
   { slots: 9, rows: 3, cols: 3 },
@@ -144,9 +208,22 @@ const SNAKE_PATHS = {
   18: [18, 17, 16, 13, 14, 15, 12, 11, 10, 7, 8, 9, 6, 5, 4, 1, 2, 3],
 }
 
+const SIMPLIFIED_ICONS = {
+  hot: faServer,
+  warm: faMagnifyingGlassChart,
+  cold: faHardDrive,
+  frozen: faCheckCircle,
+}
+
 // ============================================================================
 // HELPERS
 // ============================================================================
+
+function mergeTierKeyedDisplay(defaults, overrides) {
+  return Object.fromEntries(
+    TIER_IDS.map((id) => [id, { ...defaults[id], ...(overrides?.[id] || {}) }])
+  )
+}
 
 function getExitSlot(tierIndex) {
   const maxSlots = TIER_CONFIG[tierIndex].slots
@@ -199,13 +276,70 @@ function isFull(slots, tierIndex) {
   return countBalls(slots) >= TIER_CONFIG[tierIndex].slots
 }
 
+function renderSubtitle(subtitle, isDark) {
+  return (
+    <>
+      <span className={`font-semibold ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>{subtitle.accent}</span>
+      <span className={`${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>{subtitle.plain}</span>
+    </>
+  )
+}
+
+function renderTraditionalSubtitle(subtitle, isDark) {
+  return (
+    <>
+      <span className={`font-semibold ${isDark ? 'text-orange-400' : 'text-dev-blue'}`}>{subtitle.accent}</span>
+      <span className={`${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>{subtitle.plain}</span>
+    </>
+  )
+}
+
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 
-function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSignal = 0 }) {
+function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSignal = 0, metadata = {} }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
+
+  const dataTiers = (metadata.tiers || DEFAULT_TIERS).map((t, i) => ({ ...(DEFAULT_TIERS[i] || {}), ...t }))
+  const elasticDisplay = mergeTierKeyedDisplay(DEFAULT_ELASTIC_DISPLAY, metadata.elasticDisplay)
+  const traditionalDisplay = mergeTierKeyedDisplay(DEFAULT_TRADITIONAL_DISPLAY, metadata.traditionalDisplay)
+  const simplifiedDisplayRaw = mergeTierKeyedDisplay(DEFAULT_SIMPLIFIED_DISPLAY, metadata.simplifiedDisplay)
+  const simplifiedDisplay = Object.fromEntries(
+    TIER_IDS.map((id) => [id, { ...simplifiedDisplayRaw[id], icon: SIMPLIFIED_ICONS[id] }])
+  )
+  const subtitles = {
+    default: { ...DEFAULT_SUBTITLES.default, ...(metadata.subtitles?.default || {}) },
+    elastic: { ...DEFAULT_SUBTITLES.elastic, ...(metadata.subtitles?.elastic || {}) },
+    simplified: { ...DEFAULT_SUBTITLES.simplified, ...(metadata.subtitles?.simplified || {}) },
+    traditional: { ...DEFAULT_SUBTITLES.traditional, ...(metadata.subtitles?.traditional || {}) },
+  }
+  const traditionalOverlays = {
+    cold: { ...DEFAULT_TRADITIONAL_OVERLAYS.cold, ...(metadata.traditionalOverlays?.cold || {}) },
+    frozen: { ...DEFAULT_TRADITIONAL_OVERLAYS.frozen, ...(metadata.traditionalOverlays?.frozen || {}) },
+  }
+  const dataFlow = { ...DEFAULT_DATA_FLOW, ...(metadata.dataFlow || {}) }
+  const comparisonSimplified = (metadata.comparisonSimplified || DEFAULT_COMPARISON_SIMPLIFIED).map((item, i) => ({
+    ...(DEFAULT_COMPARISON_SIMPLIFIED[i] || {}),
+    ...item,
+  }))
+  const comparisonElastic = (metadata.comparisonElastic || DEFAULT_COMPARISON_ELASTIC).map((item, i) => ({
+    ...(DEFAULT_COMPARISON_ELASTIC[i] || {}),
+    ...item,
+  }))
+  const comparisonTraditional = (metadata.comparisonTraditional || DEFAULT_COMPARISON_TRADITIONAL).map((item, i) => ({
+    ...(DEFAULT_COMPARISON_TRADITIONAL[i] || {}),
+    ...item,
+  }))
+  const architecturePatterns = (metadata.architecturePatterns || DEFAULT_ARCHITECTURE_PATTERNS).map((p, i) => ({
+    ...(DEFAULT_ARCHITECTURE_PATTERNS[i] || {}),
+    ...p,
+  }))
+  const nav = { ...DEFAULT_NAV, ...(metadata.nav || {}) }
+  const eyebrow = metadata.eyebrow || 'Intelligent Data Lifecycle'
+  const titlePlain = metadata.titlePlain || 'Your data ages. '
+  const titleAccent = metadata.titleAccent || "Your insights shouldn't wait."
 
   const [tiers, setTiers] = useState(() => TIER_CONFIG.map(c => Array(c.slots).fill(null)))
   const nextBallIdRef = useRef(1)
@@ -253,37 +387,28 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
     if (resetSignal > 0) reset()
   }, [resetSignal])
 
+  const headerSubtitle =
+    comparisonMode === null
+      ? renderSubtitle(subtitles.default, isDark)
+      : comparisonMode === 'elastic'
+        ? renderSubtitle(subtitles.elastic, isDark)
+        : comparisonMode === 'simplified'
+          ? renderSubtitle(subtitles.simplified, isDark)
+          : renderTraditionalSubtitle(subtitles.traditional, isDark)
+
+  const simplifiedComparisonIcons = [faServer, faMagnifyingGlassChart, faHardDrive, faCheckCircle]
+  const elasticComparisonIcons = [faMagnifyingGlassChart, faBolt, faClock, faCheckCircle]
+  const traditionalComparisonIcons = [faClock, faDatabase, faSliders, faHardDrive]
+
   return (
     <div className="scene !py-4 w-full h-full">
       <div className="max-w-[95%] mx-auto w-full h-full flex flex-col">
         {/* Header */}
         <SceneHeader
-          eyebrow="Intelligent Data Lifecycle"
-          titlePlain="Your data ages. "
-          titleAccent="Your insights shouldn't wait."
-          subtitle={
-            comparisonMode === null ? (
-              <>
-                <span className={`font-semibold ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>Hot, warm, cold, frozen.</span>
-                <span className={`${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}> One platform across every stage — pick a path on the right to compare.</span>
-              </>
-            ) : comparisonMode === 'elastic' ? (
-              <>
-                <span className={`font-semibold ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>No more restores. No more rehydration.</span>
-                <span className={`${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}> — Search everything, instantly.</span>
-              </>
-            ) : comparisonMode === 'simplified' ? (
-              <>
-                <span className={`font-semibold ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>Index. Search. Store.</span>
-                <span className={`${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}> — One platform, every stage of your data's life.</span>
-              </>
-            ) : (
-              <>
-                <span className={`font-semibold ${isDark ? 'text-orange-400' : 'text-dev-blue'}`}>Restores required. Data invisible until rehydrated.</span>
-                <span className={`${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}> Resulting in hours to days of waiting.</span>
-              </>
-            )
-          }
+          eyebrow={eyebrow}
+          titlePlain={titlePlain}
+          titleAccent={titleAccent}
+          subtitle={headerSubtitle}
         />
 
 
@@ -372,8 +497,8 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
                             {comparisonMode === 'traditional' && tierIndex === 2 && (
                               <div className="absolute inset-0 rounded-lg bg-black/50 backdrop-blur-sm flex flex-col items-center justify-center">
                                 <FontAwesomeIcon icon={faClock} className="text-white text-2xl mb-1" />
-                                <span className="text-white text-xs font-bold text-center">Restore</span>
-                                <span className="text-white text-xs text-center">On Request</span>
+                                <span className="text-white text-xs font-bold text-center">{traditionalOverlays.cold.title}</span>
+                                <span className="text-white text-xs text-center">{traditionalOverlays.cold.subtitle}</span>
                               </div>
                             )}
 
@@ -381,8 +506,8 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
                             {comparisonMode === 'traditional' && tierIndex === 3 && (
                               <div className="absolute inset-0 rounded-lg bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center">
                                 <FontAwesomeIcon icon={faClock} className="text-white text-2xl mb-1" />
-                                <span className="text-white text-sm font-bold text-center">Manual</span>
-                                <span className="text-white text-sm text-center">Rehydration</span>
+                                <span className="text-white text-sm font-bold text-center">{traditionalOverlays.frozen.title}</span>
+                                <span className="text-white text-sm text-center">{traditionalOverlays.frozen.subtitle}</span>
                               </div>
                             )}
                           </div>
@@ -393,14 +518,14 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
                           {comparisonMode === 'simplified' ? (
                             <>
                               <div className="flex items-center justify-center gap-2 mb-2">
-                                <FontAwesomeIcon icon={SIMPLIFIED_DISPLAY[tier.id]?.icon} className="text-2xl" style={{ color: isDark ? tier.color : 'rgb(11,100,221)' }} />
-                                <span className="font-bold text-3xl" style={{ color: isDark ? tier.color : 'rgb(11,100,221)' }}>{SIMPLIFIED_DISPLAY[tier.id]?.name}</span>
+                                <FontAwesomeIcon icon={simplifiedDisplay[tier.id]?.icon} className="text-2xl" style={{ color: isDark ? tier.color : 'rgb(11,100,221)' }} />
+                                <span className="font-bold text-3xl" style={{ color: isDark ? tier.color : 'rgb(11,100,221)' }}>{simplifiedDisplay[tier.id]?.name}</span>
                               </div>
                               <div className={`text-4xl font-black ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>
-                                {SIMPLIFIED_DISPLAY[tier.id]?.costSymbol}<span className="text-2xl font-normal opacity-50">/GB</span>
+                                {simplifiedDisplay[tier.id]?.costSymbol}<span className="text-2xl font-normal opacity-50">/GB</span>
                               </div>
                               <div className={`text-xl mt-1 ${isDark ? 'text-white/70' : 'text-elastic-dev-blue/70'}`}>
-                                {SIMPLIFIED_DISPLAY[tier.id]?.latencyShort}
+                                {simplifiedDisplay[tier.id]?.latencyShort}
                               </div>
                             </>
                           ) : (
@@ -411,14 +536,14 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
                               </div>
                               <div className={`text-4xl font-black ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>
                                 {comparisonMode === 'traditional'
-                                  ? TRADITIONAL_DISPLAY[tier.id]?.costSymbol
-                                  : ELASTIC_DISPLAY[tier.id]?.costSymbol
+                                  ? traditionalDisplay[tier.id]?.costSymbol
+                                  : elasticDisplay[tier.id]?.costSymbol
                                 }<span className="text-2xl font-normal opacity-50">/GB</span>
                               </div>
                               <div className={`text-xl mt-1 ${isDark ? 'text-white/70' : 'text-elastic-dev-blue/70'}`}>
                                 {comparisonMode === 'traditional'
-                                  ? TRADITIONAL_DISPLAY[tier.id]?.latencyShort
-                                  : ELASTIC_DISPLAY[tier.id]?.latencyShort
+                                  ? traditionalDisplay[tier.id]?.latencyShort
+                                  : elasticDisplay[tier.id]?.latencyShort
                                 }
                               </div>
                             </>
@@ -433,9 +558,9 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
 
             {/* Data Flow Arrow */}
             <div className="mx-8 mt-2 flex items-center justify-between">
-              <span className={`text-xs font-mono uppercase ${isDark ? 'text-elastic-pink' : 'text-elastic-pink'}`}>Newest Data →</span>
+              <span className={`text-xs font-mono uppercase ${isDark ? 'text-elastic-pink' : 'text-elastic-pink'}`}>{dataFlow.newestLabel}</span>
               <div className="flex-1 mx-4 h-px bg-gradient-to-r from-pink-500/40 via-blue-500/40 to-teal-400/40" />
-              <span className={`text-xs font-mono uppercase ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>Oldest Data →</span>
+              <span className={`text-xs font-mono uppercase ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>{dataFlow.oldestLabel}</span>
             </div>
 
             {/* Comparison Panel — revealed once a mode is selected */}
@@ -444,120 +569,45 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
               <div className={`p-4 rounded-2xl ${isDark ? 'bg-white/[0.03]' : 'bg-elastic-dev-blue/[0.04]'}`}>
                 {comparisonMode === 'simplified' ? (
                   <div key="simplified" className="grid grid-cols-4 gap-4">
-                    <div className={`p-3 rounded-xl ${isDark ? 'bg-elastic-teal/10 border border-elastic-teal/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <FontAwesomeIcon icon={faServer} className={isDark ? 'text-elastic-teal' : 'text-elastic-dev-blue/50'} />
-                        <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>Index</span>
+                    {comparisonSimplified.map((card, i) => (
+                      <div key={i} className={`p-3 rounded-xl ${isDark ? 'bg-elastic-teal/10 border border-elastic-teal/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <FontAwesomeIcon icon={simplifiedComparisonIcons[i]} className={isDark ? 'text-elastic-teal' : 'text-elastic-dev-blue/50'} />
+                          <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>{card.title}</span>
+                        </div>
+                        <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
+                          {card.description}
+                        </p>
                       </div>
-                      <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
-                        Real-time ingest with millisecond search response
-                      </p>
-                    </div>
-                    <div className={`p-3 rounded-xl ${isDark ? 'bg-elastic-teal/10 border border-elastic-teal/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <FontAwesomeIcon icon={faMagnifyingGlassChart} className={isDark ? 'text-elastic-teal' : 'text-elastic-dev-blue/50'} />
-                        <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>Search</span>
-                      </div>
-                      <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
-                        Sub-second queries across recent historical data
-                      </p>
-                    </div>
-                    <div className={`p-3 rounded-xl ${isDark ? 'bg-elastic-teal/10 border border-elastic-teal/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <FontAwesomeIcon icon={faHardDrive} className={isDark ? 'text-elastic-teal' : 'text-elastic-dev-blue/50'} />
-                        <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>Store</span>
-                      </div>
-                      <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
-                        Cost-efficient object storage, single replica
-                      </p>
-                    </div>
-                    <div className={`p-3 rounded-xl ${isDark ? 'bg-elastic-teal/10 border border-elastic-teal/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <FontAwesomeIcon icon={faCheckCircle} className={isDark ? 'text-elastic-teal' : 'text-elastic-dev-blue/50'} />
-                        <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>Searchable</span>
-                      </div>
-                      <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
-                        Full search across snapshots — no rehydration needed
-                      </p>
-                    </div>
+                    ))}
                   </div>
                 ) : comparisonMode === 'elastic' ? (
                   <div key="elastic" className="grid grid-cols-4 gap-4">
-                    <div className={`p-3 rounded-xl ${isDark ? 'bg-elastic-teal/10 border border-elastic-teal/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <FontAwesomeIcon icon={faMagnifyingGlassChart} className={isDark ? 'text-elastic-teal' : 'text-elastic-dev-blue/50'} />
-                        <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>Searchable Snapshots</span>
+                    {comparisonElastic.map((card, i) => (
+                      <div key={i} className={`p-3 rounded-xl ${isDark ? 'bg-elastic-teal/10 border border-elastic-teal/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <FontAwesomeIcon icon={elasticComparisonIcons[i]} className={isDark ? 'text-elastic-teal' : 'text-elastic-dev-blue/50'} />
+                          <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>{card.title}</span>
+                        </div>
+                        <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
+                          {card.description}
+                        </p>
                       </div>
-                      <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
-                        Cold & Frozen data queryable without restore
-                      </p>
-                    </div>
-                    <div className={`p-3 rounded-xl ${isDark ? 'bg-elastic-teal/10 border border-elastic-teal/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <FontAwesomeIcon icon={faBolt} className={isDark ? 'text-elastic-teal' : 'text-elastic-dev-blue/50'} />
-                        <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>Unlimited Lookback</span>
-                      </div>
-                      <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
-                        Query years of historical data instantly
-                      </p>
-                    </div>
-                    <div className={`p-3 rounded-xl ${isDark ? 'bg-elastic-teal/10 border border-elastic-teal/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <FontAwesomeIcon icon={faClock} className={isDark ? 'text-elastic-teal' : 'text-elastic-dev-blue/50'} />
-                        <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>50% Storage Savings</span>
-                      </div>
-                      <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
-                        Cold tier uses object store for replicas
-                      </p>
-                    </div>
-                    <div className={`p-3 rounded-xl ${isDark ? 'bg-elastic-teal/10 border border-elastic-teal/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <FontAwesomeIcon icon={faCheckCircle} className={isDark ? 'text-elastic-teal' : 'text-elastic-dev-blue/50'} />
-                        <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>Never Delete Data</span>
-                      </div>
-                      <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
-                        Frozen tier so cheap you can keep everything
-                      </p>
-                    </div>
+                    ))}
                   </div>
                 ) : (
                   <div key="traditional" className="grid grid-cols-4 gap-4">
-                    <div className={`p-3 rounded-xl ${isDark ? 'bg-elastic-pink/10 border border-elastic-pink/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <FontAwesomeIcon icon={faClock} className={isDark ? 'text-elastic-pink' : 'text-elastic-dev-blue/50'} />
-                        <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>24+ Hour Restores</span>
+                    {comparisonTraditional.map((card, i) => (
+                      <div key={i} className={`p-3 rounded-xl ${isDark ? 'bg-elastic-pink/10 border border-elastic-pink/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <FontAwesomeIcon icon={traditionalComparisonIcons[i]} className={isDark ? 'text-elastic-pink' : 'text-elastic-dev-blue/50'} />
+                          <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>{card.title}</span>
+                        </div>
+                        <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
+                          {card.description}
+                        </p>
                       </div>
-                      <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
-                        Cold data requires support ticket to access
-                      </p>
-                    </div>
-                    <div className={`p-3 rounded-xl ${isDark ? 'bg-elastic-pink/10 border border-elastic-pink/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <FontAwesomeIcon icon={faDatabase} className={isDark ? 'text-elastic-pink' : 'text-elastic-dev-blue/50'} />
-                        <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>Data Invisible</span>
-                      </div>
-                      <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
-                        Frozen data can't be searched until rehydrated
-                      </p>
-                    </div>
-                    <div className={`p-3 rounded-xl ${isDark ? 'bg-elastic-pink/10 border border-elastic-pink/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <FontAwesomeIcon icon={faSliders} className={isDark ? 'text-elastic-pink' : 'text-elastic-dev-blue/50'} />
-                        <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>Limited Lookback</span>
-                      </div>
-                      <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
-                        No visibility into historical data
-                      </p>
-                    </div>
-                    <div className={`p-3 rounded-xl ${isDark ? 'bg-elastic-pink/10 border border-elastic-pink/30' : 'bg-elastic-dev-blue/[0.04] border border-elastic-dev-blue/10'}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <FontAwesomeIcon icon={faHardDrive} className={isDark ? 'text-elastic-pink' : 'text-elastic-dev-blue/50'} />
-                        <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>Forced Deletion</span>
-                      </div>
-                      <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
-                        Cost forces deletion of valuable data
-                      </p>
-                    </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -582,7 +632,7 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
               className="relative z-10 group flex flex-col items-center py-7"
             >
               <span className={`absolute right-full mr-3 top-1/2 -translate-y-1/2 whitespace-nowrap text-xs px-2.5 py-1.5 rounded-lg pointer-events-none transition-all duration-200 opacity-0 group-hover:opacity-100 border ${isDark ? 'bg-elastic-dev-blue/95 text-white/80 border-white/10' : 'bg-white/95 text-elastic-dark-ink/80 border-elastic-dev-blue/10'} shadow-lg`}>
-                Traditional
+                {nav.traditional}
               </span>
               <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 border-2 ${comparisonMode === 'traditional'
                   ? isDark
@@ -602,7 +652,7 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
               className="relative z-10 group flex flex-col items-center py-7"
             >
               <span className={`absolute right-full mr-3 top-1/2 -translate-y-1/2 whitespace-nowrap text-xs px-2.5 py-1.5 rounded-lg pointer-events-none transition-all duration-200 opacity-0 group-hover:opacity-100 border ${isDark ? 'bg-elastic-dev-blue/95 text-white/80 border-white/10' : 'bg-white/95 text-elastic-dark-ink/80 border-elastic-dev-blue/10'} shadow-lg`}>
-                Elastic ILM
+                {nav.elastic}
               </span>
               <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 border-2 ${comparisonMode === 'elastic'
                   ? isDark
@@ -619,11 +669,7 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
             {/* Architecture pattern sub-dots (Elastic mode only) */}
             {comparisonMode === 'elastic' && (
               <div className={`relative z-10 flex flex-col items-center gap-2.5 mb-3 px-2 py-1 rounded-full ${isDark ? 'bg-elastic-dev-blue' : 'bg-elastic-light-grey'}`}>
-                {[
-                  { id: 'all', label: 'All Tiers' },
-                  { id: 'hot-cold-frozen', label: 'Hot → Cold → Frozen' },
-                  { id: 'hot-frozen', label: 'Hot → Frozen' },
-                ].map(p => (
+                {architecturePatterns.map(p => (
                   <button
                     key={p.id}
                     onClick={() => {
@@ -654,7 +700,7 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
               className="relative z-10 group flex flex-col items-center py-7"
             >
               <span className={`absolute right-full mr-3 top-1/2 -translate-y-1/2 whitespace-nowrap text-xs px-2.5 py-1.5 rounded-lg pointer-events-none transition-all duration-200 opacity-0 group-hover:opacity-100 border ${isDark ? 'bg-elastic-dev-blue/95 text-white/80 border-white/10' : 'bg-white/95 text-elastic-dark-ink/80 border-elastic-dev-blue/10'} shadow-lg`}>
-                Index / Search / Store
+                {nav.simplified}
               </span>
               <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 border-2 ${comparisonMode === 'simplified'
                   ? isDark

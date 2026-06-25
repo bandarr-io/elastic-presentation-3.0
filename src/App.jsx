@@ -30,8 +30,10 @@ import SecurityNarrativeVisualScene from './scenes/SecurityNarrativeVisualScene'
 import SecurityUseCasesScene from './scenes/SecurityUseCasesScene'
 import ElasticValueScene from './scenes/ElasticValueScene'
 import PlatformOperationsScene from './scenes/PlatformOperationsScene'
+import PlatformValueScene from './scenes/PlatformValueScene'
 import ValueByTeamScene from './scenes/ValueByTeamScene'
 import { DEFAULT_AGENDA_ITEMS } from './data/agendaDefaults'
+import { resolveIcon } from './data/iconOptions'
 
 // Hero Scene with typing animation
 const HeroScene = ({ metadata = {} }) => {
@@ -225,6 +227,7 @@ const AboutScene = ({ metadata = {} }) => {
 
   const features = defaultFeatures.map((feature, index) => ({
     ...feature,
+    icon: resolveIcon(metadata.features?.[index]?.icon, feature.icon),
     title: metadata.features?.[index]?.title || feature.title,
     description: metadata.features?.[index]?.description || feature.description
   }))
@@ -334,7 +337,7 @@ const BusinessValueScene = ({ selectedCard, setSelectedCard, showUnifiedMessage,
 
   const valueCards = defaultCards.map((defaults, i) => ({
     id: ['risk', 'time', 'resilience', 'cost'][i],
-    icon:        cardIcons[i],
+    icon:        resolveIcon(metadata.cards?.[i]?.icon, cardIcons[i]),
     title:       metadata.cards?.[i]?.title       || defaults.title,
     description: metadata.cards?.[i]?.description || defaults.description,
     detailText:  metadata.cards?.[i]?.detailText  || defaults.detailText,
@@ -805,23 +808,23 @@ function AppContent() {
     {
       id: 'elastic-value',
       component: ElasticValueScene,
-      title: 'Value Delivered',
+      title: 'Metrics Dashboard',
       duration: '3 min',
-      description: 'The on-prem Elastic platform by the numbers \u2014 scale, efficiency, and consolidation'
+      description: 'Configurable layout \u2014 hero stat cards, a stat grid, and a bottom-line banner'
     },
     {
       id: 'value-by-team',
       component: ValueByTeamScene,
-      title: 'By Team',
+      title: 'Card Grid',
       duration: '4 min',
-      description: 'How every team relies on Elastic \u2014 SOC/CTI, Identity, Help Desk, Web App, Risk & Compliance, newly onboarded business units'
+      description: 'Configurable layout \u2014 a grid of icon cards with an impact banner'
     },
     {
       id: 'security-use-cases',
       component: SecurityUseCasesScene,
-      title: 'Security Use Cases',
+      title: 'Visual Gallery',
       duration: '5 min',
-      description: 'Live Elastic security dashboards, AI workflows, and investigations across your environment'
+      description: 'Configurable layout — a grid of image cards with an expandable lightbox view'
     },
     // ── Act 3 — Platform (bridge to partner deep-dive) ──────────────────────
     {
@@ -975,9 +978,17 @@ function AppContent() {
     {
       id: 'platform-operations',
       component: PlatformOperationsScene,
-      title: 'Run On-Prem',
-      duration: '3 min',
-      description: 'What the customer manages self-managed end to end \u2014 architecture, ingestion, security & lifecycle',
+      title: 'Deployment Models',
+      duration: '4 min',
+      description: 'Self-Managed, Cloud Hosted, and Serverless \u2014 each with its own benefits, switchable via side nav',
+      defaultDisabled: true
+    },
+    {
+      id: 'platform-value',
+      component: PlatformValueScene,
+      title: 'Platform Value',
+      duration: '2 min',
+      description: 'Closing hero \u2014 the value of the Elastic platform as a whole',
       defaultDisabled: true
     },
   ]
@@ -988,6 +999,9 @@ function AppContent() {
     orderedScenes,
     customDurations,
     sceneMetadata,
+    activePreset,
+    presets,
+    applyPreset,
     toggleScene,
     updateDuration,
     updateSceneMetadata,
@@ -1020,6 +1034,8 @@ function AppContent() {
   }
 
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [sceneMenuOpen, setSceneMenuOpen] = useState(false)
+  const [sceneQuery, setSceneQuery] = useState('')
   const [securityStage, setSecurityStage] = useState(0)
   const [securityPlaySignal, setSecurityPlaySignal] = useState(0)
   const [securityAlertPhase, setSecurityAlertPhase] = useState('idle')
@@ -1127,11 +1143,16 @@ function AppContent() {
       playSignal: securityPlaySignal,
       phaseAdvanceSignal: securityPhaseSignal,
       onAlertPhaseChange: setSecurityAlertPhase,
+      metadata: sceneMetadata?.security || {},
     }
+  } else if (currentSceneId === 'licensing') {
+    sceneProps = { metadata: sceneMetadata?.licensing || {} }
   } else if (currentSceneId === 'elastic-value') {
     sceneProps = { metadata: sceneMetadata?.['elastic-value'] || {} }
   } else if (currentSceneId === 'platform-operations') {
     sceneProps = { metadata: sceneMetadata?.['platform-operations'] || {} }
+  } else if (currentSceneId === 'platform-value') {
+    sceneProps = { metadata: sceneMetadata?.['platform-value'] || {} }
   } else if (currentSceneId === 'value-by-team') {
     sceneProps = { metadata: sceneMetadata?.['value-by-team'] || {} }
   } else if (currentSceneId === 'security-use-cases') {
@@ -1152,6 +1173,7 @@ function AppContent() {
       isRunning: dataTieringIsRunning,
       setIsRunning: setDataTieringIsRunning,
       resetSignal: dataTieringResetSignal,
+      metadata: sceneMetadata?.['data-tiering'] || {},
     }
   } else if (currentSceneId === 'consolidation') {
     sceneProps = {
@@ -1195,6 +1217,36 @@ function AppContent() {
     navigateToScene(currentScene - 1)
   }
 
+  const sceneTitle = (scene) => sceneMetadata?.[scene.id]?.title || scene.title
+
+  // Global keyboard navigation for live presenting (ignored while typing or in Settings).
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (settingsOpen) return
+      const el = e.target
+      const tag = el?.tagName
+      if (el?.isContentEditable || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+
+      if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+        if (currentScene < scenes.length - 1) { e.preventDefault(); handleNext() }
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        if (currentScene > 0) { e.preventDefault(); handlePrev() }
+      } else if (e.key === 'Escape') {
+        setSceneMenuOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentScene, scenes.length, settingsOpen])
+
+  // Close the jump menu whenever the active scene changes.
+  useEffect(() => {
+    setSceneMenuOpen(false)
+    setSceneQuery('')
+  }, [currentSceneId])
+
   // Reset scene-specific state when navigating away
   useEffect(() => {
     if (currentSceneId !== 'business-value') {
@@ -1229,6 +1281,9 @@ function AppContent() {
         onUpdateSceneMetadata={updateSceneMetadata}
         onUpdateOrder={updateOrder}
         onReset={resetToDefault}
+        presets={presets}
+        activePreset={activePreset}
+        onApplyPreset={applyPreset}
         isOpen={settingsOpen}
         onOpenChange={setSettingsOpen}
       />
@@ -1239,7 +1294,7 @@ function AppContent() {
       </div>
       
       {/* Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-elastic-light-grey dark:bg-elastic-dev-blue w-full py-4">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 w-full py-4 border-t backdrop-blur-md bg-elastic-light-grey/85 dark:bg-elastic-dev-blue/85 border-elastic-dev-blue/10 dark:border-white/10 shadow-[0_-4px_20px_rgba(11,22,40,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.3)]">
         <div className="flex items-center justify-between max-w-[95%] mx-auto">
           {/* Left: Theme Toggle and Settings */}
           <div className="flex items-center gap-3">
@@ -1514,60 +1569,130 @@ function AppContent() {
           </div>
           
           {/* Right: Navigation Controls */}
-          <div className="flex items-center gap-6">
-            <button 
-              onClick={handlePrev} 
+          <div className="flex items-center gap-2">
+            {/* Prev */}
+            <button
+              onClick={handlePrev}
               disabled={currentScene === 0}
-              className={`text-sm font-medium transition-all hover:scale-105 ${
+              aria-label="Previous scene"
+              className={`w-10 h-10 rounded-full border flex items-center justify-center transition-all ${
                 currentScene === 0
-                  ? 'opacity-30 cursor-not-allowed'
+                  ? 'opacity-30 cursor-not-allowed border-transparent'
                   : theme === 'dark'
-                    ? 'text-white/60 hover:text-white'
-                    : 'text-elastic-ink/60 hover:text-elastic-dark-ink'
+                    ? 'bg-white/[0.06] border-white/15 text-white/80 hover:text-white hover:bg-white/15 hover:scale-110'
+                    : 'bg-white border-elastic-dev-blue/15 text-elastic-ink/80 hover:text-elastic-dark-ink hover:border-elastic-blue/40 hover:scale-110'
               }`}
             >
-              Previous
+              <FontAwesomeIcon icon={faChevronLeft} className="text-sm" />
             </button>
-            
-            {/* Scene Dots */}
-            <div className="flex gap-3">
-              {scenes.map((scene, index) => (
-                <div key={scene.id} className="relative group flex flex-col items-center">
+
+            {/* Current scene readout + jump-to menu */}
+            <div className="relative">
+              <button
+                onClick={() => setSceneMenuOpen((o) => !o)}
+                className={`group flex items-center gap-2.5 pl-3.5 pr-3 py-2 rounded-full border shadow-sm transition-all ${
+                  theme === 'dark'
+                    ? 'bg-white/[0.08] border-white/20 hover:border-elastic-teal/50'
+                    : 'bg-white border-elastic-dev-blue/20 hover:border-elastic-blue/40 hover:shadow'
+                }`}
+                title="Jump to scene"
+              >
+                <span className={`text-sm font-semibold leading-none ${theme === 'dark' ? 'text-white' : 'text-elastic-dark-ink'}`}>
+                  {sceneTitle(scenes[currentScene] || {})}
+                </span>
+                <span className={`text-xs font-mono leading-none tabular-nums ${theme === 'dark' ? 'text-elastic-teal' : 'text-elastic-blue'}`}>
+                  {currentScene + 1} / {scenes.length}
+                </span>
+                <FontAwesomeIcon
+                  icon={faChevronRight}
+                  className={`text-[10px] transition-transform duration-200 ${sceneMenuOpen ? '-rotate-90' : 'rotate-0'} ${theme === 'dark' ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}
+                />
+              </button>
+
+              {sceneMenuOpen && (
+                <>
+                  {/* Click-away backdrop */}
                   <button
-                    onClick={() => navigateToScene(index)}
-                    className={`w-3 h-3 rounded-full transition-all duration-300 ${
-                      index === currentScene 
-                        ? 'bg-elastic-blue dark:bg-elastic-teal scale-125' 
-                        : 'bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500'
-                    }`}
-                    aria-label={`Go to ${scene.title}`}
+                    className="fixed inset-0 z-40 cursor-default"
+                    aria-hidden="true"
+                    tabIndex={-1}
+                    onClick={() => setSceneMenuOpen(false)}
                   />
-                  <span className={`pointer-events-none absolute top-full mt-2 whitespace-nowrap text-xs px-2 py-1 rounded-md border opacity-0 group-hover:opacity-100 transition-opacity duration-150 ${theme === 'dark' ? 'bg-elastic-dev-blue/95 text-white/80 border-white/10' : 'bg-white/95 text-elastic-dark-ink/80 border-elastic-dev-blue/10'} shadow-md`}>
-                    {scene.title}
-                  </span>
-                </div>
-              ))}
+                  <div
+                    className={`absolute bottom-full right-0 mb-3 z-50 w-72 rounded-2xl border shadow-2xl overflow-hidden ${
+                      theme === 'dark' ? 'bg-elastic-dev-blue border-white/10' : 'bg-white border-elastic-dev-blue/10'
+                    }`}
+                  >
+                    {/* Search */}
+                    <div className={`flex items-center gap-2 px-3 py-2.5 border-b ${theme === 'dark' ? 'border-white/10' : 'border-elastic-dev-blue/10'}`}>
+                      <FontAwesomeIcon icon={faMagnifyingGlass} className={`text-xs ${theme === 'dark' ? 'text-white/40' : 'text-elastic-dev-blue/40'}`} />
+                      <input
+                        autoFocus
+                        value={sceneQuery}
+                        onChange={(e) => setSceneQuery(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Escape') setSceneMenuOpen(false) }}
+                        placeholder="Jump to scene…"
+                        className={`flex-1 bg-transparent text-sm outline-none ${theme === 'dark' ? 'text-white placeholder:text-white/30' : 'text-elastic-dark-ink placeholder:text-elastic-dev-blue/30'}`}
+                      />
+                    </div>
+
+                    {/* Scene list */}
+                    <div className="max-h-72 overflow-y-auto py-1">
+                      {scenes
+                        .map((scene, index) => ({ scene, index, title: sceneTitle(scene) }))
+                        .filter(({ title }) => title.toLowerCase().includes(sceneQuery.trim().toLowerCase()))
+                        .map(({ scene, index, title }) => {
+                          const isActive = index === currentScene
+                          return (
+                            <button
+                              key={scene.id}
+                              onClick={() => { navigateToScene(index); setSceneMenuOpen(false) }}
+                              className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
+                                isActive
+                                  ? theme === 'dark' ? 'bg-elastic-teal/15' : 'bg-elastic-blue/10'
+                                  : theme === 'dark' ? 'hover:bg-white/[0.06]' : 'hover:bg-elastic-dev-blue/[0.05]'
+                              }`}
+                            >
+                              <span className={`w-6 text-right text-xs font-mono tabular-nums shrink-0 ${theme === 'dark' ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>
+                                {index + 1}
+                              </span>
+                              <span className={`flex-1 min-w-0 truncate text-sm ${
+                                isActive
+                                  ? `font-semibold ${theme === 'dark' ? 'text-elastic-teal' : 'text-elastic-blue'}`
+                                  : theme === 'dark' ? 'text-white/80' : 'text-elastic-dark-ink/80'
+                              }`}>
+                                {title}
+                              </span>
+                            </button>
+                          )
+                        })}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-            
-            <button 
-              onClick={handleNext} 
+
+            {/* Next */}
+            <button
+              onClick={handleNext}
               disabled={currentScene === scenes.length - 1}
-              className={`text-sm font-medium transition-all hover:scale-105 ${
+              aria-label="Next scene"
+              className={`w-10 h-10 rounded-full border flex items-center justify-center transition-all ${
                 currentScene === scenes.length - 1
-                  ? 'opacity-30 cursor-not-allowed'
+                  ? 'opacity-30 cursor-not-allowed border-transparent'
                   : theme === 'dark'
-                    ? 'text-white/60 hover:text-white'
-                    : 'text-elastic-ink/60 hover:text-elastic-dark-ink'
+                    ? 'bg-white/[0.06] border-white/15 text-white/80 hover:text-white hover:bg-white/15 hover:scale-110'
+                    : 'bg-white border-elastic-dev-blue/15 text-elastic-ink/80 hover:text-elastic-dark-ink hover:border-elastic-blue/40 hover:scale-110'
               }`}
             >
-              Next
+              <FontAwesomeIcon icon={faChevronRight} className="text-sm" />
             </button>
           </div>
         </div>
       </nav>
       
       {/* Progress Bar */}
-      <div className="fixed bottom-0 left-0 right-0 h-1 bg-gray-200 dark:bg-gray-700">
+      <div className="fixed bottom-0 left-0 right-0 z-50 h-1 bg-gray-200 dark:bg-gray-700">
         <div 
           className="h-full bg-elastic-blue dark:bg-elastic-teal transition-all duration-500"
           style={{ width: `${((currentScene + 1) / scenes.length) * 100}%` }}

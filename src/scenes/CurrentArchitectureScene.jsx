@@ -190,7 +190,7 @@ function CurrentArchitectureScene({ metadata = {} }) {
   const appStackRaw = metadata.appStack || DEFAULT_APP_STACK
   // Support both a flat list (single row) and grouped rows (array of arrays).
   const appStackRows = Array.isArray(appStackRaw[0]) ? appStackRaw : [appStackRaw]
-  const currentStack = metadata.currentStack || DEFAULT_CURRENT_STACK
+  const currentStack = (metadata.currentStack || DEFAULT_CURRENT_STACK).map((item, i) => ({ ...(DEFAULT_CURRENT_STACK[i] || {}), ...item }))
   const pipeline = { ...DEFAULT_PIPELINE, ...(metadata.pipeline || {}) }
   const program = metadata.programStatus || DEFAULT_PROGRAM
 

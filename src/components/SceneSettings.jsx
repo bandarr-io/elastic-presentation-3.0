@@ -8,20 +8,57 @@ import {
   faDownload, faUpload, faImage, faPalette, faArrowUp, faArrowDown
 } from '@fortawesome/free-solid-svg-icons'
 import { DEFAULT_AGENDA_ITEMS } from '../data/agendaDefaults'
+import { DECK_PRESETS, DEFAULT_PRESET_ID, CUSTOM_PRESET_ID, presetConfig } from '../data/deckPresets'
+
+import CurrentArchitectureEditor from './sceneEditors/CurrentArchitectureEditor'
+import ElasticValueEditor from './sceneEditors/ElasticValueEditor'
+import ValueByTeamEditor from './sceneEditors/ValueByTeamEditor'
+import SecurityUseCasesEditor from './sceneEditors/SecurityUseCasesEditor'
+import AIAssistantEditor from './sceneEditors/AIAssistantEditor'
+import LogsDBEditor from './sceneEditors/LogsDBEditor'
+import CustomerArchitectEditor from './sceneEditors/CustomerArchitectEditor'
+import PlatformOperationsEditor from './sceneEditors/PlatformOperationsEditor'
+import PlatformValueEditor from './sceneEditors/PlatformValueEditor'
+import SecurityNarrativeVisualEditor from './sceneEditors/SecurityNarrativeVisualEditor'
+import LicensingEditor from './sceneEditors/LicensingEditor'
+import DataTieringEditor from './sceneEditors/DataTieringEditor'
+import SecurityEditor from './sceneEditors/SecurityEditor'
+import IconSelect from './sceneEditors/IconSelect'
+
+// Scenes whose content editors live in ./sceneEditors as standalone modules.
+// Each receives ({ sceneMetadata, onUpdateSceneMetadata, isDark, inputClass, textareaClass }).
+const MODULAR_SCENE_EDITORS = {
+  'current-architecture': CurrentArchitectureEditor,
+  'elastic-value': ElasticValueEditor,
+  'value-by-team': ValueByTeamEditor,
+  'security-use-cases': SecurityUseCasesEditor,
+  'ai-assistant': AIAssistantEditor,
+  'logsdb': LogsDBEditor,
+  'customer-architect': CustomerArchitectEditor,
+  'platform-operations': PlatformOperationsEditor,
+  'platform-value': PlatformValueEditor,
+  'security-narrative-visual': SecurityNarrativeVisualEditor,
+  'licensing': LicensingEditor,
+  'data-tiering': DataTieringEditor,
+  'security': SecurityEditor,
+}
 
 const STORAGE_KEY = 'presentation-scene-config'
 
 // Bump whenever the canonical default scene order / enabled set changes. On a
 // version mismatch we adopt the new order + enabled defaults while preserving
 // the user's own durations and scene metadata.
-const ORDER_VERSION = 5
+const ORDER_VERSION = 6
 
 function buildDefaultConfig(initialScenes) {
+  const allIds = initialScenes.map(s => s.id)
+  const preset = presetConfig(DEFAULT_PRESET_ID, allIds)
   return {
-    enabledIds: initialScenes.filter(s => !s.defaultDisabled).map(s => s.id),
+    enabledIds: preset ? preset.enabledIds : initialScenes.filter(s => !s.defaultDisabled).map(s => s.id),
     durations: {},
     sceneMetadata: {},
-    order: initialScenes.map(s => s.id),
+    order: preset ? preset.order : allIds,
+    activePreset: preset ? DEFAULT_PRESET_ID : CUSTOM_PRESET_ID,
     orderVersion: ORDER_VERSION
   }
 }
@@ -33,14 +70,12 @@ export function useSceneConfiguration(initialScenes) {
       try {
         const parsed = JSON.parse(saved)
         if (parsed.orderVersion !== ORDER_VERSION) {
-          // Migrate to the new canonical order + enabled set, keeping edits.
+          // Migrate to the new canonical flow (default preset), keeping edits.
+          const migrated = buildDefaultConfig(initialScenes)
           return {
-            ...parsed,
+            ...migrated,
             durations: parsed.durations || {},
-            sceneMetadata: parsed.sceneMetadata || {},
-            order: initialScenes.map(s => s.id),
-            enabledIds: initialScenes.filter(s => !s.defaultDisabled).map(s => s.id),
-            orderVersion: ORDER_VERSION
+            sceneMetadata: parsed.sceneMetadata || {}
           }
         }
         return parsed
@@ -55,13 +90,25 @@ export function useSceneConfiguration(initialScenes) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
   }, [config])
 
+  const applyPreset = (presetId) => {
+    const allIds = initialScenes.map(s => s.id)
+    const preset = presetConfig(presetId, allIds)
+    if (!preset) return
+    setConfig(prev => ({
+      ...prev,
+      order: preset.order,
+      enabledIds: preset.enabledIds,
+      activePreset: presetId
+    }))
+  }
+
   const toggleScene = (sceneId) => {
     setConfig(prev => {
       if (prev.enabledIds.includes(sceneId)) {
         if (prev.enabledIds.length <= 1) return prev
-        return { ...prev, enabledIds: prev.enabledIds.filter(id => id !== sceneId) }
+        return { ...prev, enabledIds: prev.enabledIds.filter(id => id !== sceneId), activePreset: CUSTOM_PRESET_ID }
       }
-      return { ...prev, enabledIds: [...prev.enabledIds, sceneId] }
+      return { ...prev, enabledIds: [...prev.enabledIds, sceneId], activePreset: CUSTOM_PRESET_ID }
     })
   }
 
@@ -88,7 +135,8 @@ export function useSceneConfiguration(initialScenes) {
   const updateOrder = (newOrder) => {
     setConfig(prev => ({
       ...prev,
-      order: newOrder
+      order: newOrder,
+      activePreset: CUSTOM_PRESET_ID
     }))
   }
 
@@ -140,6 +188,9 @@ export function useSceneConfiguration(initialScenes) {
     orderedScenes,
     customDurations: config.durations,
     sceneMetadata: config.sceneMetadata || {},
+    activePreset: config.activePreset || CUSTOM_PRESET_ID,
+    presets: DECK_PRESETS,
+    applyPreset,
     toggleScene,
     updateDuration,
     updateSceneMetadata,
@@ -500,6 +551,10 @@ function TeamEditorPanel({ isDark }) {
       : 'bg-white border-elastic-dev-blue/10 text-elastic-dev-blue placeholder-elastic-dev-blue/30'
   }`
 
+  // The Team scene renders every member with the theme accent, so avatars
+  // here preview that same color rather than a per-member value.
+  const accentColor = isDark ? '#48EFCF' : '#0B64DD'
+
   const handleMemberUpdate = (index, field, value) => {
     const newMembers = [...teamConfig.members]
     newMembers[index] = { ...newMembers[index], [field]: value }
@@ -535,7 +590,6 @@ function TeamEditorPanel({ isDark }) {
       role: '',
       email: '',
       phone: '',
-      color: '#0B64DD',
       initials: '',
       photo: null
     }
@@ -624,15 +678,15 @@ function TeamEditorPanel({ isDark }) {
                         src={member.photo}
                         alt={member.name}
                         className="w-10 h-10 rounded-lg object-cover"
-                        style={{ border: `2px solid ${member.color}` }}
+                        style={{ border: `2px solid ${accentColor}` }}
                       />
                     ) : (
                       <div
                         className="w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold"
                         style={{
-                          backgroundColor: `${member.color}20`,
-                          color: member.color,
-                          border: `2px solid ${member.color}`
+                          backgroundColor: `${accentColor}20`,
+                          color: accentColor,
+                          border: `2px solid ${accentColor}`
                         }}
                       >
                         {member.initials || '?'}
@@ -746,38 +800,18 @@ function TeamEditorPanel({ isDark }) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 mt-3">
-                <div>
-                  <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Photo URL</label>
-                  <input
-                    type="text"
-                    value={member.photo && !member.photo.startsWith('data:') ? member.photo : ''}
-                    onChange={(e) => handleMemberUpdate(index, 'photo', e.target.value)}
-                    className={inputClass}
-                    placeholder="/photos/name.jpg"
-                  />
-                  <p className={`text-xs mt-1 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>
-                    Or click avatar to upload
-                  </p>
-                </div>
-                <div>
-                  <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Color</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="color"
-                      value={member.color}
-                      onChange={(e) => handleMemberUpdate(index, 'color', e.target.value)}
-                      className="w-10 h-10 rounded-lg cursor-pointer"
-                    />
-                    <input
-                      type="text"
-                      value={member.color}
-                      onChange={(e) => handleMemberUpdate(index, 'color', e.target.value)}
-                      className={`${inputClass} flex-1`}
-                      placeholder="#0B64DD"
-                    />
-                  </div>
-                </div>
+              <div className="mt-3">
+                <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Photo URL</label>
+                <input
+                  type="text"
+                  value={member.photo && !member.photo.startsWith('data:') ? member.photo : ''}
+                  onChange={(e) => handleMemberUpdate(index, 'photo', e.target.value)}
+                  className={inputClass}
+                  placeholder="/photos/name.jpg"
+                />
+                <p className={`text-xs mt-1 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>
+                  Or click avatar to upload
+                </p>
               </div>
             </div>
           ))}
@@ -820,6 +854,9 @@ export default function SceneSettings({
   onUpdateSceneMetadata,
   onUpdateOrder,
   onReset,
+  presets = [],
+  activePreset,
+  onApplyPreset,
   isOpen: externalIsOpen,
   onOpenChange
 }) {
@@ -1066,6 +1103,56 @@ export default function SceneSettings({
           <div className="flex-1 overflow-y-auto p-4">
             {activeTab === 'scenes' ? (
               <>
+                {/* Presentation flow presets */}
+                {presets.length > 0 && (
+                  <div className={`mb-4 rounded-xl border p-4 ${isDark ? 'border-white/10 bg-white/[0.02]' : 'border-elastic-dev-blue/10 bg-elastic-dev-blue/[0.02]'}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <span className={`text-sm font-semibold flex items-center gap-2 ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>
+                        <FontAwesomeIcon icon={faSliders} className={isDark ? 'text-elastic-teal' : 'text-elastic-blue'} />
+                        Default Flows
+                      </span>
+                      {activePreset === CUSTOM_PRESET_ID && (
+                        <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-white/10 text-white/60' : 'bg-elastic-dev-blue/10 text-elastic-dev-blue/60'}`}>
+                          Custom
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {presets.map((preset) => {
+                        const isActive = activePreset === preset.id
+                        return (
+                          <button
+                            key={preset.id}
+                            onClick={() => onApplyPreset?.(preset.id)}
+                            className={`text-left rounded-lg border p-3 transition-all ${
+                              isActive
+                                ? isDark
+                                  ? 'border-elastic-teal/60 bg-elastic-teal/10'
+                                  : 'border-elastic-blue/50 bg-elastic-blue/10'
+                                : isDark
+                                  ? 'border-white/10 bg-white/[0.02] hover:border-white/25'
+                                  : 'border-elastic-dev-blue/10 bg-white hover:border-elastic-dev-blue/25'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={`text-sm font-bold ${isActive ? (isDark ? 'text-elastic-teal' : 'text-elastic-blue') : (isDark ? 'text-white' : 'text-elastic-dark-ink')}`}>
+                                {preset.label}
+                              </span>
+                              {isActive && <FontAwesomeIcon icon={faCheck} className={`text-xs ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`} />}
+                            </div>
+                            <p className={`text-[11px] leading-snug mt-1 ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
+                              {preset.description}
+                            </p>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <p className={`text-[11px] mt-2.5 ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>
+                      Applying a flow re-enables and reorders scenes. Your durations and content edits are kept; toggling or reordering switches to Custom.
+                    </p>
+                  </div>
+                )}
+
                 {/* Agenda / Session Schedule editor (collapsible) */}
                 <div className={`mb-4 rounded-xl border ${isDark ? 'border-white/10 bg-white/[0.02]' : 'border-elastic-dev-blue/10 bg-elastic-dev-blue/[0.02]'}`}>
                   <button
@@ -1447,18 +1534,31 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
           <option value="hero">Hero</option>
           <option value="about">About Elastic</option>
           <option value="business-value">Business Value</option>
-          <option value="problem-patterns">Problem Patterns</option>
+          <option value="current-architecture">Current Architecture</option>
+          <option value="elastic-value">Metrics Dashboard</option>
+          <option value="value-by-team">Card Grid</option>
+          <option value="security-use-cases">Visual Gallery</option>
           <option value="unified-strategy">Platform Overview</option>
+          <option value="ai-assistant">AI Capability Map</option>
+          <option value="security-narrative-visual">Security: Why Now</option>
+          <option value="security">Security</option>
+          <option value="licensing">Licensing</option>
+          <option value="customer-architect">Customer Architect</option>
+          <option value="services">Services</option>
+          <option value="next-steps">Next Steps</option>
+          <option value="panel">Panel</option>
+          <option value="problem-patterns">Problem Patterns</option>
           <option value="data-explosion">Data Explosion</option>
+          <option value="logsdb">LogsDB</option>
           <option value="data-mesh">Data Mesh</option>
           <option value="cross-cluster">Cross-Cluster</option>
           <option value="schema">Schema</option>
           <option value="access-control">Access Control</option>
+          <option value="data-tiering">Data Tiering</option>
           <option value="consolidation">Consolidation</option>
           <option value="esql">ES|QL</option>
-          <option value="services">Services</option>
-          <option value="next-steps">Next Steps</option>
-          <option value="panel">Panel</option>
+          <option value="platform-operations">Deployment Models</option>
+          <option value="platform-value">Platform Value</option>
         </select>
       </div>
 
@@ -1665,16 +1765,27 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
             </h4>
             <div className="grid grid-cols-2 gap-3">
             {[
-              { index: 0, defaultTitle: 'Search Pioneer', defaultDesc: 'Built on Apache Lucene, the gold standard for search' },
-              { index: 1, defaultTitle: 'Data at Scale', defaultDesc: 'Petabytes of data processed daily by our customers' },
-              { index: 2, defaultTitle: 'AI-Native', defaultDesc: 'Vector search & ML built into the platform from day one' },
-              { index: 3, defaultTitle: 'Open Source DNA', defaultDesc: 'Transparent, extensible, community-driven' }
+              { index: 0, defaultTitle: 'Search Pioneer', defaultDesc: 'Built on Apache Lucene, the gold standard for search', defaultIcon: 'magnifying-glass' },
+              { index: 1, defaultTitle: 'Data at Scale', defaultDesc: 'Petabytes of data processed daily by our customers', defaultIcon: 'chart-column' },
+              { index: 2, defaultTitle: 'AI-Native', defaultDesc: 'Vector search & ML built into the platform from day one', defaultIcon: 'brain' },
+              { index: 3, defaultTitle: 'Open Source DNA', defaultDesc: 'Transparent, extensible, community-driven', defaultIcon: 'dna' }
             ].map((feature) => (
               <div key={`feature-${feature.index}`} className={`p-3 rounded-lg border ${isDark ? 'border-white/10 bg-white/[0.02]' : 'border-elastic-dev-blue/10 bg-elastic-dev-blue/[0.02]'}`}>
                 <p className={`text-xs font-semibold mb-2 ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
                   Feature #{feature.index + 1}
                 </p>
                 <div className="space-y-2">
+                  <IconSelect
+                    value={typeof sceneMetadata?.about?.features?.[feature.index]?.icon === 'string' ? sceneMetadata.about.features[feature.index].icon : feature.defaultIcon}
+                    onChange={(name) => {
+                      const currentFeatures = sceneMetadata?.about?.features || []
+                      const newFeatures = [...currentFeatures]
+                      newFeatures[feature.index] = { ...newFeatures[feature.index], icon: name }
+                      onUpdateSceneMetadata('about', { ...sceneMetadata?.about, features: newFeatures })
+                    }}
+                    inputClass={inputClass}
+                    isDark={isDark}
+                  />
                   <div>
                     <label className={`text-xs mb-1 block ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>
                       Title
@@ -1793,11 +1904,11 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
             <h4 className={`text-sm font-semibold mb-3 ${isDark ? 'text-white/70' : 'text-elastic-dark-ink/70'}`}>Value Cards</h4>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { index: 0, defaultTitle: 'Risk Reduction',  defaultDesc: 'Reduce likelihood & severity of threats',  defaultDetail: 'Elastic helps reduce your attack surface, detect threats faster, and improve your overall security posture.' },
-                { index: 1, defaultTitle: 'Time Efficiency', defaultDesc: 'Do more with less',                        defaultDetail: 'Elastic helps you automate manual tasks, streamline workflows, and get insights faster so your teams can focus on what matters most.' },
-                { index: 2, defaultTitle: 'Resilience',      defaultDesc: 'Respond & recover faster',                 defaultDetail: 'Elastic helps you quickly identify and resolve issues, minimize downtime, and maintain business continuity even during incidents.' },
-                { index: 3, defaultTitle: 'Cost Savings',    defaultDesc: 'Reduce expenses & prevent losses',          defaultDetail: 'Elastic helps you consolidate tools, optimize resource usage, and prevent costly security breaches and operational incidents.' },
-              ].map(({ index, defaultTitle, defaultDesc, defaultDetail }) => {
+                { index: 0, defaultTitle: 'Risk Reduction',  defaultDesc: 'Reduce likelihood & severity of threats',  defaultDetail: 'Elastic helps reduce your attack surface, detect threats faster, and improve your overall security posture.', defaultIcon: 'shield' },
+                { index: 1, defaultTitle: 'Time Efficiency', defaultDesc: 'Do more with less',                        defaultDetail: 'Elastic helps you automate manual tasks, streamline workflows, and get insights faster so your teams can focus on what matters most.', defaultIcon: 'clock' },
+                { index: 2, defaultTitle: 'Resilience',      defaultDesc: 'Respond & recover faster',                 defaultDetail: 'Elastic helps you quickly identify and resolve issues, minimize downtime, and maintain business continuity even during incidents.', defaultIcon: 'rocket' },
+                { index: 3, defaultTitle: 'Cost Savings',    defaultDesc: 'Reduce expenses & prevent losses',          defaultDetail: 'Elastic helps you consolidate tools, optimize resource usage, and prevent costly security breaches and operational incidents.', defaultIcon: 'coins' },
+              ].map(({ index, defaultTitle, defaultDesc, defaultDetail, defaultIcon }) => {
                 const cards = sceneMetadata?.['business-value']?.cards || []
                 const updateCard = (field, value) => {
                   const updated = [...cards]
@@ -1808,6 +1919,12 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
                   <div key={index} className={`p-3 rounded-lg border ${isDark ? 'border-white/10 bg-white/[0.02]' : 'border-elastic-dev-blue/10 bg-elastic-dev-blue/[0.02]'}`}>
                     <p className={`text-xs font-semibold mb-2 ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Card #{index + 1}</p>
                     <div className="space-y-2">
+                      <IconSelect
+                        value={typeof cards[index]?.icon === 'string' ? cards[index].icon : defaultIcon}
+                        onChange={(name) => updateCard('icon', name)}
+                        inputClass={inputClass}
+                        isDark={isDark}
+                      />
                       <div>
                         <label className={`text-xs mb-1 block ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>Title</label>
                         <input type="text" value={cards[index]?.title || ''} onChange={(e) => updateCard('title', e.target.value)} className={inputClass} placeholder={defaultTitle} />
@@ -3801,6 +3918,19 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
           })()}
         </div>
       )}
+
+      {(() => {
+        const ModularEditor = MODULAR_SCENE_EDITORS[selectedScene]
+        return ModularEditor ? (
+          <ModularEditor
+            sceneMetadata={sceneMetadata}
+            onUpdateSceneMetadata={onUpdateSceneMetadata}
+            isDark={isDark}
+            inputClass={inputClass}
+            textareaClass={textareaClass}
+          />
+        ) : null
+      })()}
     </div>
   )
 }

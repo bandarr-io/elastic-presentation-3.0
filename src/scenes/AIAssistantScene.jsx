@@ -10,6 +10,7 @@ import {
   faArrowRightLong,
   faCircleCheck,
 } from '@fortawesome/free-solid-svg-icons'
+import { resolveIcon } from '../data/iconOptions'
 
 const COLORS = {
   teal: '#48EFCF',
@@ -53,7 +54,10 @@ function AIAssistantScene({ metadata = {} }) {
 
   const titleParts = metadata.titleParts || ['Reactive today.', 'Agentic now.', 'Autonomous next.']
   const eyebrow = metadata.eyebrow || 'From Answers to Action'
-  const stages = metadata.stages || DEFAULT_STAGES
+  const stages = (metadata.stages || DEFAULT_STAGES).map((item, i) => {
+    const merged = { ...(DEFAULT_STAGES[i] || {}), ...item }
+    return { ...merged, icon: resolveIcon(merged.icon, DEFAULT_STAGES[i]?.icon) }
+  })
   const todayLabel = metadata.todayLabel || 'In production today'
   const roadmapLabel = metadata.roadmapLabel || 'Committed roadmap'
 

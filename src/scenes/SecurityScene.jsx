@@ -12,10 +12,16 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 
 // ─── Stage Configuration ─────────────────────────────────────────────
-const stages = [
+const DEFAULT_STAGES = [
   { id: 'attack-discovery',    label: 'Attack Discovery'    },
   { id: 'threat-hunting',      label: 'AI Assistant'        },
   { id: 'automated-workflows', label: 'Automated Response'  },
+]
+
+const DEFAULT_STAGE_SUBTITLES = [
+  'Prioritize Attacks, Not Alerts',
+  'Make every analyst a power user',
+  'Automated response at machine speed',
 ]
 
 // ─── Severity Colors ─────────────────────────────────────────────────
@@ -27,7 +33,7 @@ const severityColors = {
 }
 
 // ─── Attack Stories ──────────────────────────────────────────────────
-const attackStories = [
+const DEFAULT_ATTACK_STORIES = [
   {
     id: 1,
     title: 'Credential Compromise Campaign',
@@ -71,7 +77,7 @@ const attackStories = [
 ]
 
 // ─── Chat Script ─────────────────────────────────────────────────────
-const chatScript = [
+const DEFAULT_CHAT_SCRIPT = [
   { role: 'user',  text: 'Investigate the credential compromise on DC-PROD-01. What happened?' },
   {
     role: 'agent',
@@ -86,7 +92,7 @@ const chatScript = [
 ]
 
 // ─── Knowledge Bases ─────────────────────────────────────────────────
-const knowledgeBases = [
+const DEFAULT_KNOWLEDGE_BASES = [
   { name: 'Internal Runbooks',       icon: faBook,           items: 'KB-SEC-2024-017 · 23 docs'  },
   { name: 'Threat Intel Feeds',      icon: faShieldHalved,   items: 'MITRE ATT&CK · CrowdStrike' },
   { name: 'Detection Rule Library',  icon: faWandMagicSparkles, items: 'Sigma · YARA · 1,240 rules'   },
@@ -95,7 +101,7 @@ const knowledgeBases = [
 ]
 
 // ─── Available Workflows ─────────────────────────────────────────────
-const availableWorkflows = [
+const DEFAULT_WORKFLOWS = [
   { id: 'isolate-host', name: 'Isolate Host',             type: 'Response',      description: 'Quarantine compromised endpoints',  icon: faLock,            color: '#F04E98', active: true },
   { id: 'search-siem',  name: 'Search Across SIEM',       type: 'ES|QL Query',   description: 'Query all data sources for IOC matches',          icon: faMagnifyingGlass, color: '#48EFCF' },
   { id: 'block-ip',     name: 'Block IP at Firewall',     type: 'Response',      description: 'Add malicious IPs to network deny list',          icon: faShieldHalved,    color: '#F04E98' },
@@ -116,7 +122,7 @@ const workflowTypeBadgeColor = {
 }
 
 // ─── Terminal Commands ────────────────────────────────────────────────
-const terminalCommands = [
+const DEFAULT_TERMINAL_COMMANDS = [
   '$ elastic-agent isolate --host WS-PC-0142 --force',
   '[INFO] Connecting to Elastic Security endpoint...',
   '[INFO] Host WS-PC-0142 found — Agent v8.15.1',
@@ -126,7 +132,7 @@ const terminalCommands = [
 ]
 
 // ─── MITRE Tactics shown during AI analysis ───────────────────────────
-const ANALYZE_TACTICS = [
+const DEFAULT_ANALYZE_TACTICS = [
   'T1110 — Brute Force',
   'T1003 — Credential Dumping',
   'T1558 — Golden Ticket',
@@ -194,14 +200,95 @@ const selectedConnections = [
   { from: 5, to: 6, color: '#0B64DD' }, // file server → C2 exfil channel
 ]
 
+const DEFAULT_HOST_DETAILS = [
+  { label: 'Hostname',   value: 'WS-PC-0142'     },
+  { label: 'IP Address', value: '10.0.3.22'      },
+  { label: 'OS',         value: 'Windows 11 Pro' },
+  { label: 'User',       value: 'j.martinez'     },
+  { label: 'Agent',      value: 'v8.15.1'        },
+]
+
+const DEFAULT_PIPELINE_STEPS = {
+  threatDetected:   { title: 'Threat Detected',   subtitle: 'Isolate Host WS-PC-0142' },
+  analystApproval:  { title: 'Analyst Approval',  subtitle: 'SOC Analyst: J. Mitchell' },
+  execute: {
+    titleIdle: 'Execute', titleDone: 'Isolated', titleDenied: 'Blocked',
+    subtitleIdle: 'Response action', subtitleDone: 'WS-PC-0142 quarantined', subtitleDenied: 'Analyst override',
+  },
+}
+
+const DEFAULT_MTTR = {
+  label: 'MTTR',
+  beforeLabel: 'Before',
+  beforeValue: '~4h',
+  afterLabel: 'After',
+  afterValue: '14 min',
+  improvement: '↓ 94% faster',
+}
+
 
 // ═══════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════
 
-function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdvanceSignal = 0, onAlertPhaseChange }) {
+function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdvanceSignal = 0, onAlertPhaseChange, metadata = {} }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
+
+  const eyebrow = metadata.eyebrow || 'Elastic Security'
+  const titlePlain = metadata.titlePlain || 'Modernizing Cyber Defense with '
+  const titleAccent = metadata.titleAccent || 'AI-Driven Efficiency'
+  const stageSubtitles = metadata.stageSubtitles || DEFAULT_STAGE_SUBTITLES
+  const stages = (metadata.stages || DEFAULT_STAGES).map((s, i) => ({ ...(DEFAULT_STAGES[i] || {}), ...s }))
+  const attackStories = (metadata.attackStories || DEFAULT_ATTACK_STORIES).map((s, i) => ({ ...(DEFAULT_ATTACK_STORIES[i] || {}), ...s }))
+  const chatScript = (metadata.chatScript || DEFAULT_CHAT_SCRIPT).map((m, i) => ({ ...(DEFAULT_CHAT_SCRIPT[i] || {}), ...m }))
+  const knowledgeBases = (metadata.knowledgeBases || DEFAULT_KNOWLEDGE_BASES).map((kb, i) => ({ ...(DEFAULT_KNOWLEDGE_BASES[i] || {}), ...kb }))
+  const availableWorkflows = (metadata.workflows || DEFAULT_WORKFLOWS).map((wf, i) => ({ ...(DEFAULT_WORKFLOWS[i] || {}), ...wf }))
+  const terminalCommands = metadata.terminalCommands || DEFAULT_TERMINAL_COMMANDS
+  const analyzeTactics = metadata.analyzeTactics || DEFAULT_ANALYZE_TACTICS
+  const hostDetails = (metadata.hostDetails || DEFAULT_HOST_DETAILS).map((item, i) => ({ ...(DEFAULT_HOST_DETAILS[i] || {}), ...item }))
+  const pipelineSteps = {
+    threatDetected:  { ...DEFAULT_PIPELINE_STEPS.threatDetected,  ...(metadata.pipelineSteps?.threatDetected  || {}) },
+    analystApproval: { ...DEFAULT_PIPELINE_STEPS.analystApproval, ...(metadata.pipelineSteps?.analystApproval || {}) },
+    execute:         { ...DEFAULT_PIPELINE_STEPS.execute,         ...(metadata.pipelineSteps?.execute         || {}) },
+  }
+  const mttr = { ...DEFAULT_MTTR, ...(metadata.mttr || {}) }
+
+  const stage0Label = metadata.stage0Label || stages[0]?.label || 'Attack Discovery'
+  const groupedSummaryBadge = metadata.groupedSummaryBadge || '80 alerts → 4 attack stories'
+  const attackDiscoveryIdleHint = metadata.attackDiscoveryIdleHint || 'See how AI turns raw alerts into clear attack stories.'
+  const mitreSectionLabel = metadata.mitreSectionLabel || 'MITRE ATT&CK'
+  const entitiesSectionLabel = metadata.entitiesSectionLabel || 'Affected Entities'
+  const alertsSuffix = metadata.alertsSuffix || 'alerts'
+  const storyFooterPrefix = metadata.storyFooterPrefix || 'Attack stories triaged and routed to analysts via'
+  const jiraLabel = metadata.jiraLabel || 'Jira'
+  const servicenowLabel = metadata.servicenowLabel || 'ServiceNow'
+
+  const stage1Label = metadata.stage1Label || stages[1]?.label || 'AI Assistant'
+  const huntingBadge = metadata.huntingBadge || 'Agent Builder'
+  const assistantName = metadata.assistantName || 'Elastic AI Assistant'
+  const assistantStatus = metadata.assistantStatus || 'Online'
+  const huntingIdleHint = metadata.huntingIdleHint || 'AI-guided investigation starting...'
+  const chatAgentLabel = metadata.chatAgentLabel || 'AI Assistant'
+  const kbReferenceBadge = metadata.kbReferenceBadge || 'via KB-SEC-2024-017'
+  const agentBuilderTitle = metadata.agentBuilderTitle || 'Agent Builder'
+  const agentBuilderSubtitle = metadata.agentBuilderSubtitle || 'Agentic AI Configuration'
+  const knowledgeBasesSectionLabel = metadata.knowledgeBasesSectionLabel || 'Connected Knowledge Bases'
+
+  const stage2Label = metadata.stage2Label || 'Automated Response Workflows'
+  const targetHostLabel = metadata.targetHostLabel || 'Target Host'
+  const threatScoreLabel = metadata.threatScoreLabel || 'Threat Score'
+  const threatScoreValue = metadata.threatScoreValue || '87'
+  const approveLabel = metadata.approveLabel || 'Approve'
+  const denyLabel = metadata.denyLabel || 'Deny'
+  const terminalTitle = metadata.terminalTitle || 'elastic-response-workflow'
+  const terminalIdleHint = metadata.terminalIdleHint || 'Waiting for workflow trigger...'
+  const terminalAwaitingHint = metadata.terminalAwaitingHint || 'Awaiting approval to execute...'
+  const terminalDeniedLine1 = metadata.terminalDeniedLine1 || '$ workflow halted — analyst denied action'
+  const terminalDeniedLine2 = metadata.terminalDeniedLine2 || '[INFO] Manual investigation required'
+  const workflowLibraryLabel = metadata.workflowLibraryLabel || 'Workflow Library'
+  const workflowDoneBadge = metadata.workflowDoneBadge || 'Done'
+  const workflowBlockedBadge = metadata.workflowBlockedBadge || 'Blocked'
 
   const timersRef     = useRef([])
   const approvalTimer = useRef(null)
@@ -436,7 +523,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
       setVisibleMessages(chatScript)
       setKbHighlight([0, 1])
     }, 7300)
-  }, [addTimer])
+  }, [addTimer, chatScript])
 
   // ─── Phase 3: Execution chain ─────────────────────────────────────────
   const executeAfterApproval = useCallback(() => {
@@ -451,7 +538,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
     addTimer(() => setWorkflowPhase('done'),                            afterTerminal)
     addTimer(() => setWorkflowPhase('notifying'),                       afterTerminal + 600)
     addTimer(() => { setWorkflowPhase('complete'); setShowMTTR(true) }, afterTerminal + 2500)
-  }, [addTimer])
+  }, [addTimer, terminalCommands])
 
   // ─── Phase 3: Workflow trigger ────────────────────────────────────────
   const runWorkflow = useCallback(() => {
@@ -521,14 +608,14 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
 
         {/* ── Header ──────────────────────────────────────────────── */}
         <SceneHeader
-          eyebrow="Elastic Security"
-          titlePlain="Modernizing Cyber Defense with "
-          titleAccent="AI-Driven Efficiency"
+          eyebrow={eyebrow}
+          titlePlain={titlePlain}
+          titleAccent={titleAccent}
           subtitle={
             <>
-              {stage === 0 && 'Prioritize Attacks, Not Alerts'}
-              {stage === 1 && 'Make every analyst a power user'}
-              {stage === 2 && 'Automated response at machine speed'}
+              {stage === 0 && stageSubtitles[0]}
+              {stage === 1 && stageSubtitles[1]}
+              {stage === 2 && stageSubtitles[2]}
             </>
           }
         />
@@ -555,11 +642,11 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
               <div className="flex items-center gap-2 mb-2 flex-shrink-0">
                 <FontAwesomeIcon icon={faShieldHalved} className={`text-base ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`} />
                 <span className={`text-sm font-semibold uppercase tracking-wider ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
-                  Attack Discovery
+                  {stage0Label}
                 </span>
                 {alertPhase === 'grouped' && (
                   <span className={`text-sm ml-auto px-3 py-1 rounded-full font-medium ${isDark ? 'bg-elastic-teal/20 text-elastic-teal' : 'bg-elastic-blue/10 text-elastic-blue'}`}>
-                    80 alerts → 4 attack stories
+                    {groupedSummaryBadge}
                   </span>
                 )}
               </div>
@@ -573,7 +660,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                     <div className={`text-center px-8 py-6 rounded-2xl ${isDark ? 'bg-elastic-dev-blue/90 backdrop-blur-sm' : 'bg-white/90 backdrop-blur-sm'}`}>
                       <FontAwesomeIcon icon={faBell} className={`text-3xl mb-3 ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`} />
                       <p className={`text-base ${isDark ? 'text-white/70' : 'text-elastic-dev-blue/70'}`}>
-                        See how AI turns raw alerts into clear attack stories.
+                        {attackDiscoveryIdleHint}
                       </p>
                     </div>
                   </div>
@@ -631,7 +718,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                 {/* ── Connecting overlay: MITRE tactics ── */}
                 {alertPhase === 'connecting' && visibleTactics > 0 && (
                   <div className="absolute bottom-4 left-4 right-4 flex items-center justify-center gap-2 z-10 pointer-events-none">
-                    {ANALYZE_TACTICS.slice(0, visibleTactics).map((tactic, i) => (
+                    {analyzeTactics.slice(0, visibleTactics).map((tactic, i) => (
                       <div
                         key={i}
                         className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs backdrop-blur-sm border ${
@@ -670,7 +757,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                                 {story.severity.toUpperCase()}
                               </span>
                               <span className={`text-xs flex-shrink-0 ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>
-                                {story.alertCount} alerts
+                                {story.alertCount} {alertsSuffix}
                               </span>
                             </div>
                             <FontAwesomeIcon icon={faTriangleExclamation} className="text-sm ml-2 flex-shrink-0" style={{ color: isDark ? story.color : '#0B64DD' }} />
@@ -684,7 +771,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                           <div className={`overflow-hidden transition-all duration-300 ${selectedStory === story.id ? 'max-h-48 opacity-100 mt-2' : 'max-h-0 opacity-0'}`}>
                             <div className={`pt-2 border-t ${isDark ? 'border-white/10' : 'border-elastic-dev-blue/10'}`}>
                               <div className="mb-2">
-                                <span className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>MITRE ATT&CK</span>
+                                <span className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>{mitreSectionLabel}</span>
                                 <div className="flex flex-wrap gap-1.5 mt-1">
                                   {story.mitre.map(t => (
                                     <span key={t} className={`text-xs px-2 py-0.5 rounded ${isDark ? 'bg-white/10 text-white/60' : 'bg-elastic-dev-blue/5 text-elastic-dev-blue/60'}`}>{t}</span>
@@ -692,7 +779,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                                 </div>
                               </div>
                               <div>
-                                <span className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>Affected Entities</span>
+                                <span className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>{entitiesSectionLabel}</span>
                                 <div className="flex flex-wrap gap-1.5 mt-1">
                                   {story.entities.map(e => (
                                     <span key={e} className={`text-xs px-2 py-0.5 rounded font-mono ${isDark ? 'bg-white/10 text-white/60' : 'bg-elastic-dev-blue/5 text-elastic-dev-blue/60'}`}>{e}</span>
@@ -712,21 +799,21 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                       className={`flex items-center justify-center gap-5 py-3 rounded-xl flex-shrink-0 ${isDark ? 'bg-white/[0.03]' : 'bg-elastic-dev-blue/[0.03]'}`}
                     >
                       <span className={`text-sm ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
-                        Attack stories triaged and routed to analysts via
+                        {storyFooterPrefix}
                       </span>
                       <div className="flex items-center gap-3">
                         <span className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${isDark ? 'bg-white/[0.06]' : 'bg-white/70'}`}>
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                             <path d="M11.53 2c0 4.97 4.03 9 9 9h.47v.47c0 4.97-4.03 9-9 9v-.47c0-4.97-4.03-9-9-9H2.53v-.47c0-4.97 4.03-9 9-9V2z" fill="#2684FF"/>
                           </svg>
-                          <span className={`text-sm font-medium ${isDark ? 'text-white/60' : 'text-elastic-dark-ink/60'}`}>Jira</span>
+                          <span className={`text-sm font-medium ${isDark ? 'text-white/60' : 'text-elastic-dark-ink/60'}`}>{jiraLabel}</span>
                         </span>
                         <span className={`flex items-center gap-2 px-3 py-1.5 rounded-lg ${isDark ? 'bg-white/[0.06]' : 'bg-white/70'}`}>
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
                             <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 16.5c-3.58 0-6.5-2.92-6.5-6.5S8.42 5.5 12 5.5s6.5 2.92 6.5 6.5-2.92 6.5-6.5 6.5z" fill="#81B5A1"/>
                             <path d="M12 7.5c-2.48 0-4.5 2.02-4.5 4.5s2.02 4.5 4.5 4.5 4.5-2.02 4.5-4.5-2.02-4.5-4.5-4.5z" fill="#81B5A1"/>
                           </svg>
-                          <span className={`text-sm font-medium ${isDark ? 'text-white/60' : 'text-elastic-dark-ink/60'}`}>ServiceNow</span>
+                          <span className={`text-sm font-medium ${isDark ? 'text-white/60' : 'text-elastic-dark-ink/60'}`}>{servicenowLabel}</span>
                         </span>
                       </div>
                     </div>
@@ -747,10 +834,10 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
               <div className="flex items-center gap-2 mb-2">
                 <FontAwesomeIcon icon={faRobot} className={`text-base ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`} />
                 <span className={`text-sm font-semibold uppercase tracking-wider ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
-                  AI Assistant
+                  {stage1Label}
                 </span>
                 <span className={`text-xs ml-auto px-3 py-1 rounded-full ${isDark ? 'bg-elastic-teal/10 text-elastic-teal/60' : 'bg-elastic-blue/10 text-elastic-blue/60'}`}>
-                  Agent Builder
+                  {huntingBadge}
                 </span>
               </div>
 
@@ -762,8 +849,8 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isDark ? 'bg-elastic-teal/20' : 'bg-elastic-blue/10'}`}>
                       <FontAwesomeIcon icon={faRobot} className={`text-sm ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`} />
                     </div>
-                    <span className={`text-sm font-semibold ${isDark ? 'text-white/70' : 'text-elastic-dark-ink/70'}`}>Elastic AI Assistant</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-elastic-teal/20 text-elastic-teal' : 'bg-elastic-blue/10 text-elastic-blue'}`}>Online</span>
+                    <span className={`text-sm font-semibold ${isDark ? 'text-white/70' : 'text-elastic-dark-ink/70'}`}>{assistantName}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${isDark ? 'bg-elastic-teal/20 text-elastic-teal' : 'bg-elastic-blue/10 text-elastic-blue'}`}>{assistantStatus}</span>
                   </div>
 
                   <div ref={chatContainerRef} className="flex-1 p-5 overflow-y-auto flex flex-col gap-4">
@@ -771,7 +858,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                       <div className="flex-1 flex items-center justify-center">
                         <div className="text-center">
                           <FontAwesomeIcon icon={faMagnifyingGlass} className={`text-3xl mb-3 ${isDark ? 'text-white/20' : 'text-elastic-dev-blue/20'}`} />
-                          <p className={`text-sm ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>AI-guided investigation starting...</p>
+                          <p className={`text-sm ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>{huntingIdleHint}</p>
                         </div>
                       </div>
                     )}
@@ -786,10 +873,10 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                           {msg.role === 'agent' && (
                             <div className="flex items-center gap-2 mb-2">
                               <FontAwesomeIcon icon={faRobot} className={`text-xs ${isDark ? 'text-elastic-teal/60' : 'text-elastic-blue/60'}`} />
-                              <span className={`text-xs font-semibold ${isDark ? 'text-elastic-teal/60' : 'text-elastic-blue/60'}`}>AI Assistant</span>
+                              <span className={`text-xs font-semibold ${isDark ? 'text-elastic-teal/60' : 'text-elastic-blue/60'}`}>{chatAgentLabel}</span>
                               {msg.hasKB && (
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded ${isDark ? 'bg-elastic-teal/10 text-elastic-teal/50' : 'bg-elastic-blue/10 text-elastic-blue/50'}`}>
-                                  via KB-SEC-2024-017
+                                  {kbReferenceBadge}
                                 </span>
                               )}
                             </div>
@@ -822,13 +909,13 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                       <FontAwesomeIcon icon={faGear} className={`text-sm ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`} />
                     </div>
                     <div>
-                      <div className={`text-sm font-semibold ${isDark ? 'text-white/70' : 'text-elastic-dark-ink/70'}`}>Agent Builder</div>
-                      <div className={`text-xs ${isDark ? 'text-white/55' : 'text-elastic-dev-blue/55'}`}>Agentic AI Configuration</div>
+                      <div className={`text-sm font-semibold ${isDark ? 'text-white/70' : 'text-elastic-dark-ink/70'}`}>{agentBuilderTitle}</div>
+                      <div className={`text-xs ${isDark ? 'text-white/55' : 'text-elastic-dev-blue/55'}`}>{agentBuilderSubtitle}</div>
                     </div>
                   </div>
 
                   <div className="flex-1">
-                    <span className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-white/55' : 'text-elastic-dev-blue/55'}`}>Connected Knowledge Bases</span>
+                    <span className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-white/55' : 'text-elastic-dev-blue/55'}`}>{knowledgeBasesSectionLabel}</span>
                     <div className="flex flex-col gap-2 mt-2">
                       {knowledgeBases.map((kb, i) => {
                         const highlighted = kbHighlight.includes(i)
@@ -868,7 +955,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
               <div className="flex items-center gap-2 mb-2">
                 <FontAwesomeIcon icon={faBolt} className={`text-base ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`} />
                 <span className={`text-sm font-semibold uppercase tracking-wider ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
-                  Automated Response Workflows
+                  {stage2Label}
                 </span>
               </div>
 
@@ -882,16 +969,10 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                 }`}>
                   <div className="flex items-center gap-2 mb-4">
                     <FontAwesomeIcon icon={faServer} className={`text-base ${workflowPhase !== 'idle' ? (isDark ? 'text-elastic-pink' : 'text-elastic-blue') : isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`} />
-                    <span className={`text-sm font-bold ${isDark ? 'text-white/80' : 'text-elastic-dark-ink/80'}`}>Target Host</span>
+                    <span className={`text-sm font-bold ${isDark ? 'text-white/80' : 'text-elastic-dark-ink/80'}`}>{targetHostLabel}</span>
                   </div>
                   <div className="flex flex-col gap-3 flex-1">
-                    {[
-                      { label: 'Hostname',   value: 'WS-PC-0142'    },
-                      { label: 'IP Address', value: '10.0.3.22'     },
-                      { label: 'OS',         value: 'Windows 11 Pro'},
-                      { label: 'User',       value: 'j.martinez'    },
-                      { label: 'Agent',      value: 'v8.15.1'       },
-                    ].map(item => (
+                    {hostDetails.map(item => (
                       <div key={item.label}>
                         <div className={`text-xs uppercase tracking-wider ${isDark ? 'text-white/55' : 'text-elastic-dev-blue/55'}`}>{item.label}</div>
                         <div className={`text-sm font-mono ${isDark ? 'text-white/60' : 'text-elastic-dark-ink/60'}`}>{item.value}</div>
@@ -899,7 +980,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                     ))}
                   </div>
                   <div className="mt-3 pt-3 border-t" style={{ borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(16,28,63,0.1)' }}>
-                    <div className={`text-xs uppercase tracking-wider mb-2 ${isDark ? 'text-white/55' : 'text-elastic-dev-blue/55'}`}>Threat Score</div>
+                    <div className={`text-xs uppercase tracking-wider mb-2 ${isDark ? 'text-white/55' : 'text-elastic-dev-blue/55'}`}>{threatScoreLabel}</div>
                     <div className="flex items-center gap-2">
                       <div className={`flex-1 h-2.5 rounded-full overflow-hidden ${isDark ? 'bg-white/10' : 'bg-elastic-dev-blue/10'}`}>
                         <div
@@ -909,7 +990,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                         />
                       </div>
                       {workflowPhase !== 'idle' && (
-                        <span className={`text-sm font-bold ${isDark ? 'text-elastic-pink' : 'text-elastic-blue'}`}>87</span>
+                        <span className={`text-sm font-bold ${isDark ? 'text-elastic-pink' : 'text-elastic-blue'}`}>{threatScoreValue}</span>
                       )}
                     </div>
                   </div>
@@ -928,8 +1009,8 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                     }`}>
                       <FontAwesomeIcon icon={faTriangleExclamation} className={`text-sm ${workflowPhase !== 'idle' ? (isDark ? 'text-elastic-pink' : 'text-elastic-blue') : isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`} />
                       <div>
-                        <div className={`text-sm font-semibold ${isDark ? 'text-white/70' : 'text-elastic-dark-ink/70'}`}>Threat Detected</div>
-                        <div className={`text-xs ${isDark ? 'text-white/35' : 'text-elastic-dev-blue/35'}`}>Isolate Host WS-PC-0142</div>
+                        <div className={`text-sm font-semibold ${isDark ? 'text-white/70' : 'text-elastic-dark-ink/70'}`}>{pipelineSteps.threatDetected.title}</div>
+                        <div className={`text-xs ${isDark ? 'text-white/35' : 'text-elastic-dev-blue/35'}`}>{pipelineSteps.threatDetected.subtitle}</div>
                       </div>
                     </div>
 
@@ -952,8 +1033,8 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                               : isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'
                       }`} />
                       <div className="flex-1">
-                        <div className={`text-sm font-semibold ${isDark ? 'text-white/70' : 'text-elastic-dark-ink/70'}`}>Analyst Approval</div>
-                        <div className={`text-xs ${isDark ? 'text-white/35' : 'text-elastic-dev-blue/35'}`}>SOC Analyst: J. Mitchell</div>
+                        <div className={`text-sm font-semibold ${isDark ? 'text-white/70' : 'text-elastic-dark-ink/70'}`}>{pipelineSteps.analystApproval.title}</div>
+                        <div className={`text-xs ${isDark ? 'text-white/35' : 'text-elastic-dev-blue/35'}`}>{pipelineSteps.analystApproval.subtitle}</div>
                       </div>
                       {approvedPhases.includes(workflowPhase) && <FontAwesomeIcon icon={faCircleCheck} className={`text-sm ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`} />}
                       {workflowPhase === 'denied' && <FontAwesomeIcon icon={faCircleXmark} className="text-elastic-pink text-sm" />}
@@ -980,10 +1061,10 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                       />
                       <div>
                         <div className={`text-sm font-semibold ${isDark ? 'text-white/70' : 'text-elastic-dark-ink/70'}`}>
-                          {workflowPhase === 'denied' ? 'Blocked' : ['done', 'notifying', 'complete'].includes(workflowPhase) ? 'Isolated' : 'Execute'}
+                          {workflowPhase === 'denied' ? pipelineSteps.execute.titleDenied : ['done', 'notifying', 'complete'].includes(workflowPhase) ? pipelineSteps.execute.titleDone : pipelineSteps.execute.titleIdle}
                         </div>
                         <div className={`text-xs ${isDark ? 'text-white/35' : 'text-elastic-dev-blue/35'}`}>
-                          {workflowPhase === 'denied' ? 'Analyst override' : ['done', 'notifying', 'complete'].includes(workflowPhase) ? 'WS-PC-0142 quarantined' : 'Response action'}
+                          {workflowPhase === 'denied' ? pipelineSteps.execute.subtitleDenied : ['done', 'notifying', 'complete'].includes(workflowPhase) ? pipelineSteps.execute.subtitleDone : pipelineSteps.execute.subtitleIdle}
                         </div>
                       </div>
                     </div>
@@ -993,10 +1074,10 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                   {workflowPhase === 'pending' && (
                     <div className="flex gap-2 flex-shrink-0">
                       <button onClick={approveWorkflow} className={`flex-1 py-2 rounded-lg text-sm font-semibold hover:scale-[1.02] active:scale-95 transition-all ${isDark ? 'bg-elastic-teal/20 text-elastic-teal hover:bg-elastic-teal/30' : 'bg-elastic-blue/20 text-elastic-blue hover:bg-elastic-blue/30'}`}>
-                        <FontAwesomeIcon icon={faCircleCheck} className="mr-1.5" />Approve
+                        <FontAwesomeIcon icon={faCircleCheck} className="mr-1.5" />{approveLabel}
                       </button>
                       <button onClick={denyWorkflow} className="flex-1 py-2 rounded-lg text-sm font-semibold bg-elastic-pink/20 text-elastic-pink hover:bg-elastic-pink/30 hover:scale-[1.02] active:scale-95 transition-all">
-                        <FontAwesomeIcon icon={faCircleXmark} className="mr-1.5" />Deny
+                        <FontAwesomeIcon icon={faCircleXmark} className="mr-1.5" />{denyLabel}
                       </button>
                     </div>
                   )}
@@ -1009,20 +1090,20 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                         <span className="w-3 h-3 rounded-full bg-yellow-500/60" />
                         <span className="w-3 h-3 rounded-full bg-green-500/60" />
                       </div>
-                      <span className="text-xs text-white/30 font-mono">elastic-response-workflow</span>
+                      <span className="text-xs text-white/30 font-mono">{terminalTitle}</span>
                     </div>
                     <div className="flex-1 p-4 overflow-y-auto font-mono text-sm leading-relaxed">
                       {terminalLines.length === 0 && workflowPhase === 'idle' && (
-                        <span className="text-white/20">Waiting for workflow trigger...</span>
+                        <span className="text-white/20">{terminalIdleHint}</span>
                       )}
                       {terminalLines.length === 0 && !['idle', 'executing', 'done', 'notifying', 'complete'].includes(workflowPhase) && workflowPhase !== 'denied' && (
-                        <span className="text-white/20">Awaiting approval to execute...</span>
+                        <span className="text-white/20">{terminalAwaitingHint}</span>
                       )}
                       {workflowPhase === 'denied' && (
                         <div>
-                          <span className="text-elastic-pink">$ workflow halted — analyst denied action</span>
+                          <span className="text-elastic-pink">{terminalDeniedLine1}</span>
                           <br />
-                          <span className="text-white/30">[INFO] Manual investigation required</span>
+                          <span className="text-white/30">{terminalDeniedLine2}</span>
                         </div>
                       )}
                       {terminalLines.map((line, i) => (
@@ -1051,14 +1132,14 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                       >
                         <div className="flex items-center gap-4">
                           <FontAwesomeIcon icon={faClock} className={`text-md ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`} />
-                          <span className={`text-md font-semibold ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>MTTR</span>
-                          <div className={`text-md font-medium ${isDark ? 'text-white/90' : 'text-elastic-dark-ink'}`}>Before</div>
-                          <div className="text-md font-bold text-elastic-pink">~4h</div>
+                          <span className={`text-md font-semibold ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>{mttr.label}</span>
+                          <div className={`text-md font-medium ${isDark ? 'text-white/90' : 'text-elastic-dark-ink'}`}>{mttr.beforeLabel}</div>
+                          <div className="text-md font-bold text-elastic-pink">{mttr.beforeValue}</div>
                           <div className={`text-md font-medium ${isDark ? 'text-white/70' : 'text-elastic-dark-ink/80'}`}>→</div>
-                          <div className={`text-md font-medium ${isDark ? 'text-white/90' : 'text-elastic-dark-ink'}`}>After</div>
-                          <div className={`text-md font-bold ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>14 min</div>
+                          <div className={`text-md font-medium ${isDark ? 'text-white/90' : 'text-elastic-dark-ink'}`}>{mttr.afterLabel}</div>
+                          <div className={`text-md font-bold ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>{mttr.afterValue}</div>
                           <div className={`px-2 py-1 rounded-full text-md font-bold ${isDark ? 'bg-elastic-teal/20 text-elastic-teal' : 'bg-elastic-blue/10 text-elastic-blue'}`}>
-                            ↓ 94% faster
+                            {mttr.improvement}
                           </div>
                         </div>
                       </div>
@@ -1069,7 +1150,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
 
                 {/* Right: Workflow Library */}
                 <div className={`w-[280px] flex-shrink-0 rounded-2xl border p-4 flex flex-col gap-2 overflow-y-auto ${isDark ? 'border-white/10 bg-white/[0.02]' : 'border-elastic-dev-blue/10 bg-white/40'}`}>
-                  <div className={`text-xs font-semibold uppercase tracking-wider mb-1 ${isDark ? 'text-white/55' : 'text-elastic-dev-blue/55'}`}>Workflow Library</div>
+                  <div className={`text-xs font-semibold uppercase tracking-wider mb-1 ${isDark ? 'text-white/55' : 'text-elastic-dev-blue/55'}`}>{workflowLibraryLabel}</div>
                   {availableWorkflows.map(wf => {
                     // Per-workflow phase sequencing:
                     // search-siem: executing on approved, done from executing onward
@@ -1113,8 +1194,8 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2">
                               <span className={`text-xs font-semibold truncate ${isActive ? (isDark ? 'text-white/90' : 'text-elastic-dark-ink') : isDark ? 'text-white/80' : 'text-elastic-dark-ink/80'}`}>{wf.name}</span>
-                              {isThisDone && <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${isDark ? 'text-elastic-teal bg-elastic-teal/10' : 'text-elastic-blue bg-elastic-blue/10'}`}>Done</span>}
-                              {isThisDenied && <span className="text-[10px] font-semibold text-elastic-pink bg-elastic-pink/10 px-1.5 py-0.5 rounded">Blocked</span>}
+                              {isThisDone && <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${isDark ? 'text-elastic-teal bg-elastic-teal/10' : 'text-elastic-blue bg-elastic-blue/10'}`}>{workflowDoneBadge}</span>}
+                              {isThisDenied && <span className="text-[10px] font-semibold text-elastic-pink bg-elastic-pink/10 px-1.5 py-0.5 rounded">{workflowBlockedBadge}</span>}
                             </div>
                             <div className={`text-[10px] leading-snug mt-0.5 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>{wf.description}</div>
                             <span className={`inline-block mt-1 text-[9px] font-semibold px-1.5 py-0.5 rounded ${badge.bg} ${badge.text}`}>{wf.type}</span>

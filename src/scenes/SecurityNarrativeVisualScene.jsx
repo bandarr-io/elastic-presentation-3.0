@@ -76,7 +76,7 @@ function SecurityNarrativeVisualScene({ metadata = {} }) {
   const [playKey, setPlayKey] = useState(0)
 
   const eyebrow = metadata.eyebrow || 'Elastic Security · Why Now'
-  const beats = metadata.beats || BEATS
+  const beats = (metadata.beats || BEATS).map((b, i) => ({ ...(BEATS[i] || {}), ...b }))
 
   const accent = (c) => (isDark ? c : COLORS.blue)
   const danger = COLORS.pink

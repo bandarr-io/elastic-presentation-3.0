@@ -2,6 +2,7 @@ import { animate, stagger } from 'animejs'
 import { useEffect, useRef } from 'react'
 import { useTheme } from '../context/ThemeContext'
 import SceneHeader from '../components/SceneHeader'
+import { resolveIcon } from '../data/iconOptions'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faUserTie, faRoute, faCheck, faBullseye, faGraduationCap,
@@ -62,9 +63,15 @@ function CustomerArchitectScene({ metadata = {} }) {
   const caJourney   = metadata.caJourney   || 'POC → Enterprise-wide'
   const caChampions = metadata.caChampions || 'Backed by your 35+ certified champions'
 
-  const pillars = (metadata.caPillars || DEFAULT_PILLARS).map((p, i) => ({ ...DEFAULT_PILLARS[i], ...p }))
+  const pillars = (metadata.caPillars || DEFAULT_PILLARS).map((p, i) => {
+    const merged = { ...DEFAULT_PILLARS[i], ...p }
+    return { ...merged, icon: resolveIcon(merged.icon, DEFAULT_PILLARS[i]?.icon) }
+  })
   const journey = metadata.caJourneyPhases || DEFAULT_JOURNEY
-  const support = metadata.supportLayers || DEFAULT_SUPPORT
+  const support = (metadata.supportLayers || DEFAULT_SUPPORT).map((item, i) => {
+    const merged = { ...(DEFAULT_SUPPORT[i] || {}), ...item }
+    return { ...merged, icon: resolveIcon(merged.icon, DEFAULT_SUPPORT[i]?.icon) }
+  })
 
   // Light theme is monochrome blue; dark theme keeps the accent palette.
   const accent = (darkColor) => (isDark ? darkColor : COLORS.blue)

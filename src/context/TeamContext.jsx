@@ -30,16 +30,16 @@ const DEFAULT_TEAM_CONFIG = {
     {
       id: 'member-3',
       name: 'Team Member',
-      role: 'Account Manager',
-      email: 'am@example.com',
+      role: 'Area VP',
+      email: 'avp@example.com',
       color: '#F04E98',
       initials: 'AM'
     },
     {
       id: 'member-4',
       name: 'Team Member',
-      role: 'SA Manager',
-      email: 'sam@example.com',
+      role: 'FE Manager',
+      email: 'fem@example.com',
       color: '#FEC514',
       initials: 'SM'
     },
