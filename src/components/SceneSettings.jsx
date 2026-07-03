@@ -10,7 +10,6 @@ import {
 import { DEFAULT_AGENDA_ITEMS } from '../data/agendaDefaults'
 import { DECK_PRESETS, DEFAULT_PRESET_ID, CUSTOM_PRESET_ID, presetConfig } from '../data/deckPresets'
 
-import CurrentArchitectureEditor from './sceneEditors/CurrentArchitectureEditor'
 import ElasticValueEditor from './sceneEditors/ElasticValueEditor'
 import ValueByTeamEditor from './sceneEditors/ValueByTeamEditor'
 import SecurityUseCasesEditor from './sceneEditors/SecurityUseCasesEditor'
@@ -19,6 +18,7 @@ import LogsDBEditor from './sceneEditors/LogsDBEditor'
 import CustomerArchitectEditor from './sceneEditors/CustomerArchitectEditor'
 import PlatformOperationsEditor from './sceneEditors/PlatformOperationsEditor'
 import PlatformValueEditor from './sceneEditors/PlatformValueEditor'
+import ProblemPatternsEditor from './sceneEditors/ProblemPatternsEditor'
 import SecurityNarrativeVisualEditor from './sceneEditors/SecurityNarrativeVisualEditor'
 import LicensingEditor from './sceneEditors/LicensingEditor'
 import DataTieringEditor from './sceneEditors/DataTieringEditor'
@@ -28,7 +28,6 @@ import IconSelect from './sceneEditors/IconSelect'
 // Scenes whose content editors live in ./sceneEditors as standalone modules.
 // Each receives ({ sceneMetadata, onUpdateSceneMetadata, isDark, inputClass, textareaClass }).
 const MODULAR_SCENE_EDITORS = {
-  'current-architecture': CurrentArchitectureEditor,
   'elastic-value': ElasticValueEditor,
   'value-by-team': ValueByTeamEditor,
   'security-use-cases': SecurityUseCasesEditor,
@@ -37,6 +36,7 @@ const MODULAR_SCENE_EDITORS = {
   'customer-architect': CustomerArchitectEditor,
   'platform-operations': PlatformOperationsEditor,
   'platform-value': PlatformValueEditor,
+  'problem-patterns': ProblemPatternsEditor,
   'security-narrative-visual': SecurityNarrativeVisualEditor,
   'licensing': LicensingEditor,
   'data-tiering': DataTieringEditor,
@@ -1534,7 +1534,6 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
           <option value="hero">Hero</option>
           <option value="about">About Elastic</option>
           <option value="business-value">Business Value</option>
-          <option value="current-architecture">Current Architecture</option>
           <option value="elastic-value">Metrics Dashboard</option>
           <option value="value-by-team">Card Grid</option>
           <option value="security-use-cases">Visual Gallery</option>
@@ -1567,6 +1566,23 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
           <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>
             Hero Content
           </h3>
+
+          <div>
+            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
+              Text Alignment
+            </label>
+            <select
+              value={sceneMetadata?.hero?.align || 'left'}
+              onChange={(e) => onUpdateSceneMetadata('hero', { ...sceneMetadata?.hero, align: e.target.value })}
+              className={inputClass}
+            >
+              <option value="left">Left</option>
+              <option value="center">Center</option>
+            </select>
+            <p className={`text-xs mt-1 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>
+              Alignment of the revealed banner (logo, title, subtitle)
+            </p>
+          </div>
 
           <div>
             <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>

@@ -22,7 +22,6 @@ import ESQLScene from './scenes/ESQLScene'
 import ServicesScene from './scenes/ServicesScene'
 import NextStepsScene from './scenes/NextStepsScene'
 import PanelScene from './scenes/PanelScene'
-import CurrentArchitectureScene from './scenes/CurrentArchitectureScene'
 import LogsDBScene from './scenes/LogsDBScene'
 import AIAssistantScene from './scenes/AIAssistantScene'
 import CustomerArchitectScene from './scenes/CustomerArchitectScene'
@@ -32,6 +31,23 @@ import ElasticValueScene from './scenes/ElasticValueScene'
 import PlatformOperationsScene from './scenes/PlatformOperationsScene'
 import PlatformValueScene from './scenes/PlatformValueScene'
 import ValueByTeamScene from './scenes/ValueByTeamScene'
+import AIScaleScene from './scenes/AIScaleScene'
+import HeritageScene from './scenes/HeritageScene'
+import ThreeLayersScene from './scenes/ThreeLayersScene'
+import PillarsScene from './scenes/PillarsScene'
+import SignalsScene from './scenes/SignalsScene'
+import NightshiftScene from './scenes/NightshiftScene'
+import StreamsScene from './scenes/StreamsScene'
+import OtelScene from './scenes/OtelScene'
+import KubernetesScene from './scenes/KubernetesScene'
+import AgenticScene from './scenes/AgenticScene'
+import DiscoveryScene from './scenes/DiscoveryScene'
+import SurfacesScene from './scenes/SurfacesScene'
+import NightshiftArchScene from './scenes/NightshiftArchScene'
+import CoreComponentsScene from './scenes/CoreComponentsScene'
+import NodeTypesScene from './scenes/NodeTypesScene'
+import ElasticOverviewScene from './scenes/ElasticOverviewScene'
+import EnterpriseDeploymentScene from './scenes/EnterpriseDeploymentScene'
 import { DEFAULT_AGENDA_ITEMS } from './data/agendaDefaults'
 import { resolveIcon } from './data/iconOptions'
 
@@ -53,6 +69,8 @@ const HeroScene = ({ metadata = {} }) => {
   const bannerTitle = metadata.bannerTitle || "The Elastic Search AI Platform:"
   const bannerHighlight = metadata.bannerHighlight || "Transforming Data into Action"
   const bannerSubtitle = metadata.bannerSubtitle || "Unleash the Power of Real-Time Insights, Scale, and Innovation"
+  // Banner text alignment — configurable in Scene Settings (defaults to left).
+  const align = metadata.align === 'center' ? 'center' : 'left'
   
   const fullText = typingText
 
@@ -149,13 +167,13 @@ const HeroScene = ({ metadata = {} }) => {
         </div>
       ) : (
         // Large Banner
-        <div className="text-center max-w-6xl">
+        <div className={`max-w-6xl ${align === 'center' ? 'text-center' : 'text-left w-full self-start'}`}>
           {/* Elastic Logo */}
           <div className="mb-12">
             <img 
               src={isDark ? '/Elastic-Logo-tagline-secondary-white.svg' : '/Elastic-Logo-tagline-secondary-black.png'}
               alt="Elastic - The Search AI Company" 
-              className={`h-16 mx-auto`}
+              className={`h-16 ${align === 'center' ? 'mx-auto' : ''}`}
             />
           </div>
           
@@ -450,90 +468,59 @@ const BusinessValueScene = ({ selectedCard, setSelectedCard, showUnifiedMessage,
   )
 }
 
-const ProblemPatternsScene = ({ metadata = {} }) => {
-  const { theme } = useTheme()
-  const isDark = theme === 'dark'
-  const [selectedFilter, setSelectedFilter] = useState('observability')
-
-  // Default problem titles
-  const defaultProblems = {
-    observability: [
+const PROBLEM_PATTERNS_DEFAULT_CATEGORIES = [
+  {
+    label: 'Observability',
+    icon: 'chart-line',
+    problems: [
       'Disconnected logs, metrics, traces',
       'MTTR stays high despite lots of data',
       'Tool sprawl and cost pressure',
-      'Weak correlation to customer impact'
+      'Weak correlation to customer impact',
     ],
-    security: [
+  },
+  {
+    label: 'Security',
+    icon: 'shield',
+    problems: [
       'Alert fatigue and signal-to-noise ratio',
       'Blind spots across cloud and on-prem',
       'Tool sprawl and cost pressure',
-      'Manual investigation slows response'
+      'Manual investigation slows response',
     ],
-    search: [
+  },
+  {
+    label: 'Search',
+    icon: 'magnifying-glass',
+    problems: [
       'Slow or irrelevant search results',
       'Limited semantic or vector search',
       'Tool sprawl and cost pressure',
-      'Difficulty scaling search infrastructure'
-    ]
-  }
+      'Difficulty scaling search infrastructure',
+    ],
+  },
+]
+
+const ProblemPatternsScene = ({ metadata = {} }) => {
+  const { theme } = useTheme()
+  const isDark = theme === 'dark'
 
   const eyebrow        = metadata.eyebrow        || 'Problem Orientation'
   const title          = metadata.title          || 'Common'
   const titleHighlight = metadata.titleHighlight || 'Problem Patterns'
   const subtitle       = metadata.subtitle       || "Elastic is broad, so rather than walk through everything, let's orient around the problems teams typically solve with it."
 
-  // Use custom problems from metadata or defaults
-  const customProblems = metadata.problems || {}
-  
-  const filters = [
-    { id: 'observability', label: 'Observability',     icon: faChartLine },
-    { id: 'security',      label: 'Security',          icon: faShield    },
-    { id: 'search',        label: 'Search',  icon: faSearch    },
-  ]
+  const categories =
+    Array.isArray(metadata.categories) && metadata.categories.length
+      ? metadata.categories
+      : PROBLEM_PATTERNS_DEFAULT_CATEGORIES
 
-  const currentFilter = filters.find(f => f.id === selectedFilter)
+  const [selected, setSelected] = useState(0)
+  const activeIndex = Math.min(selected, categories.length - 1)
+  const active = categories[activeIndex] || {}
   const accentHex = isDark ? '#48EFCF' : '#0B64DD'
 
-  // Build problems array - use custom titles from metadata or defaults
-  const problems = []
-  
-  // Observability problems
-  for (let i = 0; i < 4; i++) {
-    const customTitle = customProblems.observability?.[i]
-    const defaultTitle = defaultProblems.observability[i]
-    problems.push({
-      id: `obs-${i}`,
-      number: String(i + 1).padStart(2, '0'),
-      title: customTitle || defaultTitle,
-      categories: ['observability']
-    })
-  }
-  
-  // Security problems
-  for (let i = 0; i < 4; i++) {
-    const customTitle = customProblems.security?.[i]
-    const defaultTitle = defaultProblems.security[i]
-    problems.push({
-      id: `sec-${i}`,
-      number: String(i + 1).padStart(2, '0'),
-      title: customTitle || defaultTitle,
-      categories: ['security']
-    })
-  }
-  
-  // Search problems
-  for (let i = 0; i < 4; i++) {
-    const customTitle = customProblems.search?.[i]
-    const defaultTitle = defaultProblems.search[i]
-    problems.push({
-      id: `search-${i}`,
-      number: String(i + 1).padStart(2, '0'),
-      title: customTitle || defaultTitle,
-      categories: ['search']
-    })
-  }
-
-  const filteredProblems = problems.filter(p => p.categories.includes(selectedFilter))
+  const problems = (active.problems || []).filter((p) => (p ?? '').trim() !== '')
 
   return (
     <div className="flex flex-col h-full w-full py-4 overflow-hidden">
@@ -546,74 +533,75 @@ const ProblemPatternsScene = ({ metadata = {} }) => {
           subtitle={subtitle}
         />
 
-        <div className="flex-1 flex flex-col justify-center gap-12">
-        {/* Filter Buttons */}
-        <div className="flex items-center justify-center gap-4">
-          {filters.map((filter) => (
-            <button
-              key={filter.id}
-              onClick={() => setSelectedFilter(filter.id)}
-              className={`flex items-center gap-3 px-8 py-4 rounded-full text-lg font-semibold transition-all duration-300 ${
-                selectedFilter === filter.id
-                  ? `scale-105 ${isDark ? 'bg-elastic-teal text-elastic-dev-blue' : 'bg-elastic-blue text-white shadow-lg'}`
-                  : isDark
-                    ? 'bg-white/[0.05] text-white/70 hover:bg-white/[0.08] hover:text-white'
-                    : 'bg-white/50 text-elastic-ink hover:bg-white shadow'
-              }`}
-            >
-              <FontAwesomeIcon icon={filter.icon} />
-              <span>{filter.label}</span>
-            </button>
-          ))}
-        </div>
+        <div className="flex-1 flex flex-col justify-center gap-10">
+          {/* Segmented category selector */}
+          <div className="flex justify-center">
+            <div className={`inline-flex items-center gap-1 rounded-2xl border p-1 ${
+              isDark ? 'bg-white/[0.04] border-white/10' : 'bg-white/70 border-elastic-dev-blue/10'
+            }`}>
+              {categories.map((cat, i) => {
+                const isActive = i === activeIndex
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setSelected(i)}
+                    className={`rounded-xl px-6 py-2.5 flex items-center gap-2.5 text-base font-semibold transition-all duration-200 ${
+                      isActive
+                        ? 'shadow-sm'
+                        : isDark
+                          ? 'text-white/65 hover:text-white hover:bg-white/[0.05]'
+                          : 'text-elastic-dev-blue/70 hover:text-elastic-dev-blue hover:bg-elastic-dev-blue/[0.05]'
+                    }`}
+                    style={isActive ? { backgroundColor: accentHex, color: isDark ? '#0B1628' : '#fff' } : undefined}
+                  >
+                    <FontAwesomeIcon icon={resolveIcon(cat.icon, faChartLine)} />
+                    {cat.label}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
 
-        {/* Problem Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {filteredProblems.map((problem) => (
-            <div
-              key={problem.id}
-              className={`rounded-2xl p-8 pr-20 transition-all duration-300 border-2 relative ${
-                isDark
-                  ? 'bg-white/[0.03] border-white/10 hover:bg-white/[0.05]'
-                  : 'bg-white border-elastic-dev-blue/10 hover:shadow-lg'
-              }`}
-            >
-              <div className="flex items-start gap-6">
-                {/* Bullet Point */}
-                <div
-                  className="flex-shrink-0 w-3 h-3 rounded-full mt-2"
-                  style={{ backgroundColor: accentHex }}
-                />
-                
-                {/* Content */}
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <FontAwesomeIcon icon={currentFilter.icon} className={`text-sm ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`} />
-                    <span className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-white/70' : 'text-elastic-ink'}`}>
-                      {currentFilter.label}
+          {/* Problem cards — vertical cards side by side, capped height, centered */}
+          <div key={activeIndex} className="flex-1 min-h-0 max-h-[320px] flex gap-4">
+            {problems.map((problem, i) => (
+              <div
+                key={i}
+                className={`group relative overflow-hidden rounded-2xl border p-6 flex-1 min-w-0 flex flex-col gap-4 transition-all duration-300 hover:-translate-y-1 ${
+                  isDark
+                    ? 'bg-white/[0.03] border-white/10 hover:bg-white/[0.06]'
+                    : 'bg-white border-elastic-dev-blue/10 hover:shadow-lg'
+                }`}
+              >
+                {/* Accent top bar */}
+                <span className="absolute left-0 right-0 top-0 h-1.5" style={{ backgroundColor: accentHex }} />
+
+                {/* Top: index + category */}
+                <div className="flex flex-col gap-3 min-w-0">
+                  <span
+                    className="shrink-0 w-14 h-14 rounded-2xl flex items-center justify-center font-mono font-bold text-2xl"
+                    style={{ backgroundColor: isDark ? 'rgba(72,239,207,0.12)' : 'rgba(11,100,221,0.1)', color: accentHex }}
+                  >
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <FontAwesomeIcon icon={resolveIcon(active.icon, faChartLine)} className="text-sm" style={{ color: accentHex }} />
+                    <span className={`text-xs font-semibold uppercase tracking-wider ${isDark ? 'text-white/60' : 'text-elastic-ink/70'}`}>
+                      {active.label}
                     </span>
                   </div>
-                  <h3 className={`text-2xl font-bold ${
-                    isDark ? 'text-white' : 'text-elastic-dark-ink'
-                  }`}>
-                    {problem.title}
+                </div>
+
+                {/* Middle: problem title */}
+                <div className="flex-1 flex items-center min-w-0">
+                  <h3 className={`text-2xl md:text-3xl font-bold leading-snug ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>
+                    {problem}
                   </h3>
                 </div>
               </div>
-
-              {/* Number Badge - Circular */}
-              <div 
-                className="absolute top-4 right-4 w-12 h-12 rounded-full flex items-center justify-center text-sm font-mono font-semibold"
-                style={{
-                  backgroundColor: isDark ? 'rgba(72, 239, 207, 0.12)' : 'rgba(11, 100, 221, 0.1)',
-                  color: accentHex
-                }}
-              >
-                {problem.number}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -797,13 +785,6 @@ function AppContent() {
       title: 'Desired Outcomes',
       duration: '4 min',
       description: 'Key areas where Elastic delivers value'
-    },
-    {
-      id: 'current-architecture',
-      component: CurrentArchitectureScene,
-      title: 'Current Architecture',
-      duration: '5 min',
-      description: 'Where Elastic already sits in the environment today'
     },
     {
       id: 'elastic-value',
@@ -991,6 +972,147 @@ function AppContent() {
       description: 'Closing hero \u2014 the value of the Elastic platform as a whole',
       defaultDisabled: true
     },
+    // ── Observability story — "from datastore to autonomous SRE" (rebuilt from
+    //    the company-preso source deck). Toggle on in Scene Settings or use the
+    //    Observability deck preset. ─────────────────────────────────────────
+    {
+      id: 'obs-ai-scale',
+      component: AIScaleScene,
+      title: 'The AI-Scale Challenge',
+      duration: '3 min',
+      description: 'AI multiplies every observability problem — dev \u00d7100, staging \u00d710, prod ?\u00d7',
+      defaultDisabled: true
+    },
+    {
+      id: 'obs-heritage',
+      component: HeritageScene,
+      title: 'Track Record',
+      duration: '3 min',
+      description: 'From the ELK Stack to the Agentic Era — a proven track record of innovation',
+      defaultDisabled: true
+    },
+    {
+      id: 'obs-three-layers',
+      component: ThreeLayersScene,
+      title: 'Three Layers',
+      duration: '3 min',
+      description: 'Elasticsearch \u2192 AI Index \u2192 Nightshift: Data \u2192 AI Index \u2192 Agent \u2192 Action',
+      defaultDisabled: true
+    },
+    {
+      id: 'obs-pillars',
+      component: PillarsScene,
+      title: 'Three Pillars',
+      duration: '3 min',
+      description: 'Streams, Signals, and Nightshift define the Observability roadmap',
+      defaultDisabled: true
+    },
+    {
+      id: 'obs-signals',
+      component: SignalsScene,
+      title: 'Signals & Efficiency',
+      duration: '4 min',
+      description: 'Five signals on one platform, plus best-in-class datastore efficiency benchmarks',
+      defaultDisabled: true
+    },
+    {
+      id: 'nightshift-sre',
+      component: NightshiftScene,
+      title: 'Nightshift: AI SRE',
+      duration: '4 min',
+      description: 'The autonomous AI SRE — detect, investigate, remediate, audit. The end of on-call.',
+      defaultDisabled: true
+    },
+    {
+      id: 'obs-streams',
+      component: StreamsScene,
+      title: 'Streams',
+      duration: '3 min',
+      description: 'Five-stage telemetry pipeline — from raw data to agent-ready significant events',
+      defaultDisabled: true
+    },
+    {
+      id: 'obs-otel',
+      component: OtelScene,
+      title: 'OpenTelemetry',
+      duration: '3 min',
+      description: 'EDOT — the #1 OTel contributor — collects everything, from everywhere',
+      defaultDisabled: true
+    },
+    {
+      id: 'obs-kubernetes',
+      component: KubernetesScene,
+      title: 'Kubernetes',
+      duration: '3 min',
+      description: 'OOTB Kubernetes dashboards plus autonomous root-cause analysis',
+      defaultDisabled: true
+    },
+    {
+      id: 'obs-agentic',
+      component: AgenticScene,
+      title: 'Agentic Observability',
+      duration: '3 min',
+      description: 'Four-quadrant strategy: infer, discover, remediate, and meet teams anywhere',
+      defaultDisabled: true
+    },
+    {
+      id: 'obs-discovery',
+      component: DiscoveryScene,
+      title: 'Knowledge & Discovery',
+      duration: '4 min',
+      description: 'Knowledge Indicators \u2192 Significant Events \u2192 the agent\u2019s live system model',
+      defaultDisabled: true
+    },
+    {
+      id: 'obs-surfaces',
+      component: SurfacesScene,
+      title: 'Meet Where They Are',
+      duration: '3 min',
+      description: 'One Skills layer across every surface — plus plain-English investigation via MCP',
+      defaultDisabled: true
+    },
+    {
+      id: 'nightshift-arch',
+      component: NightshiftArchScene,
+      title: 'Inside Nightshift',
+      duration: '4 min',
+      description: 'Architecture, the Elastic Brain, and the token-efficiency funnel that makes it viable',
+      defaultDisabled: true
+    },
+    // ── Reference architecture — platform/deployment diagrams for technical
+    //    deep-dives. Toggle on in Scene Settings. ────────────────────────────
+    {
+      id: 'core-components',
+      component: CoreComponentsScene,
+      title: 'Core Components',
+      duration: '3 min',
+      description: 'The Elastic stack, layer by layer — from data collection to solutions',
+      defaultDisabled: true
+    },
+    {
+      id: 'node-types',
+      component: NodeTypesScene,
+      title: 'Node Types',
+      duration: '3 min',
+      description: 'Elasticsearch node roles — master, data, ingest, coordinating, and ML',
+      defaultDisabled: true
+    },
+    {
+      id: 'elastic-overview',
+      component: ElasticOverviewScene,
+      title: 'Elastic Overview',
+      duration: '3 min',
+      description: 'The visualization, data, and ETL planes — with an optional management plane',
+      defaultDisabled: true
+    },
+    {
+      id: 'enterprise-deployment',
+      component: EnterpriseDeploymentScene,
+      title: 'Enterprise Deployment',
+      duration: '4 min',
+      description: 'Full reference architecture — sources, ingest, tiered cluster, consumers, and monitoring',
+      defaultDisabled: true
+    },
   ]
 
   const {
@@ -1046,6 +1168,8 @@ function AppContent() {
   const SCHEMA_STAGE_COUNT = 2
   const ESQL_STAGE_COUNT = 6
   const [esqlStage, setEsqlStage] = useState(0)
+  const ELASTIC_OVERVIEW_STAGE_COUNT = 4
+  const [elasticOverviewStage, setElasticOverviewStage] = useState(0)
   const [servicesStage, setServicesStage] = useState(0)
   const [demoPhase, setDemoPhase] = useState('idle')
 
@@ -1103,8 +1227,6 @@ function AppContent() {
     }
   } else if (currentSceneId === 'problem-patterns') {
     sceneProps = { metadata: sceneMetadata?.['problem-patterns'] || {} }
-  } else if (currentSceneId === 'current-architecture') {
-    sceneProps = { metadata: sceneMetadata?.['current-architecture'] || {} }
   } else if (currentSceneId === 'logsdb') {
     sceneProps = { metadata: sceneMetadata?.logsdb || {} }
   } else if (currentSceneId === 'ai-assistant') {
@@ -1201,6 +1323,44 @@ function AppContent() {
     sceneProps = {
       metadata: sceneMetadata?.panel || {},
     }
+  } else if (currentSceneId === 'obs-ai-scale') {
+    sceneProps = { metadata: sceneMetadata?.['obs-ai-scale'] || {} }
+  } else if (currentSceneId === 'obs-heritage') {
+    sceneProps = { metadata: sceneMetadata?.['obs-heritage'] || {} }
+  } else if (currentSceneId === 'obs-three-layers') {
+    sceneProps = { metadata: sceneMetadata?.['obs-three-layers'] || {} }
+  } else if (currentSceneId === 'obs-pillars') {
+    sceneProps = { metadata: sceneMetadata?.['obs-pillars'] || {} }
+  } else if (currentSceneId === 'obs-signals') {
+    sceneProps = { metadata: sceneMetadata?.['obs-signals'] || {} }
+  } else if (currentSceneId === 'nightshift-sre') {
+    sceneProps = { metadata: sceneMetadata?.['nightshift-sre'] || {} }
+  } else if (currentSceneId === 'obs-streams') {
+    sceneProps = { metadata: sceneMetadata?.['obs-streams'] || {} }
+  } else if (currentSceneId === 'obs-otel') {
+    sceneProps = { metadata: sceneMetadata?.['obs-otel'] || {} }
+  } else if (currentSceneId === 'obs-kubernetes') {
+    sceneProps = { metadata: sceneMetadata?.['obs-kubernetes'] || {} }
+  } else if (currentSceneId === 'obs-agentic') {
+    sceneProps = { metadata: sceneMetadata?.['obs-agentic'] || {} }
+  } else if (currentSceneId === 'obs-discovery') {
+    sceneProps = { metadata: sceneMetadata?.['obs-discovery'] || {} }
+  } else if (currentSceneId === 'obs-surfaces') {
+    sceneProps = { metadata: sceneMetadata?.['obs-surfaces'] || {} }
+  } else if (currentSceneId === 'nightshift-arch') {
+    sceneProps = { metadata: sceneMetadata?.['nightshift-arch'] || {} }
+  } else if (currentSceneId === 'core-components') {
+    sceneProps = { metadata: sceneMetadata?.['core-components'] || {} }
+  } else if (currentSceneId === 'node-types') {
+    sceneProps = { metadata: sceneMetadata?.['node-types'] || {} }
+  } else if (currentSceneId === 'elastic-overview') {
+    sceneProps = {
+      metadata: sceneMetadata?.['elastic-overview'] || {},
+      externalStage: elasticOverviewStage,
+      onStageChange: setElasticOverviewStage,
+    }
+  } else if (currentSceneId === 'enterprise-deployment') {
+    sceneProps = { metadata: sceneMetadata?.['enterprise-deployment'] || {} }
   }
 
   const handleNext = () => {
@@ -1208,12 +1368,14 @@ function AppContent() {
     setSchemaStage(0)
     setEsqlStage(0)
     setServicesStage(0)
+    setElasticOverviewStage(0)
     navigateToScene(currentScene + 1)
   }
 
   const handlePrev = () => {
     setSecurityStage(0)
     setSchemaStage(0)
+    setElasticOverviewStage(0)
     navigateToScene(currentScene - 1)
   }
 
@@ -1265,6 +1427,9 @@ function AppContent() {
     if (currentSceneId !== 'schema') {
       setSchemaPlaySignal(0)
       setSchemaStage(0)
+    }
+    if (currentSceneId !== 'elastic-overview') {
+      setElasticOverviewStage(0)
     }
   }, [currentSceneId])
 
@@ -1514,6 +1679,36 @@ function AppContent() {
                 <button
                   onClick={() => setEsqlStage(s => Math.min(ESQL_STAGE_COUNT - 1, s + 1))}
                   disabled={esqlStage === ESQL_STAGE_COUNT - 1}
+                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed ${
+                    theme === 'dark'
+                      ? 'bg-elastic-teal/20 hover:bg-elastic-teal/30 text-elastic-teal'
+                      : 'bg-elastic-blue/10 hover:bg-elastic-blue/20 text-elastic-blue'
+                  }`}
+                  title="Next stage"
+                >
+                  <FontAwesomeIcon icon={faChevronRight} className="text-sm" />
+                </button>
+              </>
+            )}
+
+            {/* Stage Back/Forward - only visible on Elastic Overview scene */}
+            {currentSceneId === 'elastic-overview' && (
+              <>
+                <button
+                  onClick={() => setElasticOverviewStage(s => Math.max(0, s - 1))}
+                  disabled={elasticOverviewStage === 0}
+                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed ${
+                    theme === 'dark'
+                      ? 'bg-elastic-teal/20 hover:bg-elastic-teal/30 text-elastic-teal'
+                      : 'bg-elastic-blue/10 hover:bg-elastic-blue/20 text-elastic-blue'
+                  }`}
+                  title="Previous stage"
+                >
+                  <FontAwesomeIcon icon={faChevronLeft} className="text-sm" />
+                </button>
+                <button
+                  onClick={() => setElasticOverviewStage(s => Math.min(ELASTIC_OVERVIEW_STAGE_COUNT - 1, s + 1))}
+                  disabled={elasticOverviewStage === ELASTIC_OVERVIEW_STAGE_COUNT - 1}
                   className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 disabled:opacity-30 disabled:cursor-not-allowed ${
                     theme === 'dark'
                       ? 'bg-elastic-teal/20 hover:bg-elastic-teal/30 text-elastic-teal'

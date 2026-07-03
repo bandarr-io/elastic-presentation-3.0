@@ -132,17 +132,17 @@ function AIAssistantScene({ metadata = {} }) {
                   className={`reveal flex-1 rounded-2xl p-4 ${cardBase} ${isRoadmap ? 'border border-dashed' : 'border-2'}`}
                   style={{ borderTopColor: color, borderTopWidth: isRoadmap ? undefined : '4px', borderColor: isRoadmap ? `${color}80` : undefined }}
                 >
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}22`, color }}>
+                  <div className="flex items-center gap-2.5 mb-2.5">
+                    <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-lg" style={{ backgroundColor: `${color}22`, color }}>
                       <FontAwesomeIcon icon={s.icon} />
                     </span>
-                    <div className={`font-bold leading-tight ${headText}`}>{s.name}</div>
+                    <div className={`font-bold text-lg leading-tight ${headText}`}>{s.name}</div>
                   </div>
-                  <p className={`text-xs leading-snug mb-3 ${mutedText}`}>{s.desc}</p>
-                  <ul className="space-y-1.5 mb-3">
+                  <p className={`text-sm leading-snug mb-3 ${mutedText}`}>{s.desc}</p>
+                  <ul className="space-y-2 mb-3">
                     {s.items.map((it) => (
-                      <li key={it} className={`flex items-start gap-2 text-xs ${isDark ? 'text-elastic-light-grey/85' : 'text-elastic-ink'}`}>
-                        <FontAwesomeIcon icon={faCircleCheck} className="mt-0.5 shrink-0" style={{ color, fontSize: 11 }} />
+                      <li key={it} className={`flex items-start gap-2 text-sm ${isDark ? 'text-elastic-light-grey/85' : 'text-elastic-ink'}`}>
+                        <FontAwesomeIcon icon={faCircleCheck} className="mt-1 shrink-0" style={{ color, fontSize: 13 }} />
                         <span>{it}</span>
                       </li>
                     ))}

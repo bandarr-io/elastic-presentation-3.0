@@ -1,6 +1,40 @@
+import { DEFAULT_SECTIONS, DEFAULT_HERO } from '../../scenes/currentArchitecture/defaults'
+
+const LAYOUT_OPTIONS = [
+  { id: 'story', label: 'Story' },
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'layered', label: 'Layered' },
+  { id: 'hybrid', label: 'Hybrid' },
+]
+
+const SECTION_OPTIONS = [
+  { id: 'infrastructure', label: 'Infrastructure' },
+  { id: 'appStack', label: 'App Stack' },
+  { id: 'incumbents', label: 'Incumbent Tools' },
+  { id: 'program', label: 'Program Metrics' },
+]
+
 export default function CurrentArchitectureEditor({ sceneMetadata, onUpdateSceneMetadata, isDark, inputClass, textareaClass }) {
   const meta = sceneMetadata?.['current-architecture'] || {}
   const update = (patch) => onUpdateSceneMetadata('current-architecture', { ...meta, ...patch })
+
+  const layout = meta.layout || 'dashboard'
+  const sections = { ...DEFAULT_SECTIONS, ...(meta.sections || {}) }
+  const toggleSection = (key) => update({ sections: { ...sections, [key]: !sections[key] } })
+
+  const hero = { ...DEFAULT_HERO, ...(meta.hero || {}) }
+  const updateHero = (patch) => update({ hero: { ...hero, ...patch } })
+
+  const router = meta.router || {}
+  const routerEnabled = router.enabled !== undefined ? router.enabled : sections.router
+  const routerLabel = router.label || 'Cribl'
+  const updateRouter = (patch) => update({ router: { ...router, ...patch } })
+
+  const toggleBtn = (active) => `flex-1 py-2 rounded-lg border text-xs font-semibold transition-colors ${
+    active
+      ? isDark ? 'border-elastic-teal/60 bg-elastic-teal/10 text-white' : 'border-elastic-blue/50 bg-elastic-blue/10 text-elastic-dark-ink'
+      : isDark ? 'border-white/10 text-white/50 hover:text-white/70' : 'border-elastic-dev-blue/10 text-elastic-dev-blue/50 hover:text-elastic-dev-blue/70'
+  }`
 
   const cardClass = `p-3 rounded-lg border ${isDark ? 'border-white/10 bg-white/[0.02]' : 'border-elastic-dev-blue/10 bg-elastic-dev-blue/[0.02]'}`
   const addBtnClass = `w-full py-2 rounded-lg border border-dashed text-xs font-semibold ${
@@ -67,6 +101,61 @@ export default function CurrentArchitectureEditor({ sceneMetadata, onUpdateScene
 
   return (
     <div className="space-y-6 mt-6">
+      <div>
+        <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>Layout &amp; Sections</h3>
+        <div className="space-y-3 mt-3">
+          <div>
+            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Layout</label>
+            <div className="flex gap-2">
+              {LAYOUT_OPTIONS.map((opt) => (
+                <button key={opt.id} type="button" className={toggleBtn(layout === opt.id)} onClick={() => update({ layout: opt.id })}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Visible Sections</label>
+            <div className="grid grid-cols-2 gap-2">
+              {SECTION_OPTIONS.map((opt) => (
+                <button key={opt.id} type="button" className={toggleBtn(sections[opt.id])} onClick={() => toggleSection(opt.id)}>
+                  {sections[opt.id] ? '✓ ' : ''}{opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>Elastic Hero Zone</h3>
+        <div className="space-y-3 mt-3">
+          <div>
+            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Title</label>
+            <input type="text" value={hero.title} onChange={(e) => updateHero({ title: e.target.value })} className={inputClass} placeholder={DEFAULT_HERO.title} />
+          </div>
+          <div>
+            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Badge</label>
+            <input type="text" value={hero.badge} onChange={(e) => updateHero({ badge: e.target.value })} className={inputClass} placeholder={DEFAULT_HERO.badge} />
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between">
+          <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>Ingest / Router</h3>
+          <button type="button" className={toggleBtn(routerEnabled).replace('flex-1 ', '') + ' px-3'} onClick={() => updateRouter({ enabled: !routerEnabled })}>
+            {routerEnabled ? 'Enabled' : 'Disabled'}
+          </button>
+        </div>
+        {routerEnabled && (
+          <div className="mt-3">
+            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Router Name</label>
+            <input type="text" value={routerLabel} onChange={(e) => updateRouter({ label: e.target.value })} className={inputClass} placeholder="Cribl" />
+          </div>
+        )}
+      </div>
+
       <div>
         <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>Header</h3>
         <div className="space-y-3 mt-3">
@@ -217,7 +306,7 @@ export default function CurrentArchitectureEditor({ sceneMetadata, onUpdateScene
             </div>
           </div>
           <div>
-            <label className={`text-xs mb-2 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Cribl Stages</label>
+            <label className={`text-xs mb-2 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Router / Ingest Stages</label>
             <div className="space-y-2">
               {criblStages.map((item, i) => (
                 <div key={i} className={cardClass}>
