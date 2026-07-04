@@ -59,8 +59,8 @@ function PlatformValueScene({ metadata = {} }) {
               >
                 <FontAwesomeIcon icon={v.icon} />
               </span>
-              <h3 className={`font-bold text-lg leading-tight ${headText}`}>{v.title}</h3>
-              <p className={`text-sm leading-snug ${mutedText}`}>{v.desc}</p>
+              <h3 className={`font-bold text-xl leading-tight ${headText}`}>{v.title}</h3>
+              <p className={`text-base leading-snug ${mutedText}`}>{v.desc}</p>
             </div>
           ))}
         </div>

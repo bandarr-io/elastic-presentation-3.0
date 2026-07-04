@@ -28,7 +28,7 @@ const VIEW = { x: 20, y: 100, w: 1734, h: 792 }
 // Category → semantic role for the flow. Colors resolve per-theme below.
 const GROUPS = [
   { id: 'gp-sources', x: 36, y: 120, w: 208, h: 492, label: 'Data Sources' },
-  { id: 'gp-monitor', x: 1140, y: 728, w: 560, h: 150, label: 'Monitoring Cluster', monitor: true },
+  { id: 'gp-monitor', x: 1140, y: 713, w: 560, h: 172, label: 'Monitoring Cluster', monitor: true },
 ]
 
 const NODES = [
@@ -88,7 +88,7 @@ const NODES = [
   { id: 'storage', x: 845, y: 755, w: 200, h: 88, t: 'ops', ghost: true, title: 'Remote Storage',
     sub: 'S3 · Blob · MinIO · …',
     desc: 'Snapshot repository for backups and searchable snapshots backing the frozen tier.' },
-  { id: 'monitor', x: 1140, y: 728, w: 560, h: 150, t: 'ops', custom: 'monitor',
+  { id: 'monitor', x: 1140, y: 713, w: 560, h: 172, t: 'ops', custom: 'monitor',
     title: 'Monitoring Cluster', group: 'gp-monitor',
     desc: 'Separate cluster that receives logs and metrics from production, so observability survives production incidents.' },
 ]
@@ -137,6 +137,51 @@ const EDGES = [
   { s: 'monitor', e: 'users', sS: 't', sT: 0.9293, eS: 'b', eT: 0.70, c: 'ops', dash: true, lbl: 'ops visibility' },
 ]
 
+/* Air-gapped-only support services (enabled via metadata.airGapped). These
+   self-hosted mirrors replace the public Elastic endpoints an internet-connected
+   stack would otherwise reach — epr.elastic.co, artifacts.elastic.co,
+   maps.elastic.co, and the GeoIP update service. They are appended to the base
+   GROUPS / NODES / EDGES only when the flag is set, so the default reference
+   architecture stays unchanged. */
+/* Split into two groups placed next to the components they serve:
+   - "Fleet & Agent registries" (EPR + EAR) tucked under Fleet Server.
+   - "Search enrichment" (EMS + GeoIP) inserted between Kibana and Cloud. */
+const AIRGAP_GROUPS = [
+  { id: 'gp-airgap-fleet', x: 36, y: 724, w: 470, h: 104, label: 'Air-Gapped: Fleet & Agents' },
+  { id: 'gp-airgap-serve', x: 1280, y: 250, w: 290, h: 148, label: 'Air-Gapped: Search Enrichment' },
+]
+
+const AIRGAP_NODES = [
+  { id: 'epr', x: 56, y: 748, w: 200, h: 58, t: 'ops', title: 'Package Registry',
+    sub: 'EPR · self-hosted', group: 'gp-airgap-fleet',
+    desc: 'Self-hosted Elastic Package Registry replacing epr.elastic.co. Kibana pulls integration packages, agent policies, and prebuilt rules from it.' },
+  { id: 'ear', x: 286, y: 748, w: 200, h: 58, t: 'ops', title: 'Artifact Registry',
+    sub: 'EAR · self-hosted', group: 'gp-airgap-fleet',
+    desc: 'Self-hosted Elastic Artifact Registry replacing artifacts.elastic.co. Agents download binaries for self-upgrades; also serves Elastic Defend endpoint artifacts.' },
+  { id: 'ems', x: 1300, y: 278, w: 250, h: 52, t: 'ops', title: 'Maps Service',
+    sub: 'EMS · self-hosted', group: 'gp-airgap-serve',
+    desc: 'Locally hosted Elastic Maps Service supplying basemap tiles and geospatial boundaries to Kibana map visualizations.' },
+  { id: 'geoip', x: 1300, y: 338, w: 250, h: 52, t: 'ops', title: 'GeoIP DBs',
+    sub: 'Local mirror', group: 'gp-airgap-serve',
+    desc: 'Locally mirrored GeoIP databases for the ingest geoip processor and Logstash geoip filter, replacing the live update service.' },
+]
+
+/* EAR climbs to Fleet (directly above). EPR routes up the far-left margin (left
+   of Data Sources) and across the top to Kibana. EMS → Kibana; GeoIP → ES on a
+   straight horizontal line. */
+const AIRGAP_EDGES = [
+  { s: 'epr', e: 'kibana', sS: 'l', eS: 't', eT: 0.5, c: 'ops', dash: true, lbl: 'packages',
+    route: [{ x: 28, y: 777 }, { x: 28, y: 104 }, { x: 1405, y: 104 }] },
+  { s: 'ear', e: 'fleet', sS: 't', eS: 'b', eT: 0.427, c: 'ops', dash: true, lbl: 'agent binaries' },
+  { s: 'ems', e: 'kibana', sS: 't', eS: 'b', eT: 0.58, c: 'ops', dash: true, lbl: 'map tiles' },
+  { s: 'geoip', e: 'es', sS: 'l', eS: 'r', eT: 0.53, c: 'ops', dash: true, lbl: 'geoip DB' },
+]
+
+// The serve group sits between Kibana and Cloud, so Cloud Hosting and the
+// Third-Party panel shift down to open the gap (kept above the Monitoring
+// Cluster at y:728). Keyed by id → y.
+const AIRGAP_SHIFT_Y = { storage: 690, cloud: 410, thirdparty: 540 }
+
 // Elasticsearch data tiers — Elastic brand palette (matches deck convention).
 const TIERS = [
   { label: 'Hot', color: '#F04E98' },
@@ -147,7 +192,7 @@ const TIERS = [
 
 /* ---------------- pure geometry ---------------- */
 
-const byId = Object.fromEntries(NODES.map((n) => [n.id, n]))
+const makeById = (nodes) => Object.fromEntries(nodes.map((n) => [n.id, n]))
 
 function anchor(n, side, t = 0.5) {
   const { x, y, w, h } = n
@@ -160,7 +205,7 @@ function anchor(n, side, t = 0.5) {
   }
 }
 
-function polyline(ed) {
+function polyline(ed, byId) {
   const A = anchor(byId[ed.s], ed.sS, ed.sT)
   const B = anchor(byId[ed.e], ed.eS, ed.eT)
   if (ed.route) return [A, ...ed.route, B]
@@ -232,6 +277,7 @@ function categoryColors(isDark) {
 function EnterpriseDeploymentScene({ metadata = {} }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
+  const airGapped = !!metadata.airGapped
   const rootRef = useRef(null)
   const [hover, setHover] = useState(null)
   const frameRef = useRef(null)
@@ -242,22 +288,40 @@ function EnterpriseDeploymentScene({ metadata = {} }) {
   const titleAccent = metadata.titleAccent || 'components'
   const subtitle =
     metadata.subtitle ||
-    'Informational only. Not all components may be necessary — work with your account team to right-size. All product names, logos, and brands are property of their respective owners.'
+    (airGapped
+      ? 'Air-gapped reference: the stack is unchanged, but the services that normally reach the public internet — package & artifact registries, maps, and GeoIP — are hosted locally. Informational only; work with your account team to right-size.'
+      : 'Informational only. Not all components may be necessary — work with your account team to right-size. All product names, logos, and brands are property of their respective owners.')
 
   const COLORS = useMemo(() => categoryColors(isDark), [isDark])
   const accent = isDark ? '#48EFCF' : '#0B64DD'
 
-  const edges = useMemo(
-    () =>
-      EDGES.map((ed, i) => {
-        const pl = polyline(ed)
-        const mid = midpoint(pl)
-        return { ...ed, i, d: roundedPath(pl), mid, len: mid.total }
-      }),
-    []
-  )
+  const groups = useMemo(() => (airGapped ? [...GROUPS, ...AIRGAP_GROUPS] : GROUPS), [airGapped])
+  const nodes = useMemo(() => {
+    if (!airGapped) return NODES
+    const shifted = NODES.map((n) =>
+      AIRGAP_SHIFT_Y[n.id] != null ? { ...n, y: AIRGAP_SHIFT_Y[n.id] } : n
+    )
+    return [...shifted, ...AIRGAP_NODES]
+  }, [airGapped])
+  const byId = useMemo(() => makeById(nodes), [nodes])
 
-  // Fit the fixed 1760×1120 stage into the available frame (width & height).
+  const edges = useMemo(() => {
+    let list = EDGES
+    if (airGapped) {
+      // Cloud Hosting shifted down, so re-anchor ES→Cloud to a straight line.
+      list = EDGES.map((ed) =>
+        ed.s === 'es' && ed.e === 'cloud' ? { ...ed, sT: 0.759 } : ed
+      )
+      list = [...list, ...AIRGAP_EDGES]
+    }
+    return list.map((ed, i) => {
+      const pl = polyline(ed, byId)
+      const mid = midpoint(pl)
+      return { ...ed, i, d: roundedPath(pl), mid, len: mid.total }
+    })
+  }, [airGapped, byId])
+
+  // Fit the fixed stage into the available frame (width & height).
   useEffect(() => {
     const el = frameRef.current
     if (!el) return
@@ -296,13 +360,6 @@ function EnterpriseDeploymentScene({ metadata = {} }) {
   const ins = hover ? edges.filter((x) => x.e === hover).length : 0
   const outs = hover ? edges.filter((x) => x.s === hover).length : 0
 
-  const legend = [
-    ['collect', 'Collect'],
-    ['process', 'Transform'],
-    ['store', 'Index & store'],
-    ['serve', 'Serve & act'],
-  ]
-
   return (
     <div className="h-full w-full flex flex-col px-2 pt-1 pb-1 overflow-hidden">
       <div ref={rootRef} className="max-w-[1600px] mx-auto w-full flex-1 flex flex-col min-h-0">
@@ -310,7 +367,7 @@ function EnterpriseDeploymentScene({ metadata = {} }) {
           <SceneHeader eyebrow={eyebrow} titlePlain={titlePlain} titleAccent={titleAccent} subtitle={subtitle} />
         </div>
 
-        <div className={'ea-root' + (hover ? ' ea-tracing' : '')} style={eaVars(isDark, COLORS, accent)}>
+        <div className={'ea-root' + (hover ? ' ea-tracing' : '') + (airGapped ? ' ea-airgap' : '')} style={eaVars(isDark, COLORS, accent)}>
           <style>{CSS}</style>
 
           <div className="ea-main reveal">
@@ -351,7 +408,7 @@ function EnterpriseDeploymentScene({ metadata = {} }) {
               </svg>
 
               {/* group panels */}
-              {GROUPS.map((g) => (
+              {groups.map((g) => (
                 <div key={g.id}
                   className={'ea-gpanel' + (g.monitor ? ' ea-monitor' : '') + (connected && [...connected].some((id) => byId[id] && byId[id].group === g.id) ? ' on' : '')}
                   style={{ left: g.x, top: g.y, width: g.w, height: g.h }}
@@ -362,7 +419,7 @@ function EnterpriseDeploymentScene({ metadata = {} }) {
               ))}
 
               {/* nodes */}
-              {NODES.map((n) => (
+              {nodes.map((n) => (
                 <div key={n.id}
                   className={
                     `ea-node ea-t-${n.t}` +
@@ -403,12 +460,6 @@ function EnterpriseDeploymentScene({ metadata = {} }) {
           </div>
 
           <div className="ea-overlay reveal">
-            <div className="ea-legend">
-              {legend.map(([k, l]) => (
-                <span key={k}><i style={{ background: COLORS[k] }} />{l}</span>
-              ))}
-              <span><i className="ea-dashed" />Operations</span>
-            </div>
             <div className="ea-infobar">
               <span className="ea-k">Trace</span>
               {hoverNode ? (
@@ -495,22 +546,15 @@ const CSS = `
   --ea-mono:'Space Mono',monospace;
 }
 .ea-main{ flex:1; min-height:0; display:flex; }
-.ea-overlay{ position:absolute; left:6px; bottom:6px; width:550px; max-width:64%;
-  display:flex; flex-direction:column; gap:8px; z-index:10; pointer-events:none; }
+.ea-overlay{ position:absolute; left:6px; right:6px; bottom:6px;
+  display:flex; flex-direction:row; align-items:center; gap:10px; z-index:10; pointer-events:none; }
 .ea-infobar{ border:1px solid var(--ea-line); border-radius:10px;
   background:color-mix(in srgb, var(--ea-bg) 82%, transparent); backdrop-filter:blur(6px);
   padding:9px 12px; font-size:12px; line-height:1.5; color:var(--ea-muted);
-  display:flex; flex-direction:column; align-items:flex-start; gap:5px; }
+  flex:none; width:50%; min-width:0; display:flex; flex-direction:row; align-items:center; gap:8px; }
 .ea-infobar b{ color:var(--ea-ink); font-family:var(--ea-display); font-weight:700; }
 .ea-k{ font-family:var(--ea-mono); font-size:10.5px; color:var(--ea-accent); letter-spacing:.08em; text-transform:uppercase; }
-.ea-io{ display:block; margin-top:3px; font-family:var(--ea-mono); font-size:10.5px; color:var(--ea-faint); }
-.ea-legend{ border:1px solid var(--ea-line); border-radius:10px;
-  background:color-mix(in srgb, var(--ea-bg) 82%, transparent); backdrop-filter:blur(6px); padding:9px 12px;
-  display:flex; flex-wrap:wrap; gap:7px 14px; font-family:var(--ea-mono); font-size:10.5px;
-  color:var(--ea-muted); }
-.ea-legend span{ display:inline-flex; align-items:center; gap:7px; }
-.ea-legend i{ width:22px; height:3px; border-radius:2px; display:inline-block; }
-.ea-legend .ea-dashed{ background:repeating-linear-gradient(90deg,var(--ea-ops) 0 5px,transparent 5px 9px); }
+.ea-io{ display:inline; margin-left:6px; font-family:var(--ea-mono); font-size:10.5px; color:var(--ea-faint); white-space:nowrap; }
 .ea-frame{ flex:1; min-width:0; min-height:0; overflow:hidden; display:flex; align-items:center; justify-content:center; }
 .ea-stage{ position:relative; transform-origin:center center; flex:none; overflow:hidden; }
 .ea-plane{ position:absolute; top:0; left:0; }
@@ -542,6 +586,7 @@ const CSS = `
 .ea-node:hover{ border-color:var(--ea-tag,var(--ea-ops)); transform:translateY(-1px); }
 .ea-t-collect{ --ea-tag:var(--ea-collect); } .ea-t-process{ --ea-tag:var(--ea-process); }
 .ea-t-store{ --ea-tag:var(--ea-store); }  .ea-t-serve{ --ea-tag:var(--ea-serve); } .ea-t-ops{ --ea-tag:var(--ea-ops); }
+.ea-t-ops:not(.ea-bare){ display:flex; flex-direction:column; justify-content:center; }
 .ea-ghost{ background:transparent; border-style:dotted; box-shadow:none; }
 .ea-bare{ background:transparent !important; border:none !important; box-shadow:none !important; padding:0 !important; }
 .ea-bare::before{ display:none; }

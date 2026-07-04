@@ -21,8 +21,10 @@ import PlatformValueEditor from './sceneEditors/PlatformValueEditor'
 import ProblemPatternsEditor from './sceneEditors/ProblemPatternsEditor'
 import SecurityNarrativeVisualEditor from './sceneEditors/SecurityNarrativeVisualEditor'
 import LicensingEditor from './sceneEditors/LicensingEditor'
+import PricingRomEditor from './sceneEditors/PricingRomEditor'
 import DataTieringEditor from './sceneEditors/DataTieringEditor'
 import SecurityEditor from './sceneEditors/SecurityEditor'
+import EnterpriseDeploymentEditor from './sceneEditors/EnterpriseDeploymentEditor'
 import IconSelect from './sceneEditors/IconSelect'
 
 // Scenes whose content editors live in ./sceneEditors as standalone modules.
@@ -39,8 +41,10 @@ const MODULAR_SCENE_EDITORS = {
   'problem-patterns': ProblemPatternsEditor,
   'security-narrative-visual': SecurityNarrativeVisualEditor,
   'licensing': LicensingEditor,
+  'pricing-rom': PricingRomEditor,
   'data-tiering': DataTieringEditor,
   'security': SecurityEditor,
+  'enterprise-deployment': EnterpriseDeploymentEditor,
 }
 
 const STORAGE_KEY = 'presentation-scene-config'
@@ -48,7 +52,7 @@ const STORAGE_KEY = 'presentation-scene-config'
 // Bump whenever the canonical default scene order / enabled set changes. On a
 // version mismatch we adopt the new order + enabled defaults while preserving
 // the user's own durations and scene metadata.
-const ORDER_VERSION = 6
+const ORDER_VERSION = 7
 
 function buildDefaultConfig(initialScenes) {
   const allIds = initialScenes.map(s => s.id)
@@ -1542,6 +1546,7 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
           <option value="security-narrative-visual">Security: Why Now</option>
           <option value="security">Security</option>
           <option value="licensing">Licensing</option>
+          <option value="pricing-rom">Pricing / ROM</option>
           <option value="customer-architect">Customer Architect</option>
           <option value="services">Services</option>
           <option value="next-steps">Next Steps</option>
@@ -1558,6 +1563,7 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
           <option value="esql">ES|QL</option>
           <option value="platform-operations">Deployment Models</option>
           <option value="platform-value">Platform Value</option>
+          <option value="enterprise-deployment">Enterprise Deployment</option>
         </select>
       </div>
 

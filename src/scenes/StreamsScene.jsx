@@ -60,7 +60,7 @@ function StreamsScene({ metadata = {} }) {
 
   const Column = ({ title, color, children }) => (
     <div className="reveal flex flex-col min-h-0">
-      <div className="text-xs font-bold uppercase tracking-wider mb-2 text-center" style={{ color }}>{title}</div>
+      <div className="text-sm font-bold uppercase tracking-wider mb-2 text-center" style={{ color }}>{title}</div>
       <div className={`flex-1 rounded-2xl border p-3 flex flex-col gap-2 min-h-0 ${cardBase}`}>{children}</div>
     </div>
   )
@@ -74,7 +74,7 @@ function StreamsScene({ metadata = {} }) {
           </div>
 
           {beat === 0 ? (
-            <div className="flex-1 min-h-0 flex items-stretch gap-2">
+            <div className="my-auto flex items-stretch gap-2">
               {stages.map((s, i) => (
                 <div key={i} className="flex items-stretch gap-2 flex-1 min-w-0">
                   <div className={`reveal relative rounded-2xl border flex flex-col p-4 flex-1 min-w-0 ${cardBase}`} style={{ borderTopWidth: '4px', borderTopColor: sky }}>
@@ -82,13 +82,13 @@ function StreamsScene({ metadata = {} }) {
                       <span className="w-9 h-9 rounded-lg flex items-center justify-center text-base shrink-0" style={{ backgroundColor: `${sky}1f`, color: sky }}>
                         <FontAwesomeIcon icon={s.icon} />
                       </span>
-                      <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: sky }}>{s.num} · {s.label}</span>
+                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: sky }}>{s.num} · {s.label}</span>
                     </div>
-                    <h3 className={`font-bold text-sm leading-tight mb-1 ${headText}`}>{s.name}</h3>
-                    <p className={`text-xs leading-snug mb-2 ${mutedText}`}>{s.desc}</p>
+                    <h3 className={`font-bold text-base leading-tight mb-1 ${headText}`}>{s.name}</h3>
+                    <p className={`text-sm leading-snug mb-2 ${mutedText}`}>{s.desc}</p>
                     <div className="flex flex-wrap gap-1 mt-auto">
                       {s.tags.map((t, j) => (
-                        <span key={j} className={`text-[10px] font-medium rounded px-1.5 py-0.5 ${monoPill}`} style={{ fontFamily: t.startsWith('/') ? 'Space Mono, monospace' : undefined }}>{t}</span>
+                        <span key={j} className={`text-xs font-medium rounded px-1.5 py-0.5 ${monoPill}`} style={{ fontFamily: t.startsWith('/') ? 'Space Mono, monospace' : undefined }}>{t}</span>
                       ))}
                     </div>
                   </div>
@@ -105,29 +105,29 @@ function StreamsScene({ metadata = {} }) {
             <div className="w-full grid grid-cols-2 md:grid-cols-4 gap-3">
               <Column title="Top-Level Streams" color={sky}>
                 {STREAM_PATHS.map((p, i) => (
-                  <span key={i} className={`text-sm font-medium rounded-lg px-3 py-2 text-center ${monoPill}`} style={{ fontFamily: 'Space Mono, monospace' }}>{p}</span>
+                  <span key={i} className={`text-base font-medium rounded-lg px-3 py-2 text-center ${monoPill}`} style={{ fontFamily: 'Space Mono, monospace' }}>{p}</span>
                 ))}
-                <p className={`text-xs leading-snug mt-1 ${mutedText}`}>Central input destinations for every signal.</p>
+                <p className={`text-sm leading-snug mt-1 ${mutedText}`}>Central input destinations for every signal.</p>
               </Column>
               <Column title="Sub Streams" color={sky}>
                 {SUB_PATHS.map((p, i) => (
-                  <span key={i} className={`text-[11px] rounded-lg px-2.5 py-1.5 ${monoPill}`} style={{ fontFamily: 'Space Mono, monospace' }}>{p}</span>
+                  <span key={i} className={`text-xs rounded-lg px-2.5 py-1.5 ${monoPill}`} style={{ fontFamily: 'Space Mono, monospace' }}>{p}</span>
                 ))}
-                <p className={`text-xs leading-snug mt-1 ${mutedText}`}>Schema · lifecycle · access per path.</p>
+                <p className={`text-sm leading-snug mt-1 ${mutedText}`}>Schema · lifecycle · access per path.</p>
               </Column>
               <Column title="KIs & Entities" color={accent}>
                 <div className="flex flex-wrap gap-1.5">
                   {ENTITIES.map((e, i) => (
-                    <span key={i} className="text-[11px] font-semibold rounded-full px-2 py-0.5" style={{ backgroundColor: `${accent}1c`, color: accent }}>{e}</span>
+                    <span key={i} className="text-xs font-semibold rounded-full px-2 py-0.5" style={{ backgroundColor: `${accent}1c`, color: accent }}>{e}</span>
                   ))}
                 </div>
-                <p className={`text-xs leading-snug mt-auto ${mutedText}`}>Topology & dependencies auto-mapped in real time.</p>
+                <p className={`text-sm leading-snug mt-auto ${mutedText}`}>Topology & dependencies auto-mapped in real time.</p>
               </Column>
               <Column title="Significant Events" color={accent}>
                 {EVENTS.map((e, i) => (
-                  <div key={i} className={`text-xs font-medium leading-snug rounded-lg px-2.5 py-1.5 ${headText}`} style={{ backgroundColor: `${accent}14` }}>{e}</div>
+                  <div key={i} className={`text-sm font-medium leading-snug rounded-lg px-2.5 py-1.5 ${headText}`} style={{ backgroundColor: `${accent}14` }}>{e}</div>
                 ))}
-                <div className="flex items-center gap-2 mt-auto text-xs font-bold" style={{ color: accent }}>
+                <div className="flex items-center gap-2 mt-auto text-sm font-bold" style={{ color: accent }}>
                   <FontAwesomeIcon icon={faRobot} /> Agent-ready
                 </div>
               </Column>

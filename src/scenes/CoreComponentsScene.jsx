@@ -102,7 +102,10 @@ function CoreComponentsScene({ metadata = {} }) {
         </div>
 
         <div className="flex-1 min-h-0 flex flex-col gap-2.5">
-          {layers.map((layer) => (
+          {layers.map((layer) => {
+            // Light theme leans on Elastic blue; dark keeps the per-layer accent.
+            const c = isDark ? layer.color : '#0B64DD'
+            return (
             <div
               key={layer.id}
               className="reveal grid gap-4 items-stretch flex-1 min-h-0"
@@ -114,7 +117,7 @@ function CoreComponentsScene({ metadata = {} }) {
                   <div
                     key={i}
                     className="rounded-xl border flex items-center justify-center text-center px-3 py-2"
-                    style={{ borderColor: `${layer.color}66`, background: `${layer.color}1c` }}
+                    style={{ borderColor: `${c}66`, background: `${c}1c` }}
                   >
                     <span
                       className={`font-bold leading-tight ${layer.boxes.length === 1 ? 'text-xl md:text-2xl' : 'text-xs md:text-sm'} ${headText}`}
@@ -128,23 +131,24 @@ function CoreComponentsScene({ metadata = {} }) {
               {/* Description */}
               <div
                 className="rounded-xl border flex items-center gap-3 px-4 py-2.5"
-                style={{ borderColor: `${layer.color}44`, background: cardBg }}
+                style={{ borderColor: `${c}44`, background: cardBg }}
               >
                 <span
                   className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-base"
-                  style={{ backgroundColor: `${layer.color}22`, color: layer.color }}
+                  style={{ backgroundColor: `${c}22`, color: c }}
                 >
                   <FontAwesomeIcon icon={layer.icon} />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-sm font-bold leading-tight" style={{ color: layer.color }}>
+                  <p className="text-sm font-bold leading-tight" style={{ color: c }}>
                     {layer.title}
                   </p>
                   <p className={`text-xs md:text-sm leading-snug ${mutedText}`}>{layer.description}</p>
                 </div>
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       </div>
     </div>

@@ -16,6 +16,7 @@ import SchemaScene from './scenes/SchemaScene'
 import AccessControlSceneDev from './scenes/AccessControlSceneDev'
 import DataMeshScene from './scenes/DataMeshScene'
 import LicensingScene from './scenes/LicensingScene'
+import PricingRomScene from './scenes/PricingRomScene'
 import DataTieringScene from './scenes/DataTieringScene'
 import ConsolidationScene from './scenes/ConsolidationScene'
 import ESQLScene from './scenes/ESQLScene'
@@ -48,6 +49,7 @@ import CoreComponentsScene from './scenes/CoreComponentsScene'
 import NodeTypesScene from './scenes/NodeTypesScene'
 import ElasticOverviewScene from './scenes/ElasticOverviewScene'
 import EnterpriseDeploymentScene from './scenes/EnterpriseDeploymentScene'
+import WhiteboardScene from './scenes/WhiteboardScene'
 import { DEFAULT_AGENDA_ITEMS } from './data/agendaDefaults'
 import { resolveIcon } from './data/iconOptions'
 
@@ -846,6 +848,13 @@ function AppContent() {
       description: 'Subscription tiers and what comes with each'
     },
     {
+      id: 'pricing-rom',
+      component: PricingRomScene,
+      title: 'Pricing / ROM',
+      duration: '4 min',
+      description: 'Customizable rough-order-of-magnitude quote \u2014 line items, quantities, and discounts with live-computed totals'
+    },
+    {
       id: 'customer-architect',
       component: CustomerArchitectScene,
       title: 'Customer Architect',
@@ -1113,6 +1122,14 @@ function AppContent() {
       description: 'Full reference architecture — sources, ingest, tiered cluster, consumers, and monitoring',
       defaultDisabled: true
     },
+    {
+      id: 'whiteboard',
+      component: WhiteboardScene,
+      title: 'Architecture Whiteboard',
+      duration: '5 min',
+      description: 'Interactive drag-and-drop canvas for whiteboarding Elastic architectures live — palette of typed components, connections, zones, and JSON/SVG/PNG export',
+      defaultDisabled: true
+    },
   ]
 
   const {
@@ -1269,6 +1286,8 @@ function AppContent() {
     }
   } else if (currentSceneId === 'licensing') {
     sceneProps = { metadata: sceneMetadata?.licensing || {} }
+  } else if (currentSceneId === 'pricing-rom') {
+    sceneProps = { metadata: sceneMetadata?.['pricing-rom'] || {} }
   } else if (currentSceneId === 'elastic-value') {
     sceneProps = { metadata: sceneMetadata?.['elastic-value'] || {} }
   } else if (currentSceneId === 'platform-operations') {
@@ -1508,6 +1527,65 @@ function AppContent() {
                 <FontAwesomeIcon icon={faLayerGroup} className="text-base" />
               </button>
             )}
+
+            {/* Air-gapped toggle - only visible on Enterprise Deployment scene */}
+            {currentSceneId === 'enterprise-deployment' && (() => {
+              const airGapped = !!sceneMetadata?.['enterprise-deployment']?.airGapped
+              return (
+                <button
+                  onClick={() => updateSceneMetadata('enterprise-deployment', { airGapped: !airGapped })}
+                  className={`h-10 px-4 rounded-full flex items-center gap-2 text-sm font-semibold transition-all hover:scale-105 ${
+                    airGapped
+                      ? theme === 'dark'
+                        ? 'bg-elastic-teal/25 text-elastic-teal border border-elastic-teal/40'
+                        : 'bg-elastic-blue/15 text-elastic-blue border border-elastic-blue/30'
+                      : theme === 'dark'
+                        ? 'bg-white/10 text-white/60 border border-white/15 hover:text-white/80'
+                        : 'bg-white text-elastic-dev-blue/60 border border-elastic-dev-blue/15 hover:text-elastic-dev-blue'
+                  }`}
+                  title="Toggle air-gapped support services"
+                  aria-pressed={airGapped}
+                >
+                  <FontAwesomeIcon icon={faShield} className="text-sm" />
+                  Air-gapped {airGapped ? 'On' : 'Off'}
+                </button>
+              )
+            })()}
+
+            {/* Data-path legend - only visible on Enterprise Deployment scene */}
+            {currentSceneId === 'enterprise-deployment' && (() => {
+              const c = theme === 'dark'
+                ? { collect: '#4C8DFF', process: '#FEC514', store: '#48EFCF', serve: '#F04E98', ops: '#8A9BB4' }
+                : { collect: '#0B64DD', process: '#B7791F', store: '#0E8C7F', serve: '#F04E98', ops: '#64748B' }
+              const items = [
+                ['Collect', c.collect, false],
+                ['Transform', c.process, false],
+                ['Index & store', c.store, false],
+                ['Serve & act', c.serve, false],
+                ['Operations', c.ops, true],
+              ]
+              return (
+                <div
+                  className={`h-10 px-4 rounded-full flex items-center gap-3.5 text-xs font-medium ${
+                    theme === 'dark'
+                      ? 'bg-white/10 text-white/70 border border-white/15'
+                      : 'bg-white text-elastic-dev-blue/70 border border-elastic-dev-blue/10'
+                  }`}
+                >
+                  {items.map(([label, col, dashed]) => (
+                    <span key={label} className="flex items-center gap-1.5 whitespace-nowrap">
+                      <i
+                        className="inline-block w-4 h-[3px] rounded-sm"
+                        style={dashed
+                          ? { backgroundImage: `repeating-linear-gradient(90deg, ${col} 0 4px, transparent 4px 8px)` }
+                          : { background: col }}
+                      />
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              )
+            })()}
 
             {/* Reveal button - only visible on Data Explosion scene */}
             {currentSceneId === 'data-explosion' && (

@@ -55,14 +55,14 @@ function OtelScene({ metadata = {} }) {
         <div className="reveal flex justify-center mb-4 shrink-0">
           <div className="inline-flex items-center gap-3 rounded-2xl border px-5 py-2.5" style={{ borderColor: `${gold}66`, backgroundColor: `${gold}14` }}>
             <FontAwesomeIcon icon={faTrophy} style={{ color: gold }} />
-            <span className={`text-sm md:text-base font-bold ${headText}`}>
+            <span className={`text-base md:text-lg font-bold ${headText}`}>
               <span style={{ color: gold }}>#1 OpenTelemetry contributor</span> — we build the standard we support.
             </span>
           </div>
         </div>
 
         {/* Architecture flow */}
-        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[1.4fr_auto_0.9fr_auto_0.8fr] gap-3 items-stretch">
+        <div className="my-auto grid grid-cols-1 lg:grid-cols-[1.4fr_auto_0.9fr_auto_0.8fr] gap-3 items-stretch">
           {/* Sources + paths */}
           <div className="flex flex-col gap-3 min-h-0">
             {sources.map((s, i) => (
@@ -71,8 +71,8 @@ function OtelScene({ metadata = {} }) {
                   <FontAwesomeIcon icon={s.icon} />
                 </span>
                 <div className="min-w-0">
-                  <div className={`font-bold text-sm leading-tight ${headText}`}>{s.name} <span className={`font-normal text-xs ${mutedText}`}>· {s.sub}</span></div>
-                  <p className={`text-xs leading-snug mt-0.5 ${mutedText}`}>{s.path}</p>
+                  <div className={`font-bold text-base leading-tight ${headText}`}>{s.name} <span className={`font-normal text-sm ${mutedText}`}>· {s.sub}</span></div>
+                  <p className={`text-sm leading-snug mt-0.5 ${mutedText}`}>{s.path}</p>
                 </div>
               </div>
             ))}
@@ -85,14 +85,14 @@ function OtelScene({ metadata = {} }) {
           {/* OTLP endpoint */}
           <div className="reveal rounded-2xl border flex flex-col items-center justify-center text-center p-4 min-h-0"
             style={{ borderColor: `${accent}66`, background: `linear-gradient(160deg, ${accent}1f, ${accent}08)` }}>
-            <div className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: accent }}>OTLP Endpoint</div>
-            <div className={`text-sm font-semibold mb-3 ${headText}`}>Single entry for all OTel signals</div>
+            <div className="text-base font-bold uppercase tracking-wider mb-2" style={{ color: accent }}>OTLP Endpoint</div>
+            <div className={`text-lg font-semibold mb-3 ${headText}`}>Single entry for all OTel signals</div>
             <div className="flex flex-wrap gap-1.5 justify-center">
               {SIGNALS.map((s, i) => (
-                <span key={i} className="text-xs font-semibold rounded-full px-2.5 py-1" style={{ backgroundColor: `${accent}22`, color: accent }}>{s}</span>
+                <span key={i} className="text-base font-semibold rounded-full px-3 py-1" style={{ backgroundColor: `${accent}22`, color: accent }}>{s}</span>
               ))}
             </div>
-            <div className={`text-[11px] leading-snug mt-3 ${mutedText}`}>Managed Ingest — Elastic scales the pipeline for you, no infra to manage.</div>
+            <div className={`text-sm leading-snug mt-3 ${mutedText}`}>Managed Ingest — Elastic scales the pipeline for you, no infra to manage.</div>
           </div>
 
           <div className="reveal hidden lg:flex items-center justify-center">
@@ -104,12 +104,12 @@ function OtelScene({ metadata = {} }) {
             <span className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl mb-3" style={{ backgroundColor: `${accent}1f`, color: accent }}>
               <FontAwesomeIcon icon={faDatabase} />
             </span>
-            <div className={`font-bold text-base leading-tight ${headText}`}>Elastic Observability</div>
-            <div className={`text-xs leading-snug mt-1 ${mutedText}`}>Stored, correlated, and agent-ready.</div>
+            <div className={`font-bold text-xl leading-tight ${headText}`}>Elastic Observability</div>
+            <div className={`text-base leading-snug mt-1 ${mutedText}`}>Stored, correlated, and agent-ready.</div>
           </div>
         </div>
 
-        <div className="reveal text-center text-xs font-semibold uppercase tracking-wider mt-3 shrink-0" style={{ color: `${accent}cc` }}>
+        <div className="reveal text-center text-sm font-semibold uppercase tracking-wider mt-3 shrink-0" style={{ color: `${accent}cc` }}>
           Customer environment&nbsp;&nbsp;→&nbsp;&nbsp;Elastic Cloud
         </div>
       </div>

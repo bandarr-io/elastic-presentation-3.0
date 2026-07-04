@@ -4,6 +4,19 @@
 
 export const DECK_PRESETS = [
   {
+    id: 'no-scenes',
+    label: 'No Scenes',
+    description: 'A blank slate — only the Hero scene. Build a flow from scratch.',
+    sceneIds: ['hero'],
+  },
+  {
+    id: 'all-scenes',
+    label: 'All Scenes',
+    description: 'Everything enabled, in registration order — the full library.',
+    allScenes: true,
+    sceneIds: [],
+  },
+  {
     id: 'new-prospect',
     label: 'New Prospect',
     description: 'Net-new pitch — market context first, no existing-footprint assumptions.',
@@ -21,6 +34,7 @@ export const DECK_PRESETS = [
       'security-narrative-visual',
       'security',
       'licensing',
+      'pricing-rom',
       'customer-architect',
       'services',
       'platform-value',
@@ -28,24 +42,24 @@ export const DECK_PRESETS = [
     ],
   },
   {
-    id: 'expansion',
-    label: 'Expansion',
-    description: 'Existing customer — anchors on current Elastic footprint and growth.',
+    id: 'technical',
+    label: 'Technical Deep-Dive',
+    description: 'Architecture & platform internals for architects and platform teams — from planes to a full reference deployment.',
     sceneIds: [
       'hero',
       'agenda',
       'team',
-      'about',
-      'problem-patterns',
-      'business-value',
-      'unified-strategy',
-      'consolidation',
-      'ai-assistant',
-      'security-narrative-visual',
-      'security',
-      'licensing',
-      'customer-architect',
-      'services',
+      'elastic-overview',
+      'core-components',
+      'node-types',
+      'data-tiering',
+      'schema',
+      'access-control',
+      'cross-cluster',
+      'data-mesh',
+      'esql',
+      'platform-operations',
+      'enterprise-deployment',
       'platform-value',
       'next-steps',
     ],
@@ -74,6 +88,31 @@ export const DECK_PRESETS = [
       'next-steps',
     ],
   },
+  {
+    id: 'security',
+    label: 'Security',
+    description: 'The Security story — modern threat landscape to AI-driven SecOps, tool consolidation, and governance.',
+    sceneIds: [
+      'hero',
+      'agenda',
+      'team',
+      'about',
+      'business-value',
+      'unified-strategy',
+      'security-narrative-visual',
+      'security',
+      'security-use-cases',
+      'ai-assistant',
+      'consolidation',
+      'access-control',
+      'licensing',
+      'pricing-rom',
+      'customer-architect',
+      'services',
+      'platform-value',
+      'next-steps',
+    ],
+  },
 ]
 
 export const DEFAULT_PRESET_ID = 'new-prospect'
@@ -89,6 +128,11 @@ export function getPreset(presetId) {
 export function presetConfig(presetId, allSceneIds) {
   const preset = getPreset(presetId)
   if (!preset) return null
+  // "All scenes" enables every registered scene in its natural order — no
+  // explicit list, so newly added scenes are always included.
+  if (preset.allScenes) {
+    return { order: [...allSceneIds], enabledIds: [...allSceneIds] }
+  }
   const enabledIds = preset.sceneIds.filter((id) => allSceneIds.includes(id))
   const remaining = allSceneIds.filter((id) => !enabledIds.includes(id))
   return { order: [...enabledIds, ...remaining], enabledIds }

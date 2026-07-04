@@ -67,7 +67,7 @@ function KubernetesScene({ metadata = {} }) {
           <SceneHeader eyebrow={eyebrow} titlePlain={titlePlain} titleAccent={titleAccent} subtitle={subtitle} />
         </div>
 
-        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[0.85fr_1.15fr_1fr] gap-4">
+        <div className="my-auto grid grid-cols-1 lg:grid-cols-[0.85fr_1.15fr_1fr] gap-4">
           {/* Context */}
           <div className={`reveal rounded-2xl border flex flex-col p-6 min-h-0 ${cardBase}`}>
             <span className="w-12 h-12 rounded-xl flex items-center justify-center text-xl mb-4" style={{ backgroundColor: `${accent}1f`, color: accent }}>

@@ -14,8 +14,8 @@ import {
   faBolt,
   faSliders,
   faMagnifyingGlassChart,
-  faLayerGroup,
   faServer,
+  faTableCells,
 } from '@fortawesome/free-solid-svg-icons'
 
 // ============================================================================
@@ -143,6 +143,10 @@ const DEFAULT_SUBTITLES = {
     accent: 'Index. Search. Store.',
     plain: " — One platform, every stage of your data's life.",
   },
+  matrix: {
+    accent: 'Right performance, right cost.',
+    plain: ' — Match each use case and capability to the tier that fits.',
+  },
   traditional: {
     accent: 'Restores required. Data invisible until rehydrated.',
     plain: ' Resulting in hours to days of waiting.',
@@ -190,6 +194,147 @@ const DEFAULT_NAV = {
   traditional: 'Traditional',
   elastic: 'Elastic ILM',
   simplified: 'Index / Search / Store',
+  matrix: 'Data Tiering Matrix',
+}
+
+// ---------------------------------------------------------------------------
+// Data Tiering Matrix — final sub-scene (Use Case → Capability → Data Tier →
+// Time in Days, aligned across the four tiers).
+// ---------------------------------------------------------------------------
+const MATRIX_PINK = '#F04E98'
+const MATRIX_YELLOW = '#FEC514'
+const MATRIX_TEAL = '#48EFCF'
+const MATRIX_BLUE = '#0B64DD'
+
+const MATRIX_USE_CASES = [
+  { label: 'Search', color: MATRIX_YELLOW },
+  { label: 'Security', color: MATRIX_PINK },
+  { label: 'Observability', color: MATRIX_BLUE },
+]
+
+const MATRIX_CAPABILITIES = [
+  { label: 'Ingest', color: MATRIX_PINK, grow: 1 },
+  { label: 'Search', color: MATRIX_YELLOW, grow: 3 },
+  { label: 'Store', color: MATRIX_BLUE, grow: 1 },
+]
+
+const MATRIX_TIERS = [
+  {
+    id: 'hot', name: 'Hot Tier', color: MATRIX_PINK, time: '1–7 Days Typical *',
+    lines: [
+      'Millisecond to seconds response times.',
+      'Most frequently accessed data.',
+      'Ideal for data ingest & FAST search use-cases.',
+    ],
+  },
+  {
+    id: 'warm', name: 'Warm Tier', color: MATRIX_YELLOW, time: '0–23 Days as Needed *',
+    lines: [
+      'Seconds to tens of seconds response times.',
+      'Less frequently accessed data.',
+      'Data rarely needs to be updated.',
+      'Ideal for holding more time-series data.',
+    ],
+  },
+  {
+    id: 'cold', name: 'Cold Tier', color: MATRIX_TEAL, time: '6–90 Days as Needed *',
+    lines: [
+      'Seconds to tens of seconds response times.',
+      'Less frequently accessed data.',
+      'Data not to be updated.',
+      'Ideal for holding 2x more data than hot tier.',
+    ],
+  },
+  {
+    id: 'frozen', name: 'Frozen Tier', color: MATRIX_BLUE, time: '0–24 Months as Needed *',
+    lines: [
+      'Tens of seconds to minutes response times.',
+      'Least frequently accessed data.',
+      'Data not to be updated.',
+      'Ideal for storing 20x more data than hot tier.',
+      'Data remains searchable.',
+    ],
+  },
+]
+
+const MATRIX_DIAMOND = 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)'
+
+function TieringMatrix({ isDark, useCases, capabilities, tiers, footnote }) {
+  const headText = isDark ? 'text-white' : 'text-elastic-dark-ink'
+  const mutedText = isDark ? 'text-white/60' : 'text-elastic-dark-ink/60'
+  const labelBg = isDark ? 'bg-white/[0.05] border-white/10' : 'bg-white/80 border-elastic-dev-blue/10'
+
+  // Light theme uses a single brand-blue accent; dark theme keeps per-item hues.
+  const accent = (color) => (isDark ? color : MATRIX_BLUE)
+
+  const fill = (color, strong = false) => {
+    const c = accent(color)
+    return {
+      background: isDark ? `${c}${strong ? '2e' : '20'}` : `${c}${strong ? '22' : '16'}`,
+      border: `2px solid ${isDark ? `${c}aa` : `${c}bb`}`,
+    }
+  }
+
+  const RowLabel = ({ icon, text }) => (
+    <div className={`rounded-xl border flex flex-col items-center justify-center gap-1 px-2 py-1.5 ${labelBg}`}>
+      {icon && <FontAwesomeIcon icon={icon} className={`text-base ${mutedText}`} />}
+      <span className={`text-sm md:text-base font-bold text-center leading-tight ${headText}`}>{text}</span>
+    </div>
+  )
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col justify-center mx-4">
+      <div
+        className="grid gap-3"
+        style={{ gridTemplateColumns: '128px repeat(4, minmax(0, 1fr))', gridAutoRows: 'min-content' }}
+      >
+        {/* Use Case */}
+        <RowLabel text="Use Case" />
+        <div className="flex items-center justify-center gap-3" style={{ gridColumn: '2 / 6' }}>
+          {useCases.map((u) => (
+            <div key={u.label} className="flex-1 h-[60px]" style={{ ...fill(u.color, true), clipPath: MATRIX_DIAMOND }}>
+              <div className="w-full h-full flex items-center justify-center">
+                <span className="text-sm md:text-base font-bold" style={{ color: accent(u.color) }}>{u.label}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Capability */}
+        <RowLabel text="Capability" />
+        <div className="flex items-center gap-3" style={{ gridColumn: '2 / 6' }}>
+          {capabilities.map((c) => (
+            <div key={c.label} className="h-[50px] rounded-xl flex items-center justify-center" style={{ ...fill(c.color), flex: `${c.grow || 1} 1 0%` }}>
+              <span className="text-sm md:text-base font-bold" style={{ color: accent(c.color) }}>{c.label}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Data Tier */}
+        <RowLabel text="Data Tier" />
+        {tiers.map((t) => (
+          <div key={t.id} className="flex items-center justify-center">
+            <div className="w-full h-[50px] rounded-full flex items-center justify-center" style={fill(t.color, true)}>
+              <span className="text-base md:text-lg font-bold" style={{ color: accent(t.color) }}>{t.name}</span>
+            </div>
+          </div>
+        ))}
+
+        {/* Time in Days */}
+        <RowLabel icon={faClock} text="Time in Days" />
+        {tiers.map((t) => (
+          <div key={t.id} className="rounded-xl p-3 flex flex-col" style={fill(t.color)}>
+            <div className="text-sm font-bold mb-1.5" style={{ color: accent(t.color) }}>{t.time}</div>
+            <ul className={`space-y-0.5 text-xs leading-snug ${mutedText}`}>
+              {t.lines.map((line, i) => <li key={i}>{line}</li>)}
+            </ul>
+          </div>
+        ))}
+      </div>
+
+      <p className={`shrink-0 text-center text-xs mt-3 ${mutedText}`}>{footnote}</p>
+    </div>
+  )
 }
 
 const TIER_IDS = ['hot', 'warm', 'cold', 'frozen']
@@ -313,6 +458,7 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
     default: { ...DEFAULT_SUBTITLES.default, ...(metadata.subtitles?.default || {}) },
     elastic: { ...DEFAULT_SUBTITLES.elastic, ...(metadata.subtitles?.elastic || {}) },
     simplified: { ...DEFAULT_SUBTITLES.simplified, ...(metadata.subtitles?.simplified || {}) },
+    matrix: { ...DEFAULT_SUBTITLES.matrix, ...(metadata.subtitles?.matrix || {}) },
     traditional: { ...DEFAULT_SUBTITLES.traditional, ...(metadata.subtitles?.traditional || {}) },
   }
   const traditionalOverlays = {
@@ -394,7 +540,9 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
         ? renderSubtitle(subtitles.elastic, isDark)
         : comparisonMode === 'simplified'
           ? renderSubtitle(subtitles.simplified, isDark)
-          : renderTraditionalSubtitle(subtitles.traditional, isDark)
+          : comparisonMode === 'matrix'
+            ? renderSubtitle(subtitles.matrix, isDark)
+            : renderTraditionalSubtitle(subtitles.traditional, isDark)
 
   const simplifiedComparisonIcons = [faServer, faMagnifyingGlassChart, faHardDrive, faCheckCircle]
   const elasticComparisonIcons = [faMagnifyingGlassChart, faBolt, faClock, faCheckCircle]
@@ -418,6 +566,16 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
 
           {/* Main Visualization */}
           <div className="flex-1 flex flex-col min-h-0">
+            {comparisonMode === 'matrix' ? (
+              <TieringMatrix
+                isDark={isDark}
+                useCases={MATRIX_USE_CASES}
+                capabilities={MATRIX_CAPABILITIES}
+                tiers={MATRIX_TIERS}
+                footnote="* Actual days depend on use-case."
+              />
+            ) : (
+            <>
             <div className="flex-1 relative rounded-2xl overflow-hidden mx-4">
               {/* Background */}
               <div className={`absolute inset-0 ${isDark ? 'bg-gradient-to-r from-pink-500/20 via-orange-400/15 via-blue-500/15 to-teal-400/20' : 'bg-gradient-to-r from-white to-elastic-blue/10'}`} />
@@ -613,6 +771,8 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
               </div>
             </div>
             )}
+            </>
+            )}
           </div>{/* /Main Visualization */}
 
           {/* Right-side mode navigator */}
@@ -623,7 +783,7 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
             {/* Progress fill */}
             <div
               className={`absolute w-px top-[8%] transition-all duration-700 ease-out ${isDark ? 'bg-elastic-teal/50' : 'bg-elastic-blue/40'}`}
-              style={{ height: comparisonMode === 'elastic' ? '30%' : comparisonMode === 'simplified' ? '60%' : '0%' }}
+              style={{ height: comparisonMode === 'elastic' ? '30%' : comparisonMode === 'matrix' ? '60%' : '0%' }}
             />
 
             {/* Traditional */}
@@ -694,15 +854,15 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
               </div>
             )}
 
-            {/* Index / Search / Store */}
+            {/* Data Tiering Matrix — final sub-scene */}
             <button
-              onClick={() => setComparisonMode('simplified')}
+              onClick={() => setComparisonMode('matrix')}
               className="relative z-10 group flex flex-col items-center py-7"
             >
               <span className={`absolute right-full mr-3 top-1/2 -translate-y-1/2 whitespace-nowrap text-xs px-2.5 py-1.5 rounded-lg pointer-events-none transition-all duration-200 opacity-0 group-hover:opacity-100 border ${isDark ? 'bg-elastic-dev-blue/95 text-white/80 border-white/10' : 'bg-white/95 text-elastic-dark-ink/80 border-elastic-dev-blue/10'} shadow-lg`}>
-                {nav.simplified}
+                {nav.matrix}
               </span>
-              <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 border-2 ${comparisonMode === 'simplified'
+              <div className={`w-9 h-9 rounded-full flex items-center justify-center transition-all duration-300 border-2 ${comparisonMode === 'matrix'
                   ? isDark
                     ? 'bg-elastic-dev-blue border-elastic-teal text-elastic-teal scale-110 shadow-[0_0_14px_rgba(72,239,207,0.3)]'
                     : 'bg-elastic-light-grey border-elastic-blue text-elastic-blue scale-110 shadow-[0_0_14px_rgba(11,100,221,0.2)]'
@@ -710,7 +870,7 @@ function DataTieringScene({ isRunning = false, setIsRunning = () => { }, resetSi
                     ? 'bg-elastic-dev-blue border-white/15 text-white/25 hover:border-white/30 hover:text-white/50'
                     : 'bg-elastic-light-grey border-black/10 text-black/25 hover:border-elastic-blue/30 hover:text-elastic-blue/50'
                 }`}>
-                <FontAwesomeIcon icon={faLayerGroup} className="text-xs" />
+                <FontAwesomeIcon icon={faTableCells} className="text-xs" />
               </div>
             </button>
 

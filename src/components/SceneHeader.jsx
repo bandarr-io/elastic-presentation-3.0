@@ -1,5 +1,33 @@
 import { useTheme } from '../context/ThemeContext'
 
+// Minor words kept lowercase in Title Case unless they lead/close the title.
+const MINOR_WORDS = new Set([
+  'a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'from', 'in', 'into', 'nor',
+  'of', 'off', 'on', 'onto', 'or', 'over', 'per', 'so', 'the', 'to', 'up', 'via',
+  'vs', 'with', 'yet',
+])
+
+// Title-case a single word while preserving brand/acronym casing (any word with
+// an uppercase letter beyond the first char — ES|QL, OpenTelemetry, AI, SRE, 5B+).
+function titleCaseWord(word, isEdge) {
+  if (/[A-Z]/.test(word.slice(1))) return word
+  const lower = word.toLowerCase()
+  const bare = lower.replace(/[^a-z]/g, '')
+  if (!isEdge && MINOR_WORDS.has(bare)) return lower
+  return lower.replace(/[a-z]/, (c) => c.toUpperCase())
+}
+
+// Convert a heading segment to Title Case, preserving all whitespace (including
+// the trailing space that separates the plain and accent segments).
+function toTitleCase(str) {
+  if (!str || typeof str !== 'string') return str
+  const tokens = str.split(/(\s+)/)
+  const contentIdx = tokens.reduce((acc, t, i) => (/\S/.test(t) ? [...acc, i] : acc), [])
+  const first = contentIdx[0]
+  const last = contentIdx[contentIdx.length - 1]
+  return tokens.map((t, i) => (/\S/.test(t) ? titleCaseWord(t, i === first || i === last) : t)).join('')
+}
+
 /**
  * Standard scene header: eyebrow + two-tone title + subtitle.
  *
@@ -31,10 +59,10 @@ function SceneHeader({
   const isLeft = align === 'left'
 
   const plainSpan = titlePlain && (
-    <span className={isDark ? 'text-white' : 'text-elastic-dark-ink'}>{titlePlain}</span>
+    <span className={isDark ? 'text-white' : 'text-elastic-dark-ink'}>{toTitleCase(titlePlain)}</span>
   )
   const accentSpan = titleAccent && (
-    <span className={isDark ? 'text-elastic-teal' : 'text-elastic-blue'}>{titleAccent}</span>
+    <span className={isDark ? 'text-elastic-teal' : 'text-elastic-blue'}>{toTitleCase(titleAccent)}</span>
   )
 
   const subtitleAlign = isLeft ? '' : 'mx-auto'
