@@ -398,6 +398,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const [editing, setEditing] = useState(null);  // node id being renamed
   const [marquee, setMarquee] = useState(null);  // {x0,y0,x1,y1} world coords
   const [q, setQ] = useState("");
+  const [styleClip, setStyleClip] = useState(null); // copied node style {color,w,h}
   const [openCats, setOpenCats] = useState(() => new Set(CATS.filter((c) => c !== "General")));
   const [, bumpHist] = useState(0);
   const viewportRef = useRef(null);
@@ -478,6 +479,16 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
       if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
       if (mod && e.key.toLowerCase() === "d") { e.preventDefault(); duplicateSel(); return; }
+      if (mod && e.shiftKey && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        if (sel && sel.kind === "nodes" && sel.ids.length) copyStyle(nodeById[sel.ids[0]]);
+        return;
+      }
+      if (mod && e.shiftKey && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        if (sel && sel.kind === "nodes") applyStyle(sel.ids);
+        return;
+      }
       if ((e.key === "Delete" || e.key === "Backspace") && sel) {
         e.preventDefault();
         deleteSel();
@@ -499,6 +510,21 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       setZones((zs) => zs.filter((z) => z.id !== sel.id));
     }
     setSel(null);
+  };
+
+  /* copy a node's visual style (accent + effective size); apply it to any
+     node selection. A null color means "inherit the type's stage color". */
+  const copyStyle = (n) => {
+    if (!n) return;
+    const r = rectOf(n);
+    setStyleClip({ color: n.color ?? null, w: r.w, h: r.h });
+  };
+  const applyStyle = (ids) => {
+    if (!styleClip || !ids || !ids.length) return;
+    snapshot();
+    setNodes((ns) => ns.map((m) => (ids.includes(m.id)
+      ? { ...m, color: styleClip.color ?? undefined, w: styleClip.w, h: styleClip.h }
+      : m)));
   };
 
   const duplicateSel = () => {
@@ -1170,6 +1196,13 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 <div className="ew-iscroll">
                   <section>
                     <div className="ew-btnrow">
+                      <button className="ew-btn" disabled={!styleClip} onClick={() => applyStyle(sel.ids)}
+                              title="Apply the copied style to all selected (⌘⇧V)">
+                        Paste style to {sel.ids.length}
+                        {styleClip && <span className="ew-swatch" style={{ background: styleClip.color || "var(--muted)" }} />}
+                      </button>
+                    </div>
+                    <div className="ew-btnrow">
                       <button className="ew-btn" onClick={duplicateSel}>Duplicate (⌘D)</button>
                       <button className="ew-btn danger" onClick={deleteSel}>Delete all</button>
                     </div>
@@ -1238,6 +1271,15 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                       <input type="color" value={nodeTag(n, stages)} onChange={(e) => set({ color: e.target.value })} />
                       {overridden && <button className="ew-btn"
                         onClick={() => set({ w: undefined, h: undefined, color: undefined, sub: undefined })}>Reset style</button>}
+                    </div></div>
+                  <div className="ew-frow"><span className="ew-flabel">Style</span>
+                    <div className="ew-btnrow">
+                      <button className="ew-btn" onClick={() => copyStyle(n)} title="Copy accent & size (⌘⇧C)">Copy style</button>
+                      <button className="ew-btn" disabled={!styleClip} onClick={() => applyStyle([n.id])}
+                              title="Apply the copied style (⌘⇧V)">
+                        Paste style
+                        {styleClip && <span className="ew-swatch" style={{ background: styleClip.color || "var(--muted)" }} />}
+                      </button>
                     </div></div>
                 </section>
                 {t.fields && t.fields.length > 0 && (
@@ -1438,9 +1480,12 @@ const CSS = `
 .ew-btnrow{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
 .ew-btn{ background:var(--panel); color:var(--muted); border:1px solid var(--line); border-radius:6px;
   padding:5px 10px; font-family:var(--mono); font-size:11px; cursor:pointer; display:inline-block; }
-.ew-btn:hover{ border-color:var(--accent); color:var(--ink); }
-.ew-btn.danger:hover{ border-color:#F04E98; color:#F04E98; }
+.ew-btn:hover:not(:disabled){ border-color:var(--accent); color:var(--ink); }
+.ew-btn.danger:hover:not(:disabled){ border-color:#F04E98; color:#F04E98; }
+.ew-btn:disabled{ opacity:.4; cursor:default; }
 .ew-btn input[type=file]{ display:none; }
+.ew-swatch{ display:inline-block; width:9px; height:9px; border-radius:2px; margin-left:6px;
+  vertical-align:middle; border:1px solid color-mix(in srgb, var(--ink) 25%, transparent); }
 .ew-ghost{ position:fixed; z-index:99; pointer-events:none; transform:translate(-50%,-50%);
   background:var(--panel); border:1px solid var(--tag); border-left:3px solid var(--tag);
   border-radius:8px; padding:8px 14px; font-family:"Mier B","Inter",sans-serif; font-size:13px;
