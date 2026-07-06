@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../context/ThemeContext";
+import { buildCatalog, describeDoc, describeSections, buildTool, systemPrompt, runLLM } from "../utils/whiteboardAI";
+import { buildFromSections, instantiateTemplate, sectionEndpoint, TEMPLATE_MENU, TEMPLATE_CONFIG, defaultFill } from "../data/whiteboardTemplates";
+import { STAGE_PALETTES, SURFACES, CATS, TYPES, tagOf, SEEDS } from "../data/whiteboardTypes";
+import { anchor, elbowPath, roundedPath, plMid, snap } from "../utils/whiteboardGeometry";
+import { useHistory } from "./whiteboard/useHistory";
+import { useDragController } from "./whiteboard/useDragController";
 
 /* ============================================================
    ElasticWhiteboard
@@ -20,273 +26,11 @@ import { useTheme } from "../context/ThemeContext";
    Export:      JSON (round-trips) · SVG · PNG
    ============================================================ */
 
-/* Data-flow stages mapped to the Elastic brand palette, per theme. Dark uses
-   the bright brand hues; light darkens them for contrast on a pale canvas
-   (mirrors the deck's light-mode flow legend). */
-const STAGE_PALETTES = {
-  dark:  { collect: "#4C8DFF", process: "#FEC514", store: "#48EFCF", serve: "#F04E98", ops: "#8A9BB4" },
-  light: { collect: "#0B64DD", process: "#B7791F", store: "#0E8C7F", serve: "#F04E98", ops: "#64748B" },
-};
-
-/* Canvas surface colors (backgrounds, panels, lines, text) per theme. Mirrored
-   into CSS variables on the root and reused by the SVG / PNG export so exported
-   diagrams match whichever theme is active. */
-const SURFACES = {
-  dark:  { bg: "#0C1530", panel: "#16213F", panel2: "#0F1A38", line: "#2A3556", ink: "#E8EDF4", muted: "#94A3C4" },
-  light: { bg: "#F5F7FA", panel: "#FFFFFF", panel2: "#EEF2F7", line: "#D6DEEA", ink: "#1C1E23", muted: "#5B6472" },
-};
-
-const CATS = [
-  "Core & UI", "Nodes", "Ingest & Processing", "OpenTelemetry (EDOT)", "Beats",
-  "Security", "ML & NLP", "Maps & Geo", "Clients & Tooling", "Orchestration",
-  "Air-Gapped Services", "Custom", "General",
-];
-
-/* Typed node registry. `flow` overrides the color of connections leaving
-   a type; `ops:true` renders its connections dashed (control-plane /
-   optional); `color` overrides the accent; `fields` are type-specific
-   settings rendered generically in the inspector.                      */
-const TYPES = {
-  /* --- Core & UI --- */
-  es:     { cat: "Core & UI", label: "Elasticsearch", sub: "Distributed search & analytics", stage: "store", w: 220, h: 80,
-    fields: [
-      { key: "masters", label: "Master nodes", kind: "number", min: 1, max: 9,   def: 3, unit: "masters" },
-      { key: "data",    label: "Data nodes",   kind: "number", min: 1, max: 200, def: 3, unit: "data" },
-      { key: "version", label: "Version",      kind: "text", placeholder: "8.x", pre: "v" },
-      { key: "ml",      label: "ML nodes",     kind: "toggle" },
-    ] },
-  kibana: { cat: "Core & UI", label: "Kibana", sub: "Stack UI · dashboards · management", stage: "serve", w: 200, h: 76,
-    fields: [{ key: "instances", label: "Instances", kind: "number", min: 1, max: 20, def: 2, unit: "inst" }] },
-  remote: { cat: "Core & UI", label: "Remote Cluster", sub: "Cross-cluster search & replication", stage: "store", w: 200, h: 76,
-    fields: [
-      { key: "mode",   label: "Mode", kind: "select", options: ["CCS", "CCR", "CCS + CCR"], def: "CCS" },
-      { key: "region", label: "Region", kind: "text", placeholder: "e.g. us-east-1" },
-    ] },
-
-  /* --- Nodes (tiers & roles) --- */
-  tier_hot:    { cat: "Nodes", label: "Hot Tier",    sub: "Indexing & recent data · fast SSD", stage: "store", color: "#ef6a5a", w: 172, h: 64,
-    fields: [
-      { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, def: 2, unit: "nodes" },
-      { key: "capacity", label: "Capacity", kind: "text", placeholder: "e.g. 2 TB" },
-    ] },
-  tier_warm:   { cat: "Nodes", label: "Warm Tier",   sub: "Read-mostly · older data", stage: "store", color: "#f09c3e", w: 172, h: 64,
-    fields: [
-      { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, def: 2, unit: "nodes" },
-      { key: "capacity", label: "Capacity", kind: "text", placeholder: "e.g. 10 TB" },
-    ] },
-  tier_cold:   { cat: "Nodes", label: "Cold Tier",   sub: "Infrequent access · cheaper HW", stage: "store", color: "#58a8e8", w: 172, h: 64,
-    fields: [
-      { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, def: 1, unit: "nodes" },
-      { key: "capacity", label: "Capacity", kind: "text", placeholder: "e.g. 40 TB" },
-    ] },
-  tier_frozen: { cat: "Nodes", label: "Frozen Tier", sub: "Searchable snapshots · object store", stage: "store", color: "#9aa5b1", w: 172, h: 64,
-    fields: [
-      { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, def: 1, unit: "nodes" },
-      { key: "capacity", label: "Capacity", kind: "text", placeholder: "object store size" },
-    ] },
-  node_master: { cat: "Nodes", label: "Master Node", sub: "Cluster state · quorum", stage: "store", color: "#e2c766", w: 182, h: 64,
-    fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 9, def: 3, unit: "nodes" }] },
-  node_ml:     { cat: "Nodes", label: "ML Node", sub: "Anomaly detection · model inference", stage: "store", color: "#b48ce8", w: 182, h: 64,
-    fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 50, def: 2, unit: "nodes" }] },
-  node_ingest: { cat: "Nodes", label: "Ingest Node", sub: "Ingest pipelines · enrichment", stage: "store", w: 182, h: 64,
-    fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 50, def: 2, unit: "nodes" }] },
-  node_coord:  { cat: "Nodes", label: "Coordinating Node", sub: "Request routing · reduce phase", stage: "store", color: "#7f96ad", w: 196, h: 64,
-    fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 50, def: 2, unit: "nodes" }] },
-
-  /* --- Ingest & Processing --- */
-  agent:    { cat: "Ingest & Processing", label: "Elastic Agent", sub: "Logs · metrics · APM · endpoint", stage: "collect", w: 190, h: 72,
-    fields: [
-      { key: "count",  label: "Agent count", kind: "number", min: 1, max: 100000, unit: "agents" },
-      { key: "policy", label: "Policy",      kind: "text", placeholder: "e.g. prod-linux" },
-    ] },
-  fleet:    { cat: "Ingest & Processing", label: "Fleet Server", sub: "Central Agent management", stage: "collect", ops: true, w: 180, h: 72,
-    fields: [{ key: "instances", label: "Instances", kind: "number", min: 1, max: 20, def: 2, unit: "inst" }] },
-  logstash: { cat: "Ingest & Processing", label: "Logstash", sub: "Ingest/transform · plugin ecosystem", stage: "process", w: 196, h: 76,
-    fields: [
-      { key: "pipelines", label: "Pipelines", kind: "number", min: 1, max: 50, def: 1, unit: "pipelines" },
-      { key: "workers",   label: "Workers",   kind: "number", min: 1, max: 64 },
-    ] },
-  apm:      { cat: "Ingest & Processing", label: "APM Server", sub: "Standalone or Agent integration", stage: "collect", w: 186, h: 72,
-    fields: [{ key: "mode", label: "Mode", kind: "select", options: ["Agent integration", "Standalone"], def: "Agent integration" }] },
-  eshadoop: { cat: "Ingest & Processing", label: "ES-Hadoop", sub: "Hadoop / Spark connectors", stage: "process", w: 176, h: 68 },
-
-  /* --- OpenTelemetry (EDOT) --- */
-  otel_collector: { cat: "OpenTelemetry (EDOT)", label: "EDOT Collector", sub: "OTLP traces · metrics · logs", stage: "collect", w: 198, h: 70,
-    fields: [
-      { key: "mode",     label: "Mode", kind: "select", options: ["Agent", "Gateway"], def: "Agent" },
-      { key: "replicas", label: "Replicas", kind: "number", min: 1, max: 50, unit: "replicas" },
-    ] },
-  otel_sdk: { cat: "OpenTelemetry (EDOT)", label: "EDOT SDK", sub: "Instrumented application", stage: "collect", w: 182, h: 66,
-    fields: [{ key: "lang", label: "Language", kind: "select",
-               options: ["Java", ".NET", "Node.js", "Python", "PHP", "Android", "iOS"] }] },
-  otel_operator: { cat: "OpenTelemetry (EDOT)", label: "OTel Operator", sub: "K8s auto-instrumentation", stage: "ops", ops: true, w: 182, h: 66 },
-
-  /* --- Beats (standalone shippers) --- */
-  beats:       { cat: "Beats", label: "Beats",       sub: "Standalone shippers (generic)", stage: "collect", w: 176, h: 66 },
-  filebeat:    { cat: "Beats", label: "Filebeat",    sub: "Log files & journals",     stage: "collect", w: 160, h: 62 },
-  metricbeat:  { cat: "Beats", label: "Metricbeat",  sub: "System & service metrics", stage: "collect", w: 160, h: 62 },
-  heartbeat:   { cat: "Beats", label: "Heartbeat",   sub: "Uptime monitoring",        stage: "collect", w: 160, h: 62 },
-  auditbeat:   { cat: "Beats", label: "Auditbeat",   sub: "Audit framework data",     stage: "collect", w: 160, h: 62 },
-  packetbeat:  { cat: "Beats", label: "Packetbeat",  sub: "Network packet analytics", stage: "collect", w: 160, h: 62 },
-  winlogbeat:  { cat: "Beats", label: "Winlogbeat",  sub: "Windows event logs",       stage: "collect", w: 160, h: 62 },
-  osquerybeat: { cat: "Beats", label: "Osquerybeat", sub: "Osquery results",          stage: "collect", w: 160, h: 62 },
-  cloudbeat:   { cat: "Beats", label: "Cloudbeat",   sub: "Cloud posture (CSPM)",     stage: "collect", w: 160, h: 62 },
-
-  /* --- Security solution --- */
-  defend: { cat: "Security", label: "Elastic Defend", sub: "Endpoint security via Agent + Fleet", stage: "collect", w: 196, h: 68,
-    fields: [{ key: "mode", label: "Protection", kind: "select", options: ["Detect", "Prevent"], def: "Detect" }] },
-  rules:  { cat: "Security", label: "Detection Rules", sub: "Via Kibana/Fleet or local artifact repo", stage: "ops", ops: true, w: 196, h: 68 },
-
-  /* --- ML & NLP --- */
-  mlmodel:   { cat: "ML & NLP", label: "Trained ML Models", sub: "Anomaly detection · NLP", stage: "process", w: 190, h: 66,
-    fields: [{ key: "model", label: "Model", kind: "text", placeholder: "e.g. anomaly-hosts" }] },
-  elser:     { cat: "ML & NLP", label: "ELSER", sub: "Sparse encoder · semantic search", stage: "process", w: 180, h: 66,
-    fields: [{ key: "model", label: "Model version", kind: "text", placeholder: "e.g. .elser_model_2" }] },
-  pytorch:   { cat: "ML & NLP", label: "PyTorch NLP Models", sub: "Via Eland · air-gapped installs", stage: "process", w: 196, h: 66,
-    fields: [{ key: "model", label: "Model", kind: "text", placeholder: "e.g. dslim/bert-base-NER" }] },
-  jina:      { cat: "ML & NLP", label: "Jina AI Embedding Models", sub: "Dense embeddings · semantic search", stage: "process", w: 216, h: 66,
-    fields: [
-      { key: "model",      label: "Model",      kind: "text",   placeholder: "e.g. jina-embeddings-v3" },
-      { key: "dimensions", label: "Dimensions", kind: "number", min: 32, max: 8192, unit: "dims" },
-    ] },
-  inference: { cat: "ML & NLP", label: "Inference Service", sub: "_inference API endpoints", stage: "process", w: 190, h: 66,
-    fields: [{ key: "service", label: "Service", kind: "select", options: ["ELSER", "E5", "Rerank", "Embedding", "Custom"] }] },
-  llm:       { cat: "ML & NLP", label: "LLM Provider", sub: "External model API", stage: "serve", ops: true, w: 182, h: 66,
-    fields: [{ key: "provider", label: "Provider", kind: "select",
-               options: ["OpenAI", "Azure OpenAI", "AWS Bedrock", "Google Vertex", "Anthropic", "Self-hosted"] }] },
-
-  /* --- Maps & Geo --- */
-  ems:       { cat: "Maps & Geo", label: "Elastic Maps Service", sub: "Hosted tiles & vector layers (EMS)", stage: "serve", ops: true, w: 204, h: 68,
-    fields: [{ key: "access", label: "Access", kind: "select", options: ["Hosted", "Via firewall", "Self-hosted tiles", "Disabled"], def: "Hosted" }] },
-  mapserver: { cat: "Maps & Geo", label: "Elastic Maps Server", sub: "Self-hosted EMS · ECK contexts", stage: "serve", w: 200, h: 68 },
-
-  /* --- Clients & Tooling --- */
-  client: { cat: "Clients & Tooling", label: "Elasticsearch Client", sub: "Java · JS · Py · .NET · Go · Ruby · PHP", stage: "collect", w: 212, h: 68,
-    fields: [{ key: "lang", label: "Language", kind: "select", options: ["Java", "JavaScript", "Python", ".NET", "Go", "Ruby", "PHP"] }] },
-  eland:  { cat: "Clients & Tooling", label: "Eland", sub: "ML/NLP model management tooling", stage: "process", w: 176, h: 66 },
-  odbc:   { cat: "Clients & Tooling", label: "SQL ODBC Driver", sub: "BI & SQL connectivity", stage: "collect", w: 180, h: 64 },
-
-  /* --- Orchestration --- */
-  eck:  { cat: "Orchestration", label: "ECK Operator", sub: "Elastic Cloud on Kubernetes", stage: "ops", ops: true, w: 186, h: 68 },
-  ece:  { cat: "Orchestration", label: "ECE", sub: "Clusters at scale · VMs / bare metal", stage: "ops", ops: true, w: 176, h: 68 },
-  helm: { cat: "Orchestration", label: "Helm Charts", sub: "eck-stack & individual charts", stage: "ops", ops: true, w: 180, h: 66 },
-
-  /* --- Air-Gapped Services --- */
-  epr:          { cat: "Air-Gapped Services", label: "Package Registry (EPR)", sub: "Local integration packages for Fleet", stage: "ops", ops: true, w: 208, h: 68 },
-  artifactreg:  { cat: "Air-Gapped Services", label: "Artifact Registry", sub: "Agent & integration binaries", stage: "ops", ops: true, w: 196, h: 66 },
-  endpointrepo: { cat: "Air-Gapped Services", label: "Endpoint Artifact Repo", sub: "Defend artifacts & rule updates", stage: "ops", ops: true, w: 204, h: 66 },
-  docsbundle:   { cat: "Air-Gapped Services", label: "Docs Bundle", sub: "Local docs for Kibana AI assistants", stage: "ops", ops: true, w: 190, h: 66 },
-
-  /* --- Custom --- */
-  integration: { cat: "Custom", label: "Integration", sub: "Configurable · name & logo", stage: "serve", configurable: true, w: 196, h: 70,
-    fields: [{ key: "protocol", label: "Protocol", kind: "select", options: ["HTTP", "TCP", "Kafka", "Webhook", "Syslog"] }] },
-
-  /* --- General diagramming --- */
-  source:     { cat: "General", label: "Data Source", sub: "Servers · endpoints · DBs", stage: "ops", flow: "collect", w: 176, h: 76 },
-  k8s:        { cat: "General", label: "Kubernetes Cluster", sub: "Workloads · kube-state", stage: "ops", flow: "collect", w: 196, h: 70 },
-  cloudsvc:   { cat: "General", label: "Cloud Services", sub: "CloudWatch · Azure Monitor · GCP Ops", stage: "ops", flow: "collect", w: 200, h: 70 },
-  syslog:     { cat: "General", label: "Syslog Devices", sub: "Network & appliance logs", stage: "ops", flow: "collect", w: 184, h: 68 },
-  saas:       { cat: "General", label: "SaaS Apps", sub: "Audit & activity logs", stage: "ops", flow: "collect", w: 168, h: 68 },
-  connectors: { cat: "General", label: "Connectors & Crawler", sub: "Content sync · SDKs", stage: "collect", w: 204, h: 80 },
-  kafka:      { cat: "General", label: "Kafka", sub: "Buffer / queue", stage: "process", w: 172, h: 72,
-    fields: [{ key: "partitions", label: "Partitions", kind: "number", min: 1, max: 500, unit: "partitions" }] },
-  firewall:   { cat: "General", label: "Firewall / Proxy", sub: "Network boundary", stage: "ops", ops: true, color: "#FF957D", w: 186, h: 68,
-    fields: [{ key: "kind", label: "Kind", kind: "select", options: ["Firewall", "Forward proxy", "Reverse proxy", "Air gap"], def: "Firewall" }] },
-  idp:        { cat: "General", label: "Identity Provider", sub: "SSO · directory services", stage: "ops", ops: true, w: 190, h: 68,
-    fields: [{ key: "protocol", label: "Protocol", kind: "select", options: ["SAML", "OIDC", "LDAP", "Active Directory"] }] },
-  lb:         { cat: "General", label: "Load Balancer", sub: "HA entry point", stage: "serve", w: 172, h: 68,
-    fields: [{ key: "layer", label: "Type", kind: "select", options: ["L4", "L7", "DNS"] }] },
-  users:      { cat: "General", label: "Users", sub: "Analysts · apps", stage: "serve", w: 152, h: 68 },
-  cloud:      { cat: "General", label: "Cloud Hosting", sub: "AWS · Azure · GCP", stage: "store", w: 192, h: 72 },
-  thirdparty: { cat: "General", label: "Third-Party", sub: "Slack · Teams · ServiceNow", stage: "serve", w: 204, h: 76 },
-  storage:    { cat: "General", label: "Remote Storage", sub: "S3 · Blob · MinIO", stage: "ops", ops: true, w: 184, h: 72,
-    fields: [{ key: "backend", label: "Backend", kind: "select", options: ["S3", "Azure Blob", "GCS", "MinIO", "NFS"] }] },
-  monitoring: { cat: "General", label: "Monitoring Cluster", sub: "Separate ES + Kibana", stage: "ops", ops: true, w: 212, h: 76,
-    fields: [{ key: "retention", label: "Retention", kind: "text", placeholder: "e.g. 30d" }] },
-};
-
-/* instance type on all Nodes-category types (tiers & node roles) */
-const INSTANCE = { key: "instance", label: "Instance type", kind: "text",
-                   placeholder: "e.g. m5.2xlarge / r6gd.4xlarge" };
-for (const k of ["tier_hot", "tier_warm", "tier_cold", "tier_frozen",
-                 "node_master", "node_ml", "node_ingest", "node_coord"])
-  TYPES[k].fields = [...(TYPES[k].fields || []), INSTANCE];
-
-/* shared hardware sizing fields, attached to infrastructure-class types */
-const HW = [
-  { key: "cpu",  label: "CPU",    kind: "number", min: 1, max: 512,  unit: "vCPU" },
-  { key: "mem",  label: "Memory", kind: "number", min: 1, max: 4096, unit: "GB RAM" },
-  { key: "disk", label: "Disk",   kind: "text", placeholder: "e.g. 2 TB NVMe", pre: "disk " },
-];
-for (const k of [
-  "es", "kibana", "logstash", "kafka", "fleet", "apm", "mapserver", "monitoring",
-  "tier_hot", "tier_warm", "tier_cold", "tier_frozen",
-  "node_master", "node_ml", "node_ingest", "node_coord", "otel_collector",
-]) TYPES[k].fields = [...(TYPES[k].fields || []), ...HW];
-
-const tagOf = (t, stages) => t.color || stages[t.stage];
-
-/* ---------------- templates ---------------- */
-
-const SEEDS = {
-  reference: {
-    zones: [],
-    nodes: [
-      { id: "n1",  type: "source",     x: 40,   y: 80,  title: "Knowledge Bases" },
-      { id: "n2",  type: "source",     x: 40,   y: 200, title: "Servers" },
-      { id: "n3",  type: "source",     x: 40,   y: 320, title: "Endpoints" },
-      { id: "n4",  type: "source",     x: 40,   y: 440, title: "Databases" },
-      { id: "n5",  type: "connectors", x: 300,  y: 78 },
-      { id: "n6",  type: "beats",      x: 300,  y: 202 },
-      { id: "n7",  type: "agent",      x: 300,  y: 322 },
-      { id: "n8",  type: "fleet",      x: 300,  y: 560 },
-      { id: "n9",  type: "logstash",   x: 580,  y: 360 },
-      { id: "n10", type: "kafka",      x: 580,  y: 490 },
-      { id: "n11", type: "es",         x: 860,  y: 170 },
-      { id: "n12", type: "kibana",     x: 1180, y: 80 },
-      { id: "n13", type: "cloud",      x: 1180, y: 230 },
-      { id: "n14", type: "thirdparty", x: 1180, y: 370 },
-      { id: "n15", type: "lb",         x: 1470, y: 84 },
-      { id: "n16", type: "users",      x: 1470, y: 210 },
-      { id: "n17", type: "storage",    x: 860,  y: 520 },
-      { id: "n18", type: "monitoring", x: 1180, y: 520 },
-    ],
-    edges: [
-      ["n1","n5"],["n2","n6"],["n2","n7"],["n2","n9"],["n3","n6"],["n3","n7"],["n3","n9"],["n4","n9"],
-      ["n5","n11"],["n6","n11"],["n7","n11"],["n6","n9"],["n7","n9"],["n8","n7"],
-      ["n9","n11"],["n9","n10"],["n10","n11"],
-      ["n11","n12"],["n11","n13"],["n11","n14"],["n12","n15"],["n15","n16"],["n14","n16"],
-      ["n11","n17"],["n11","n18"],["n18","n16"],
-    ],
-  },
-  airgap: {
-    zones: [
-      { id: "z1", x: 40,   y: 90, w: 1010, h: 640, label: "Air-gapped enclave", color: "#FEC514" },
-      { id: "z2", x: 1340, y: 90, w: 380,  h: 340, label: "External / Internet", color: "#FF957D" },
-    ],
-    nodes: [
-      { id: "a1",  type: "source",       x: 80,   y: 150, title: "Servers" },
-      { id: "a2",  type: "source",       x: 80,   y: 270, title: "Endpoints" },
-      { id: "a3",  type: "agent",        x: 330,  y: 160 },
-      { id: "a4",  type: "fleet",        x: 330,  y: 310 },
-      { id: "a5",  type: "es",           x: 620,  y: 150 },
-      { id: "a6",  type: "kibana",       x: 620,  y: 310 },
-      { id: "a12", type: "mapserver",    x: 838,  y: 310 },
-      { id: "a8",  type: "epr",          x: 80,   y: 590 },
-      { id: "a9",  type: "artifactreg",  x: 330,  y: 590 },
-      { id: "a10", type: "endpointrepo", x: 570,  y: 590 },
-      { id: "a11", type: "docsbundle",   x: 820,  y: 590 },
-      { id: "a13", type: "firewall",     x: 1120, y: 220 },
-      { id: "a14", type: "ems",          x: 1380, y: 150, props: { access: "Via firewall" } },
-      { id: "a15", type: "llm",          x: 1380, y: 300 },
-    ],
-    edges: [
-      ["a1","a3"],["a2","a3"],["a3","a5"],["a4","a3"],["a5","a6"],
-      ["a6","a8"],["a4","a9"],["a4","a10"],["a6","a11"],["a6","a12"],
-      ["a6","a13"],["a13","a14"],["a13","a15"],
-    ],
-  },
-};
+/* Node TYPES, palettes, categories and seed templates are defined in
+   ../data/whiteboardTypes and imported above. Derived here for the AI chat: */
+const WB_CATALOG = buildCatalog(TYPES);
+const WB_TOOL = buildTool();
+const TEMPLATES_OK = new Set([...TEMPLATE_MENU.map((t) => t.id), "single"]);
 
 /* ---------------- pure geometry ---------------- */
 
@@ -307,77 +51,52 @@ const fieldChips = (n) => {
   return out;
 };
 
-function anchor(r, side, t = 0.5) {
-  switch (side) {
-    case "l": return { x: r.x,           y: r.y + r.h * t };
-    case "r": return { x: r.x + r.w,     y: r.y + r.h * t };
-    case "t": return { x: r.x + r.w * t, y: r.y };
-    case "b": return { x: r.x + r.w * t, y: r.y + r.h };
-    default:  return { x: r.x, y: r.y };
-  }
-}
-function autoSides(ra, rb) {
-  const dx = rb.x + rb.w / 2 - (ra.x + ra.w / 2);
-  const dy = rb.y + rb.h / 2 - (ra.y + ra.h / 2);
-  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? ["r", "l"] : ["l", "r"];
-  return dy >= 0 ? ["b", "t"] : ["t", "b"];
-}
-function edgePolyline(ra, rb) {
-  const [sS, eS] = autoSides(ra, rb);
-  const A = anchor(ra, sS), B = anchor(rb, eS);
-  const hOut = sS === "l" || sS === "r";
-  if (hOut) {
-    if (Math.abs(A.y - B.y) < 14) return [A, B];
-    const mx = (A.x + B.x) / 2;
-    return [A, { x: mx, y: A.y }, { x: mx, y: B.y }, B];
-  }
-  if (Math.abs(A.x - B.x) < 14) return [A, B];
-  const my = (A.y + B.y) / 2;
-  return [A, { x: A.x, y: my }, { x: B.x, y: my }, B];
-}
-function roundedPath(pl, R = 12) {
-  let d = `M ${pl[0].x} ${pl[0].y}`;
-  for (let q = 1; q < pl.length - 1; q++) {
-    const pv = pl[q - 1], p = pl[q], nx = pl[q + 1];
-    const l1 = Math.hypot(p.x - pv.x, p.y - pv.y);
-    const l2 = Math.hypot(nx.x - p.x, nx.y - p.y);
-    const r = Math.min(R, l1 / 2, l2 / 2);
-    const u1 = { x: (p.x - pv.x) / (l1 || 1), y: (p.y - pv.y) / (l1 || 1) };
-    const u2 = { x: (nx.x - p.x) / (l2 || 1), y: (nx.y - p.y) / (l2 || 1) };
-    d += ` L ${p.x - u1.x * r} ${p.y - u1.y * r} Q ${p.x} ${p.y} ${p.x + u2.x * r} ${p.y + u2.y * r}`;
-  }
-  d += ` L ${pl[pl.length - 1].x} ${pl[pl.length - 1].y}`;
-  return d;
-}
-function plMid(pl) {
-  const lens = [];
-  let total = 0;
-  for (let i = 0; i < pl.length - 1; i++) {
-    const l = Math.hypot(pl[i + 1].x - pl[i].x, pl[i + 1].y - pl[i].y);
-    lens.push(l); total += l;
-  }
-  let target = total / 2;
-  for (let i = 0; i < lens.length; i++) {
-    if (target <= lens[i]) {
-      const f = lens[i] ? target / lens[i] : 0;
-      return { x: pl[i].x + (pl[i + 1].x - pl[i].x) * f,
-               y: pl[i].y + (pl[i + 1].y - pl[i].y) * f, total };
-    }
-    target -= lens[i];
-  }
-  return { ...pl[pl.length - 1], total };
-}
-
-const snap = (v) => Math.round(v / 8) * 8;
 const stageKeyOf = (srcNode) => {
   const t = TYPES[srcNode.type];
   return t.flow || t.stage;
 };
-const edgeDashed = (a, b) => TYPES[a.type].ops || TYPES[b.type].ops;
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
 let UID = 1000;
 const uid = (p) => `${p}${UID++}`;
+
+/* ---- persistence (autosave board + user-saved seed presets) ---- */
+const BOARD_KEY = "ew-board";
+const seedKey = (k) => `ew-seed-${k}`;
+const readJSON = (key) => { try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch { return null; } };
+const writeJSON = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* quota / disabled */ } };
+
+/* Serialize the current board into a SEEDS-shaped JS literal, ready to paste as
+   a `SEEDS.<key>` entry in whiteboardTypes.js (version-controlled defaults).
+   Edges use compact [s, e] / [s, e, label] tuples, or an object when they carry
+   manual waypoints; the seed loader accepts both forms. */
+const nz = (v) => Math.round(v || 0);
+const seedNodeStr = (n) => {
+  const p = [`id: ${JSON.stringify(n.id)}`, `type: ${JSON.stringify(n.type)}`, `x: ${nz(n.x)}`, `y: ${nz(n.y)}`];
+  if (n.title) p.push(`title: ${JSON.stringify(n.title)}`);
+  if (n.sub) p.push(`sub: ${JSON.stringify(n.sub)}`);
+  if (n.color) p.push(`color: ${JSON.stringify(n.color)}`);
+  if (n.w) p.push(`w: ${nz(n.w)}`);
+  if (n.h) p.push(`h: ${nz(n.h)}`);
+  if (n.props && Object.keys(n.props).length) p.push(`props: ${JSON.stringify(n.props)}`);
+  return `      { ${p.join(", ")} },`;
+};
+const seedEdgeStr = (e) => {
+  const hasPts = e.pts && e.pts.length;
+  if (hasPts || e.bi) return `      { s: ${JSON.stringify(e.s)}, e: ${JSON.stringify(e.e)}${e.lbl ? `, lbl: ${JSON.stringify(e.lbl)}` : ""}${e.bi ? ", bi: true" : ""}${hasPts ? `, pts: ${JSON.stringify(e.pts)}` : ""} },`;
+  return e.lbl
+    ? `      [${JSON.stringify(e.s)}, ${JSON.stringify(e.e)}, ${JSON.stringify(e.lbl)}],`
+    : `      [${JSON.stringify(e.s)}, ${JSON.stringify(e.e)}],`;
+};
+const seedZoneStr = (z) =>
+  `      { id: ${JSON.stringify(z.id)}, x: ${nz(z.x)}, y: ${nz(z.y)}, w: ${nz(z.w)}, h: ${nz(z.h)}, label: ${JSON.stringify(z.label)}, color: ${JSON.stringify(z.color)} },`;
+const toSeedCode = (nodes, edges, zones) => [
+  "{",
+  "    zones: [", ...zones.map(seedZoneStr), "    ],",
+  "    nodes: [", ...nodes.map(seedNodeStr), "    ],",
+  "    edges: [", ...edges.map(seedEdgeStr), "    ],",
+  "  }",
+].join("\n");
 
 /* ---------------- component ---------------- */
 
@@ -387,10 +106,15 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const stages = isDark ? STAGE_PALETTES.dark : STAGE_PALETTES.light;
   const surface = isDark ? SURFACES.dark : SURFACES.light;
 
-  const [nodes, setNodes] = useState(clone(SEEDS.reference.nodes));
-  const [edges, setEdges] = useState(SEEDS.reference.edges.map(([s, e], i) => ({ id: `e${i}`, s, e })));
-  const [zones, setZones] = useState([]);
-  const [view, setView]   = useState({ x: 30, y: 20, k: 0.85 });
+  // hydrate once from the last autosaved board, falling back to the reference seed
+  const bootRef = useRef();
+  if (bootRef.current === undefined) bootRef.current = readJSON(BOARD_KEY) || null;
+  const boot = bootRef.current;
+
+  const [nodes, setNodes] = useState(() => boot?.nodes || clone(SEEDS.reference.nodes));
+  const [edges, setEdges] = useState(() => boot?.edges || SEEDS.reference.edges.map(([s, e], i) => ({ id: `e${i}`, s, e })));
+  const [zones, setZones] = useState(() => boot?.zones || []);
+  const [view, setView]   = useState(() => boot?.view || { x: 30, y: 20, k: 0.85 });
   const [sel, setSel]     = useState(null);      // {kind:'nodes',ids} | {kind:'edge'|'zone',id}
   const [hover, setHover] = useState(null);
   const [connect, setConnect] = useState(null);  // {from,cx,cy} world coords
@@ -400,47 +124,56 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const [q, setQ] = useState("");
   const [styleClip, setStyleClip] = useState(null); // copied node style {color,w,h}
   const [openCats, setOpenCats] = useState(() => new Set(CATS.filter((c) => c !== "General")));
-  const [, bumpHist] = useState(0);
+  const [patternCfg, setPatternCfg] = useState(null); // { id, fill } while configuring a Patterns block
+  const [seedMenu, setSeedMenu] = useState(false);    // preset save/reset dropdown open
+  const [seedNote, setSeedNote] = useState("");       // transient "saved" confirmation
+  const [routeTick, setRouteTick] = useState(0);     // forces a full re-route after a drag ends
+
+  /* ---------- AI chat ---------- */
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMsgs, setChatMsgs] = useState([]);   // {role:'user'|'ai'|'error', text}
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
+  const [showChatSettings, setShowChatSettings] = useState(false);
+  const [provider, setProvider] = useState(() => localStorage.getItem("ew-llm-provider") || "anthropic");
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem("ew-anthropic-key") || "");
+  const [model, setModel] = useState(() => localStorage.getItem("ew-anthropic-model") || "claude-sonnet-5");
+  const [proxyUrl, setProxyUrl] = useState(() => localStorage.getItem("ew-proxy-url") || "");
+  const [proxyToken, setProxyToken] = useState(() => localStorage.getItem("ew-proxy-token") || "");
+  const chatLogRef = useRef(null);
   const viewportRef = useRef(null);
   const fileRef = useRef(null);
   const dragRef = useRef(null);
   const lastClickRef = useRef({ id: null, t: 0 });
-  const histRef = useRef({ undo: [], redo: [] });
-  const snapKeyRef = useRef({ k: null, t: 0 });
 
   const nodeById = useMemo(() => Object.fromEntries(nodes.map((n) => [n.id, n])), [nodes]);
+  const zoneById = useMemo(() => Object.fromEntries(zones.map((z) => [z.id, z])), [zones]);
+  // Connectors may terminate on a node or a zone; resolve either to a rect.
+  const endpointRect = (id) => {
+    const n = nodeById[id];
+    if (n) return rectOf(n);
+    const z = zoneById[id];
+    return z ? { x: z.x, y: z.y, w: z.w, h: z.h } : null;
+  };
+  const endpointName = (id) => {
+    const n = nodeById[id];
+    if (n) return n.title || TYPES[n.type].label;
+    const z = zoneById[id];
+    return z ? z.label : "?";
+  };
   const docRef = useRef(null);
   docRef.current = { nodes, edges, zones };
+  const sectionsRef = useRef(boot?.sections || {}); // sectionId -> { template, fill, keys, zoneId } for incremental AI edits
 
   /* ---------- history ---------- */
-  const snapshot = () => {
-    const h = histRef.current;
-    h.undo.push(clone(docRef.current));
-    if (h.undo.length > 60) h.undo.shift();
-    h.redo = [];
-    bumpHist((t) => t + 1);
-  };
-  /* one snapshot per continuous edit target (e.g. typing in a field) */
-  const snapGuard = (key) => {
-    const now = Date.now();
-    if (snapKeyRef.current.k !== key || now - snapKeyRef.current.t > 1200) snapshot();
-    snapKeyRef.current = { k: key, t: now };
-  };
   const restore = (doc) => { setNodes(doc.nodes); setEdges(doc.edges); setZones(doc.zones); setSel(null); };
-  const undo = () => {
-    const h = histRef.current;
-    if (!h.undo.length) return;
-    h.redo.push(clone(docRef.current));
-    restore(h.undo.pop());
-    bumpHist((t) => t + 1);
-  };
-  const redo = () => {
-    const h = histRef.current;
-    if (!h.redo.length) return;
-    h.undo.push(clone(docRef.current));
-    restore(h.redo.pop());
-    bumpHist((t) => t + 1);
-  };
+  const { snapshot, snapGuard, undo, redo, canUndo, canRedo } = useHistory(docRef, restore);
+
+  /* ---------- autosave (survives page refresh) ---------- */
+  useEffect(() => {
+    const t = setTimeout(() => writeJSON(BOARD_KEY, { nodes, edges, zones, view, sections: sectionsRef.current }), 300);
+    return () => clearTimeout(t);
+  }, [nodes, edges, zones, view]);
 
   /* ---------- coords ---------- */
   const toWorld = (clientX, clientY) => {
@@ -545,201 +278,283 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     if (clones.length) setSel({ kind: "nodes", ids: clones });
   };
 
+  /* ---------- AI: apply a model-generated document/edit ---------- */
+  useEffect(() => { localStorage.setItem("ew-llm-provider", provider); }, [provider]);
+  useEffect(() => { localStorage.setItem("ew-anthropic-key", apiKey); }, [apiKey]);
+  useEffect(() => { localStorage.setItem("ew-anthropic-model", model); }, [model]);
+  useEffect(() => { localStorage.setItem("ew-proxy-url", proxyUrl); }, [proxyUrl]);
+  useEffect(() => { localStorage.setItem("ew-proxy-token", proxyToken); }, [proxyToken]);
+
+  useEffect(() => {
+    const el = chatLogRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [chatMsgs, chatBusy]);
+
+  /* Push a fully-built board + its section metadata into state (one undoable
+     step). Used by both the first (from-scratch) AI build and manual inserts. */
+  const commitBoard = (board, meta) => {
+    docRef.current = board;
+    sectionsRef.current = meta;
+    setNodes(board.nodes);
+    setEdges(board.edges);
+    setZones(board.zones);
+    setSel(null);
+    setTimeout(() => fit(), 40);
+  };
+
+  const ownsId = (id, sid) => id === `${sid}__zone` || id.startsWith(`${sid}__`);
+  const boxOf = (ns, zs) => {
+    const boxes = [...zs, ...ns.map((n) => rectOf(n))];
+    if (!boxes.length) return null;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const b of boxes) { x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+    return { x0, y0, x1, y1 };
+  };
+  // Shift a fresh instance so its bounding box top-left sits at (x, y).
+  const shiftInst = (inst, x, y) => {
+    const dx = snap(x) - inst.bbox.x, dy = snap(y) - inst.bbox.y;
+    return {
+      nodes: inst.nodes.map((n) => ({ ...n, x: snap(n.x + dx), y: snap(n.y + dy) })),
+      zone: inst.zone ? { ...inst.zone, x: snap(inst.zone.x + dx), y: snap(inst.zone.y + dy) } : null,
+      // waypoints are absolute, so they must move with the section too
+      edges: inst.edges.map((e) => (e.pts ? { ...e, pts: e.pts.map((p) => ({ x: snap(p.x + dx), y: snap(p.y + dy) })) } : e)),
+      keys: inst.keys, bbox: { x: snap(x), y: snap(y), w: inst.bbox.w, h: inst.bbox.h },
+    };
+  };
+
+  /* Interpret the edit_whiteboard tool payload. On an empty board this lays out
+     the whole design deterministically. On an existing board it edits
+     incrementally: unchanged sections stay exactly where the user put them
+     (drags + waypoints preserved), changed sections re-render in place, new
+     sections are placed alongside, and cross-section flows are rebuilt. */
+  const applyAI = (res) => {
+    if (!res || typeof res !== "object") return null;
+    const incoming = (Array.isArray(res.sections) ? res.sections : [])
+      .filter((s) => s && s.template && TEMPLATES_OK.has(s.template))
+      .map((s, i) => ({ id: s.id || `${s.template}${i}`, template: s.template, ...(s.row ? { row: true } : {}),
+                        fill: { ...(s.fill || {}), ...(s.label ? { label: s.label } : {}) } }));
+    const removeIds = new Set(res.remove || []);
+    if (!incoming.length && !removeIds.size) return null;
+
+    // prune tracked sections that no longer exist on the board (undo / manual delete)
+    const present = new Set([...docRef.current.nodes.map((n) => n.id), ...docRef.current.zones.map((z) => z.id)]);
+    const secs = {};
+    for (const [sid, m] of Object.entries(sectionsRef.current)) {
+      if (Object.values(m.keys).some((id) => present.has(id)) || (m.zoneId && present.has(m.zoneId))) secs[sid] = m;
+    }
+
+    snapshot();
+
+    // First build (nothing tracked yet): full deterministic lane layout.
+    if (!Object.keys(secs).length) {
+      const board = buildFromSections(incoming, res.edges || []);
+      commitBoard({ nodes: board.nodes, edges: board.edges, zones: board.zones }, board.meta);
+      return board;
+    }
+
+    // ---- incremental edit ----
+    const incomingById = new Map(incoming.map((s) => [s.id, s]));
+    const sameFill = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const rebuild = new Set(), keep = new Set();
+    for (const sid of Object.keys(secs)) {
+      if (removeIds.has(sid)) continue;
+      const inc = incomingById.get(sid);
+      if (!inc) { keep.add(sid); continue; }
+      if (inc.template === secs[sid].template && sameFill(inc.fill, secs[sid].fill)) keep.add(sid);
+      else rebuild.add(sid);
+    }
+    const news = incoming.filter((s) => !secs[s.id] && !removeIds.has(s.id));
+    const gone = new Set([...removeIds, ...rebuild]);
+    const goneOwns = (id) => [...gone].some((sid) => ownsId(id, sid));
+
+    const cur = docRef.current;
+    let nodes = cur.nodes.filter((n) => !goneOwns(n.id));
+    let zones = cur.zones.filter((z) => !goneOwns(z.id));
+    const oldCrossPts = {}; // preserve user-shaped bends on rebuilt AI flows
+    let edges = cur.edges.filter((ed) => {
+      if (String(ed.id).startsWith("x")) { if (ed.pts) oldCrossPts[`${ed.s}|${ed.e}`] = ed.pts; return false; }
+      return !goneOwns(ed.s) && !goneOwns(ed.e);
+    });
+
+    const meta = {};
+    for (const sid of keep) meta[sid] = secs[sid];
+
+    // rebuild changed sections anchored to their current top-left node
+    for (const sid of rebuild) {
+      const inc = incomingById.get(sid);
+      const fresh = instantiateTemplate(inc.template, inc.fill, { x: 0, y: 0 }, sid);
+      if (!fresh || !fresh.nodes.length) continue;
+      const lmx = Math.min(...fresh.nodes.map((n) => n.x)), lmy = Math.min(...fresh.nodes.map((n) => n.y));
+      const old = cur.nodes.filter((n) => n.id.startsWith(`${sid}__`));
+      const cmx = Math.min(...old.map((n) => n.x)), cmy = Math.min(...old.map((n) => n.y));
+      const inst = instantiateTemplate(inc.template, inc.fill, { x: cmx - lmx, y: cmy - lmy }, sid);
+      nodes.push(...inst.nodes); edges.push(...inst.edges); if (inst.zone) zones.push(inst.zone);
+      meta[sid] = { template: inc.template, fill: inc.fill, keys: inst.keys, zoneId: inst.zone ? inst.zone.id : null };
+    }
+
+    // place new sections in a fresh column to the right of existing content
+    let box = boxOf(nodes, zones);
+    let curY = box ? box.y0 : 80;
+    const rightX = box ? box.x1 + 160 : 80;
+    for (const s of news) {
+      const inst0 = instantiateTemplate(s.template, s.fill, { x: 0, y: 0 }, s.id);
+      if (!inst0 || !inst0.nodes.length) continue;
+      const p = shiftInst(inst0, rightX, curY);
+      nodes.push(...p.nodes); edges.push(...p.edges); if (p.zone) zones.push(p.zone);
+      meta[s.id] = { template: s.template, fill: s.fill, keys: p.keys, zoneId: p.zone ? p.zone.id : null };
+      curY = p.bbox.y + p.bbox.h + 90;
+    }
+
+    // rebuild cross-section flows for the resulting section set
+    (res.edges || []).forEach((e, i) => {
+      const s = sectionEndpoint(e.source, "out", meta), t = sectionEndpoint(e.target, "in", meta);
+      if (!s || !t || s === t) return;
+      const pts = oldCrossPts[`${s}|${t}`];
+      edges.push({ id: uid("x"), s, e: t, ...(e.label ? { lbl: e.label } : {}), ...(pts ? { pts } : {}) });
+    });
+
+    const board = { nodes, edges, zones };
+    commitBoard(board, meta);
+    return board;
+  };
+
+  /* Insert a deterministic template block at a free spot on the canvas and track
+     it as a section so the AI can later reference/modify it. */
+  const insertTemplate = (templateId, fill) => {
+    const sid = uid("sec");
+    const inst = instantiateTemplate(templateId, fill || {}, { x: 0, y: 0 }, sid);
+    if (!inst || !inst.nodes.length) return;
+    snapshot();
+    const b = bbox();
+    const p = shiftInst(inst, b ? b.x1 + 140 : 80, b ? b.y0 : 80);
+    setNodes((ns) => [...ns, ...p.nodes]);
+    setEdges((es) => [...es, ...p.edges]);
+    if (p.zone) setZones((zs) => [...zs, p.zone]);
+    sectionsRef.current = { ...sectionsRef.current,
+      [sid]: { template: templateId, fill: fill || {}, keys: p.keys, zoneId: p.zone ? p.zone.id : null } };
+    setSel(null);
+    setTimeout(() => fit(), 40);
+  };
+
+  const sendChat = async () => {
+    const text = chatInput.trim();
+    if (!text || chatBusy) return;
+    const missingCreds = provider === "proxy" ? (!proxyUrl || !proxyToken) : !apiKey;
+    if (missingCreds) { setShowChatSettings(true); return; }
+    setChatInput("");
+    const history = [...chatMsgs, { role: "user", text }];
+    setChatMsgs(history);
+    setChatBusy(true);
+    try {
+      const cfg = { provider, apiKey, model, proxyUrl, proxyToken };
+      const convo = history
+        .filter((m) => m.role === "user" || m.role === "ai")
+        .map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text }));
+
+      const sys = systemPrompt(WB_CATALOG, describeDoc(docRef.current, TYPES) + describeSections(sectionsRef.current));
+      const out = await runLLM(cfg, { system: sys, messages: convo, tools: WB_TOOL });
+      const board = applyAI(out);
+      if (!board) throw new Error("The model didn't return any sections to build.");
+      setChatMsgs((m) => [...m, { role: "ai", text: out.message || "Done." }]);
+    } catch (err) {
+      setChatMsgs((m) => [...m, { role: "error", text: err.message || String(err) }]);
+    } finally {
+      setChatBusy(false);
+    }
+  };
+
   /* ---------- gestures ---------- */
 
-  const startPan = (e) => {
-    if (e.button !== 0) return;
-    if (e.shiftKey) {                                  /* marquee select */
-      const w = toWorld(e.clientX, e.clientY);
-      dragRef.current = { mode: "marquee", x0: w.x, y0: w.y };
-      setMarquee({ x0: w.x, y0: w.y, x1: w.x, y1: w.y });
-    } else {
-      dragRef.current = { mode: "pan", sx: e.clientX, sy: e.clientY, v0: view };
-      setSel(null);
-    }
-    viewportRef.current.setPointerCapture(e.pointerId);
-  };
-
-  const startMove = (e, id) => {
-    if (e.button !== 0) return;
-    e.stopPropagation();
-    if (e.shiftKey) {                                  /* toggle multi-selection */
-      setSel((prev) => {
-        const ids = prev && prev.kind === "nodes" ? [...prev.ids] : [];
-        const i = ids.indexOf(id);
-        if (i >= 0) ids.splice(i, 1); else ids.push(id);
-        return ids.length ? { kind: "nodes", ids } : null;
-      });
-      return;
-    }
-    /* manual double-click detection (pointer capture retargets clicks) */
-    const now = Date.now();
-    if (lastClickRef.current.id === id && now - lastClickRef.current.t < 350) {
-      e.preventDefault();                              /* keep focus on the rename input */
-      lastClickRef.current = { id: null, t: 0 };
-      setEditing(id);
-      return;
-    }
-    lastClickRef.current = { id, t: now };
-
-    const w = toWorld(e.clientX, e.clientY);
-    const already = sel && sel.kind === "nodes" && sel.ids.includes(id);
-    const ids = already ? sel.ids : [id];
-    if (!already) setSel({ kind: "nodes", ids: [id] });
-    const starts = {};
-    for (const i2 of ids) { const n = nodeById[i2]; if (n) starts[i2] = { x: n.x, y: n.y }; }
-    dragRef.current = { mode: "move", ids, starts, px: w.x, py: w.y, snapped: false };
-    viewportRef.current.setPointerCapture(e.pointerId);
-  };
-
-  const startResize = (e, id) => {
-    e.stopPropagation();
-    const r = rectOf(nodeById[id]);
-    const w0 = toWorld(e.clientX, e.clientY);
-    dragRef.current = { mode: "resize", id, w: r.w, h: r.h, px: w0.x, py: w0.y, snapped: false };
-    viewportRef.current.setPointerCapture(e.pointerId);
-  };
-
-  const startConnect = (e, id) => {
-    e.stopPropagation();
-    const w = toWorld(e.clientX, e.clientY);
-    dragRef.current = { mode: "connect", from: id };
-    viewportRef.current.setPointerCapture(e.pointerId);
-    setConnect({ from: id, cx: w.x, cy: w.y });
-  };
-
-  const startZoneMove = (e, id) => {
-    if (e.button !== 0) return;
-    e.stopPropagation();
-    setSel({ kind: "zone", id });
-    const z = zones.find((x) => x.id === id);
-    const w = toWorld(e.clientX, e.clientY);
-    /* zone drags its contents: capture nodes whose centers are inside */
-    const nstarts = {};
-    for (const n of nodes) {
-      const r = rectOf(n);
-      const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
-      if (cx >= z.x && cx <= z.x + z.w && cy >= z.y && cy <= z.y + z.h)
-        nstarts[n.id] = { x: n.x, y: n.y };
-    }
-    dragRef.current = { mode: "zmove", id, zx: z.x, zy: z.y, nstarts, px: w.x, py: w.y, snapped: false };
-    viewportRef.current.setPointerCapture(e.pointerId);
-  };
-
-  const startZoneResize = (e, id) => {
-    e.stopPropagation();
-    const z = zones.find((x) => x.id === id);
-    const w = toWorld(e.clientX, e.clientY);
-    dragRef.current = { mode: "zresize", id, w: z.w, h: z.h, px: w.x, py: w.y, snapped: false };
-    viewportRef.current.setPointerCapture(e.pointerId);
-  };
-
-  const startPalette = (e, type) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    dragRef.current = { mode: "palette", type };
-    setGhost({ type, cx: e.clientX, cy: e.clientY });
-    window.addEventListener("pointermove", paletteMove);
-    window.addEventListener("pointerup", paletteUp, { once: true });
-  };
-  const paletteMove = (e) => setGhost((g) => (g ? { ...g, cx: e.clientX, cy: e.clientY } : g));
-  const paletteUp = (e) => {
-    window.removeEventListener("pointermove", paletteMove);
-    const d = dragRef.current;
-    dragRef.current = null;
-    setGhost(null);
-    if (!d || d.mode !== "palette") return;
-    const r = viewportRef.current.getBoundingClientRect();
-    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
-    const w = toWorld(e.clientX, e.clientY);
-    const t = TYPES[d.type];
-    const id = uid("n");
-    snapshot();
-    setNodes((ns) => [...ns, { id, type: d.type, x: snap(w.x - t.w / 2), y: snap(w.y - t.h / 2) }]);
-    setSel({ kind: "nodes", ids: [id] });
-  };
-
-  const onMove = (e) => {
-    const d = dragRef.current;
-    if (!d) return;
-    const lazySnap = () => { if (!d.snapped) { snapshot(); d.snapped = true; } };
-    if (d.mode === "pan") {
-      setView({ ...d.v0, x: d.v0.x + (e.clientX - d.sx), y: d.v0.y + (e.clientY - d.sy) });
-    } else if (d.mode === "marquee") {
-      const w = toWorld(e.clientX, e.clientY);
-      setMarquee({ x0: d.x0, y0: d.y0, x1: w.x, y1: w.y });
-    } else if (d.mode === "move") {
-      lazySnap();
-      const w = toWorld(e.clientX, e.clientY);
-      const dx = w.x - d.px, dy = w.y - d.py;
-      setNodes((ns) => ns.map((n) => d.starts[n.id]
-        ? { ...n, x: snap(d.starts[n.id].x + dx), y: snap(d.starts[n.id].y + dy) } : n));
-    } else if (d.mode === "resize") {
-      lazySnap();
-      const w = toWorld(e.clientX, e.clientY);
-      const nw = Math.max(96, Math.min(640, snap(d.w + (w.x - d.px))));
-      const nh = Math.max(48, Math.min(420, snap(d.h + (w.y - d.py))));
-      setNodes((ns) => ns.map((n) => (n.id === d.id ? { ...n, w: nw, h: nh } : n)));
-    } else if (d.mode === "zmove") {
-      lazySnap();
-      const w = toWorld(e.clientX, e.clientY);
-      const dx = w.x - d.px, dy = w.y - d.py;
-      setZones((zs) => zs.map((z) => (z.id === d.id ? { ...z, x: snap(d.zx + dx), y: snap(d.zy + dy) } : z)));
-      setNodes((ns) => ns.map((n) => d.nstarts[n.id]
-        ? { ...n, x: snap(d.nstarts[n.id].x + dx), y: snap(d.nstarts[n.id].y + dy) } : n));
-    } else if (d.mode === "zresize") {
-      lazySnap();
-      const w = toWorld(e.clientX, e.clientY);
-      const nw = Math.max(160, Math.min(2400, snap(d.w + (w.x - d.px))));
-      const nh = Math.max(120, Math.min(1600, snap(d.h + (w.y - d.py))));
-      setZones((zs) => zs.map((z) => (z.id === d.id ? { ...z, w: nw, h: nh } : z)));
-    } else if (d.mode === "connect") {
-      const w = toWorld(e.clientX, e.clientY);
-      setConnect((c) => (c ? { ...c, cx: w.x, cy: w.y } : c));
-    }
-  };
-
-  const onUp = (e) => {
-    const d = dragRef.current;
-    if (!d) return;
-    if (d.mode === "palette") return;                  /* finalized by window paletteUp */
-    dragRef.current = null;
-    if (d.mode === "connect") {
-      const w = toWorld(e.clientX, e.clientY);
-      const hit = nodes.find((n) => {
-        const r = rectOf(n);
-        return w.x >= r.x && w.x <= r.x + r.w && w.y >= r.y && w.y <= r.y + r.h;
-      });
-      if (hit && hit.id !== d.from &&
-          !edges.some((ed) => ed.s === d.from && ed.e === hit.id)) {
-        snapshot();
-        setEdges((es) => [...es, { id: uid("e"), s: d.from, e: hit.id }]);
-      }
-      setConnect(null);
-    } else if (d.mode === "marquee") {
-      const w = toWorld(e.clientX, e.clientY);
-      const x0 = Math.min(d.x0, w.x), x1 = Math.max(d.x0, w.x);
-      const y0 = Math.min(d.y0, w.y), y1 = Math.max(d.y0, w.y);
-      const ids = nodes.filter((n) => {
-        const r = rectOf(n);
-        return r.x < x1 && r.x + r.w > x0 && r.y < y1 && r.y + r.h > y0;
-      }).map((n) => n.id);
-      setSel(ids.length ? { kind: "nodes", ids } : null);
-      setMarquee(null);
-    }
-  };
+  const { startPan, startMove, startResize, startConnect, startZoneMove, startZoneResize,
+          startPalette, startEdgePoint, onMove, onUp } = useDragController({
+    dragRef, viewportRef, lastClickRef,
+    view, sel, nodes, edges, zones, nodeById,
+    setView, setMarquee, setSel, setNodes, setZones, setEdges, setConnect, setGhost, setEditing, setRouteTick,
+    toWorld, snapshot, uid, rectOf,
+  });
 
   /* ---------- toolbar ---------- */
 
+  /* Load a preset: a user-saved custom version if present, else the built-in. */
   const loadSeed = (key) => {
     snapshot();
-    const s = SEEDS[key];
-    setNodes(clone(s.nodes));
-    setEdges(s.edges.map(([a, b], i) => ({ id: `e${i}`, s: a, e: b })));
-    setZones(clone(s.zones));
+    const custom = readJSON(seedKey(key));
+    if (custom && Array.isArray(custom.nodes)) {
+      setNodes(clone(custom.nodes));
+      setEdges(clone(custom.edges || []));
+      setZones(clone(custom.zones || []));
+      sectionsRef.current = custom.sections ? clone(custom.sections) : {};
+    } else {
+      const s = SEEDS[key];
+      setNodes(clone(s.nodes));
+      setEdges(s.edges.map((ed, i) => Array.isArray(ed)
+        ? { id: `e${i}`, s: ed[0], e: ed[1], lbl: ed[2] }
+        : { id: `e${i}`, s: ed.s, e: ed.e, lbl: ed.lbl, ...(ed.pts ? { pts: ed.pts } : {}), ...(ed.bi ? { bi: true } : {}) }));
+      setZones(clone(s.zones));
+      sectionsRef.current = {};
+    }
     setSel(null);
+    setTimeout(() => fit(), 40);
   };
-  const clearAll = () => { snapshot(); setNodes([]); setEdges([]); setZones([]); setSel(null); };
+
+  /* Copy the current board as pasteable SEEDS code (falls back to a download if
+     the clipboard is unavailable). Drop it into SEEDS in whiteboardTypes.js. */
+  const copySeedCode = () => {
+    const code = toSeedCode(nodes, edges, zones);
+    setSeedMenu(false);
+    const ok = () => flashSeedNote("Seed code copied — paste into whiteboardTypes.js");
+    const fallback = () => {
+      const url = URL.createObjectURL(new Blob([code], { type: "text/plain" }));
+      const a = document.createElement("a");
+      a.href = url; a.download = "whiteboard-seed.txt"; a.click();
+      URL.revokeObjectURL(url);
+      flashSeedNote("Seed code downloaded");
+    };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(code).then(ok, fallback);
+    else fallback();
+  };
+
+  const flashSeedNote = (msg) => { setSeedNote(msg); setTimeout(() => setSeedNote(""), 1800); };
+
+  /* Save the current board as the custom Reference / Air-gapped preset. */
+  const saveSeed = (key, label) => {
+    writeJSON(seedKey(key), { nodes: clone(nodes), edges: clone(edges), zones: clone(zones), sections: clone(sectionsRef.current) });
+    setSeedMenu(false);
+    flashSeedNote(`Saved current board as ${label}`);
+  };
+
+  /* Forget a custom preset so the button loads the built-in default again. */
+  const resetSeed = (key, label) => {
+    try { localStorage.removeItem(seedKey(key)); } catch { /* disabled */ }
+    setSeedMenu(false);
+    flashSeedNote(`${label} reset to default`);
+  };
+
+  const hasCustom = (key) => !!readJSON(seedKey(key));
+  const clearAll = () => { snapshot(); setNodes([]); setEdges([]); setZones([]); sectionsRef.current = {}; setSel(null); };
+
+  /* Deterministic multi-tenant SIEM starter: N tenant source zones on one
+     horizontal line, each feeding shared ingestion -> SIEM cluster -> SOC. */
+  const multiTenantSeed = (n = 3) => {
+    snapshot();
+    const tenants = Array.from({ length: n }, (_, i) => ({
+      id: `tenant${i}`, template: "dataZone", row: true,
+      fill: { label: `Tenant ${String.fromCharCode(65 + i)}`, sources: ["source", "syslog", "saas"], collectors: ["agent"] },
+    }));
+    const sections = [
+      ...tenants,
+      { id: "ingest", template: "sharedIngestion", fill: { tools: ["agent", "logstash", "kafka"] } },
+      { id: "siem", template: "cluster", fill: { label: "SIEM Cluster", tiers: ["hot", "cold", "frozen"], ingest: true, coord: true, master: true } },
+      { id: "soc", template: "userSpace", fill: { label: "SOC", consumers: ["kibana", "users"], idp: true } },
+    ];
+    const edges = [
+      ...tenants.map((t) => ({ source: t.id, target: "ingest" })),
+      { source: "ingest", target: "siem", label: "normalized events" },
+      { source: "siem", target: "soc" },
+    ];
+    const board = buildFromSections(sections, edges);
+    commitBoard({ nodes: board.nodes, edges: board.edges, zones: board.zones }, board.meta);
+  };
 
   const addZone = () => {
     snapshot();
@@ -760,7 +575,13 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   };
 
   const exportJSON = () => {
-    dl(new Blob([JSON.stringify({ nodes, edges: edges.map(({ s, e, lbl }) => (lbl ? [s, e, lbl] : [s, e])), zones }, null, 2)],
+    // Edges with a label, a hand-shaped path, or a zone endpoint are serialized
+    // as objects; plain node-to-node edges stay compact [s, e] tuples.
+    const serEdge = ({ s, e, lbl, pts }) =>
+      (pts || zoneIdSet.has(s) || zoneIdSet.has(e))
+        ? { s, e, ...(lbl ? { lbl } : {}), ...(pts ? { pts } : {}) }
+        : (lbl ? [s, e, lbl] : [s, e]);
+    dl(new Blob([JSON.stringify({ nodes, edges: edges.map(serEdge), zones }, null, 2)],
        { type: "application/json" }), "elastic-whiteboard.json");
   };
   const importJSON = (e) => {
@@ -773,8 +594,11 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) throw new Error("bad shape");
         snapshot();
         setNodes(data.nodes.filter((n) => TYPES[n.type]));
-        setEdges(data.edges.map((ed, i) => ({ id: `e${i}`, s: ed[0], e: ed[1], lbl: ed[2] })));
+        setEdges(data.edges.map((ed, i) => Array.isArray(ed)
+          ? { id: `e${i}`, s: ed[0], e: ed[1], lbl: ed[2] }
+          : { id: `e${i}`, s: ed.s, e: ed.e, lbl: ed.lbl, ...(ed.pts ? { pts: ed.pts } : {}), ...(ed.bi ? { bi: true } : {}) }));
         setZones(Array.isArray(data.zones) ? data.zones : []);
+        sectionsRef.current = {};
         setSel(null);
       } catch { /* ignore malformed files */ }
     };
@@ -828,7 +652,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     }
     for (const ed of edgeGeo) {
       const key = ed.stageKey || "ops";
-      out += `<path d="${ed.d}" fill="none" stroke="${ed.color}" stroke-width="1.8" stroke-linecap="round" ${ed.dashed ? 'stroke-dasharray="5 6"' : ""} marker-end="url(#xarr-${key})"/>`;
+      out += `<path d="${ed.d}" fill="none" stroke="${ed.color}" stroke-width="1.8" stroke-linecap="round" ${ed.dashed ? 'stroke-dasharray="5 6"' : ""} marker-end="url(#xarr-${key})"${ed.bi ? ` marker-start="url(#xarr-${key})"` : ""}/>`;
       if (ed.lbl) out += `<text x="${ed.mid.x}" y="${ed.mid.y - 7}" text-anchor="middle" font-family="'Space Mono',monospace" font-size="11" fill="${surface.muted}" stroke="${surface.bg}" stroke-width="4" paint-order="stroke">${esc(ed.lbl)}</text>`;
     }
     for (const n of nodes) {
@@ -891,16 +715,32 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     return keep;
   }, [hover, edges]);
 
-  const edgeGeo = edges
-    .filter((ed) => nodeById[ed.s] && nodeById[ed.e])
+  const zoneIdSet = useMemo(() => new Set(zones.map((z) => z.id)), [zones]);
+
+  // Edge geometry: a simple orthogonal elbow between endpoints (nodes or zones),
+  // honouring any manual waypoints the user has dragged. No obstacle routing.
+  const edgeGeo = useMemo(() => edges
+    .filter((ed) => endpointRect(ed.s) && endpointRect(ed.e))
     .map((ed) => {
       const a = nodeById[ed.s], b = nodeById[ed.e];
-      const pl = edgePolyline(rectOf(a), rectOf(b));
+      const pl = elbowPath(endpointRect(ed.s), endpointRect(ed.e), ed.pts);
       const mid = plMid(pl);
-      const stageKey = stageKeyOf(a);
+      const src = a || b;                          // colour from whichever end is a node
+      const stageKey = src ? stageKeyOf(src) : "ops";
+      const dashed = (a && TYPES[a.type].ops) || (b && TYPES[b.type].ops) || false;
       return { ...ed, d: roundedPath(pl), mid, len: mid.total,
-               stageKey, color: stages[stageKey], dashed: edgeDashed(a, b) };
-    });
+               stageKey, color: stages[stageKey], dashed };
+    }), [edges, nodeById, zoneById, stages]);
+
+  // wire canvas sized to content (+margin) so nothing clips on wide diagrams
+  const wireBox = useMemo(() => {
+    const boxes = [...zones, ...nodes.map((n) => rectOf(n))];
+    if (!boxes.length) return { x: 0, y: 0, w: 4200, h: 2800 };
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const b of boxes) { x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+    const pad = 240;
+    return { x: x0 - pad, y: y0 - pad, w: (x1 - x0) + pad * 2, h: (y1 - y0) + pad * 2 };
+  }, [nodes, zones]);
 
   const totals = useMemo(() => {
     const t = { count: 0, cpu: 0, mem: 0 };
@@ -914,13 +754,32 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     return t;
   }, [nodes]);
 
-  const tempLine = connect && nodeById[connect.from] ? (() => {
-    const A = anchor(rectOf(nodeById[connect.from]), "r");
+  const tempLine = connect && endpointRect(connect.from) ? (() => {
+    const A = anchor(endpointRect(connect.from), "r");
     return `M ${A.x} ${A.y} L ${connect.cx} ${connect.cy}`;
   })() : null;
 
+  /* Remove one hand-placed waypoint from an edge (double-click a handle). */
+  const removeWaypoint = (edgeId, index) => {
+    snapshot();
+    setEdges((es) => es.map((x) => {
+      if (x.id !== edgeId) return x;
+      const pts = (x.pts || []).filter((_, i) => i !== index);
+      if (pts.length) return { ...x, pts };
+      const { pts: _drop, ...rest } = x;
+      return rest;
+    }));
+    setRouteTick((t) => t + 1);
+  };
+
+  /* Clear all manual waypoints on an edge (Reset shape). */
+  const resetEdgeShape = (edgeId) => {
+    snapshot();
+    setEdges((es) => es.map((x) => { if (x.id !== edgeId) return x; const { pts: _drop, ...rest } = x; return rest; }));
+    setRouteTick((t) => t + 1);
+  };
+
   const selNodeIds = sel && sel.kind === "nodes" ? sel.ids : [];
-  const h = histRef.current;
 
   /* ---------- render ---------- */
   return (
@@ -929,12 +788,38 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
       <div className="ew-toolbar">
         <span className="ew-title">Elastic Whiteboard</span>
-        <button onClick={() => loadSeed("reference")}>Reference</button>
-        <button onClick={() => loadSeed("airgap")}>Air-gapped</button>
+        <button onClick={() => loadSeed("reference")}
+                title={hasCustom("reference") ? "Load your saved Reference architecture" : "Load the built-in Reference architecture"}>
+          Reference{hasCustom("reference") ? " •" : ""}</button>
+        <button onClick={() => loadSeed("airgap")}
+                title={hasCustom("airgap") ? "Load your saved Air-gapped example" : "Load the built-in Air-gapped example"}>
+          Air-gapped{hasCustom("airgap") ? " •" : ""}</button>
+        <button onClick={() => multiTenantSeed(3)}>Multi-tenant</button>
+        <span className="ew-menuwrap">
+          <button onClick={() => setSeedMenu((v) => !v)} title="Save or reset the Reference / Air-gapped presets">Presets ▾</button>
+          {seedMenu && (
+            <>
+              <div className="ew-menu-backdrop" onClick={() => setSeedMenu(false)} />
+              <div className="ew-menu">
+                <div className="ew-menu-h">Save current board as</div>
+                <button onClick={() => saveSeed("reference", "Reference")}>Reference</button>
+                <button onClick={() => saveSeed("airgap", "Air-gapped")}>Air-gapped</button>
+                <div className="ew-menu-sep" />
+                <div className="ew-menu-h">Reset to built-in default</div>
+                <button onClick={() => resetSeed("reference", "Reference")} disabled={!hasCustom("reference")}>Reference</button>
+                <button onClick={() => resetSeed("airgap", "Air-gapped")} disabled={!hasCustom("airgap")}>Air-gapped</button>
+                <div className="ew-menu-sep" />
+                <div className="ew-menu-h">Ship as source default</div>
+                <button onClick={copySeedCode}>Copy board as SEEDS code</button>
+              </div>
+            </>
+          )}
+        </span>
         <button onClick={clearAll}>Clear</button>
+        {seedNote && <span className="ew-seednote">✓ {seedNote}</span>}
         <span className="ew-gap" />
-        <button onClick={undo} disabled={!h.undo.length} title="Undo (Ctrl+Z)">↺</button>
-        <button onClick={redo} disabled={!h.redo.length} title="Redo (Ctrl+Shift+Z)">↻</button>
+        <button onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">↺</button>
+        <button onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">↻</button>
         <button onClick={addZone}>+ Zone</button>
         <span className="ew-gap" />
         <button onClick={exportJSON}>JSON</button>
@@ -947,6 +832,9 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         <span className="ew-zoom">{Math.round(view.k * 100)}%</span>
         <button onClick={() => zoomBy(1.2)}>+</button>
         <button onClick={fit}>Fit</button>
+        <span className="ew-gap" />
+        <button className={"ew-ai-toggle" + (chatOpen ? " on" : "")}
+                onClick={() => setChatOpen((o) => !o)} title="Build with AI">✦ AI</button>
         {(totals.cpu > 0 || totals.mem > 0 || totals.count > 0) && (
           <span className="ew-totals" title="Sums per-node CPU/RAM × node counts">
             Σ{totals.count > 0 && ` ${totals.count} nodes`}{totals.cpu > 0 && ` · ${totals.cpu} vCPU`}{totals.mem > 0 && ` · ${totals.mem} GB RAM`}
@@ -958,6 +846,19 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       <div className="ew-body">
         {/* palette */}
         <div className="ew-palette">
+          <div className="ew-patterns">
+            <div className="ew-patterns-h">Patterns</div>
+            {patternCfg ? (
+              <PatternConfig cfg={patternCfg} setCfg={setPatternCfg}
+                onInsert={() => { insertTemplate(patternCfg.id, patternCfg.fill); setPatternCfg(null); }} />
+            ) : (
+              TEMPLATE_MENU.map((t) => (
+                <button key={t.id} className="ew-pattern"
+                        onClick={() => setPatternCfg({ id: t.id, fill: defaultFill(t.id) })}
+                        title={`Configure and insert the ${t.label} block`}>+ {t.label}</button>
+              ))
+            )}
+          </div>
           <input className="ew-search" placeholder="Search components…"
                  value={q} onChange={(e) => setQ(e.target.value)} />
           {!q.trim() && (
@@ -1004,12 +905,16 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 <div key={z.id} className={"ew-zone" + (isSel ? " sel" : "")}
                      style={{ left: z.x, top: z.y, width: z.w, height: z.h, "--zc": z.color }}>
                   <span className="ew-zlabel" onPointerDown={(e) => startZoneMove(e, z.id)}>{z.label}</span>
+                  {isSel && <span className="ew-zport" title="Drag to connect from this zone"
+                                  onPointerDown={(e) => startConnect(e, z.id)} />}
                   {isSel && <span className="ew-zgrip" onPointerDown={(e) => startZoneResize(e, z.id)} />}
                 </div>
               );
             })}
 
-            <svg className="ew-wires" width="4200" height="2800" viewBox="0 0 4200 2800">
+            <svg className="ew-wires" style={{ left: wireBox.x, top: wireBox.y }}
+                 width={wireBox.w} height={wireBox.h}
+                 viewBox={`${wireBox.x} ${wireBox.y} ${wireBox.w} ${wireBox.h}`}>
               <defs>
                 {Object.entries(stages).map(([k, col]) => (
                   <marker key={k} id={`ew-arr-${k}`} viewBox="0 0 10 10" refX="8" refY="5"
@@ -1029,7 +934,8 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                     <path id={`ew-${ed.id}`} d={ed.d}
                           className={"ew-edge" + (ed.dashed ? " ew-dash" : "") + (dim ? " dim" : "") + (on || isSel ? " on" : "")}
                           stroke={ed.color}
-                          markerEnd={`url(#ew-arr-${ed.stageKey || "ops"})`} />
+                          markerEnd={`url(#ew-arr-${ed.stageKey || "ops"})`}
+                          markerStart={ed.bi ? `url(#ew-arr-${ed.stageKey || "ops"})` : undefined} />
                     {ed.lbl && (
                       <text x={ed.mid.x} y={ed.mid.y - 7} textAnchor="middle"
                             className={"ew-elbl" + (dim ? " dim" : "") + (on || isSel ? " on" : "")}>
@@ -1045,6 +951,34 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                   </g>
                 );
               })}
+              {sel && sel.kind === "edge" && (() => {
+                const ed = edges.find((x) => x.id === sel.id);
+                if (!ed) return null;
+                const ra = endpointRect(ed.s), rb = endpointRect(ed.e);
+                if (!ra || !rb) return null;
+                const pts = ed.pts || [];
+                const sc = { x: ra.x + ra.w / 2, y: ra.y + ra.h / 2 };
+                const tc = { x: rb.x + rb.w / 2, y: rb.y + rb.h / 2 };
+                const spine = [sc, ...pts, tc];
+                const mids = [];
+                for (let i = 0; i < spine.length - 1; i++)
+                  mids.push({ x: (spine[i].x + spine[i + 1].x) / 2, y: (spine[i].y + spine[i + 1].y) / 2, at: i });
+                return (
+                  <g className="ew-edit">
+                    {mids.map((m, i) => (
+                      <circle key={"m" + i} cx={m.x} cy={m.y} r="5" className="ew-wp-add"
+                              style={{ pointerEvents: "all" }}
+                              onPointerDown={(e) => startEdgePoint(e, ed.id, m.at, { x: m.x, y: m.y })} />
+                    ))}
+                    {pts.map((p, i) => (
+                      <circle key={"p" + i} cx={p.x} cy={p.y} r="6" className="ew-wp"
+                              style={{ pointerEvents: "all" }}
+                              onPointerDown={(e) => startEdgePoint(e, ed.id, i)}
+                              onDoubleClick={(e) => { e.stopPropagation(); removeWaypoint(ed.id, i); }} />
+                    ))}
+                  </g>
+                );
+              })()}
               {tempLine && <path d={tempLine} className="ew-temp" />}
             </svg>
 
@@ -1114,13 +1048,13 @@ export default function ElasticWhiteboard({ height = "100%" }) {
           if (sel.kind === "edge") {
             const ed = edges.find((x) => x.id === sel.id);
             if (!ed) return null;
-            const a = nodeById[ed.s], z = nodeById[ed.e];
-            const nm = (x) => (x ? x.title || TYPES[x.type].label : "?");
+            const a = nodeById[ed.s];
+            const hasShape = Array.isArray(ed.pts) && ed.pts.length > 0;
             return (
               <div className="ew-inspector" onPointerDown={(e) => e.stopPropagation()}>
                 <div className="ew-ihead">
                   <span className="ew-idot" style={{ background: a ? stages[stageKeyOf(a)] : stages.ops }} />
-                  <div className="ew-ititle"><b>Connection</b><small>{nm(a)} → {nm(z)}</small></div>
+                  <div className="ew-ititle"><b>Connection</b><small>{endpointName(ed.s)} → {endpointName(ed.e)}</small></div>
                   <button className="ew-x" onClick={() => setSel(null)}>×</button>
                 </div>
                 <div className="ew-iscroll">
@@ -1131,7 +1065,9 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                                snapGuard("elbl:" + ed.id);
                                setEdges((es) => es.map((x) => (x.id === ed.id ? { ...x, lbl: e.target.value || undefined } : x)));
                              }} /></div>
+                    <p className="ew-ihint">Drag the hollow dots on the line to bend it; drag a solid dot to move a bend, double-click it to remove.</p>
                     <div className="ew-btnrow">
+                      {hasShape && <button className="ew-btn" onClick={() => resetEdgeShape(ed.id)}>Reset shape</button>}
                       <button className="ew-btn" onClick={() => {
                         snapshot();
                         setEdges((es) => es.map((x) => (x.id === ed.id ? { ...x, s: ed.e, e: ed.s } : x)));
@@ -1323,6 +1259,85 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         })()}
       </div>
 
+      {/* AI chat */}
+      {chatOpen && (
+        <div className="ew-chat" onPointerDown={(e) => e.stopPropagation()}>
+          <div className="ew-chat-head">
+            <b>✦ Build with AI</b>
+            <button className="ew-chat-gear" title="Settings" onClick={() => setShowChatSettings((s) => !s)}>⚙</button>
+            <button className="ew-x" onClick={() => setChatOpen(false)}>×</button>
+          </div>
+
+          {showChatSettings && (
+            <div className="ew-chat-settings">
+              <label className="ew-flabel">Provider</label>
+              <select className="ew-chat-select" value={provider}
+                      onChange={(e) => setProvider(e.target.value)}>
+                <option value="anthropic">Anthropic (direct)</option>
+                <option value="proxy">OpenAI-compatible proxy</option>
+              </select>
+
+              {provider === "proxy" ? (
+                <>
+                  <label className="ew-flabel">Endpoint URL</label>
+                  <input value={proxyUrl} placeholder="https://…/v1/chat/completions"
+                         onChange={(e) => setProxyUrl(e.target.value.trim())} />
+                  <label className="ew-flabel">Bearer token</label>
+                  <input type="password" value={proxyToken} placeholder="sk-…"
+                         onChange={(e) => setProxyToken(e.target.value.trim())} />
+                  <label className="ew-flabel">Model</label>
+                  <input value={model} placeholder="claude-opus-4-7"
+                         onChange={(e) => setModel(e.target.value.trim())} />
+                  <p className="ew-chat-note">
+                    Requests go to your proxy with an <code>Authorization: Bearer</code> header. The URL and token are stored in this browser (localStorage). Don’t use this on a shared computer.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <label className="ew-flabel">Anthropic API key</label>
+                  <input type="password" value={apiKey} placeholder="sk-ant-…"
+                         onChange={(e) => setApiKey(e.target.value.trim())} />
+                  <label className="ew-flabel">Model</label>
+                  <input value={model} placeholder="claude-sonnet-5"
+                         onChange={(e) => setModel(e.target.value.trim())} />
+                  <p className="ew-chat-note">
+                    Your key is stored in this browser (localStorage) and sent directly to Anthropic from your machine. Don’t use this on a shared computer.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="ew-chat-log" ref={chatLogRef}>
+            {chatMsgs.length === 0 && !chatBusy && (
+              <div className="ew-chat-empty">
+                Describe an architecture and I’ll build it.
+                <div className="ew-chat-chips">
+                  {["Design a SIEM log ingest pipeline",
+                    "Build an air-gapped Elastic deployment",
+                    "Add a Kafka buffer before Elasticsearch"].map((s) => (
+                    <button key={s} onClick={() => setChatInput(s)}>{s}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {chatMsgs.map((m, i) => (
+              <div key={i} className={"ew-msg " + m.role}>{m.text}</div>
+            ))}
+            {chatBusy && <div className="ew-msg ai ew-thinking">Thinking…</div>}
+          </div>
+
+          <div className="ew-chat-form">
+            <textarea className="ew-chat-input" rows={2} value={chatInput}
+                      placeholder={(provider === "proxy" ? (proxyUrl && proxyToken) : apiKey) ? "Describe or edit the diagram…" : "Add credentials (⚙) to begin…"}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }} />
+            <button className="ew-chat-send" onClick={sendChat} disabled={chatBusy || !chatInput.trim()}
+                    title="Send (Enter)">{chatBusy ? "…" : "Send"}</button>
+          </div>
+        </div>
+      )}
+
       {/* palette drag ghost */}
       {ghost && (
         <div className="ew-ghost" style={{ left: ghost.cx, top: ghost.cy, "--tag": tagOf(TYPES[ghost.type], stages) }}>
@@ -1343,6 +1358,53 @@ function PaletteItem({ k, t, start, stages }) {
   );
 }
 
+/* Inline config form for a Patterns block: renders checkbox sets / toggles from
+   the template's control schema, then inserts a fully deterministic block. */
+function PatternConfig({ cfg, setCfg, onInsert }) {
+  const conf = TEMPLATE_CONFIG[cfg.id];
+  if (!conf) return null;
+  const set = (key, val) => setCfg((c) => ({ ...c, fill: { ...c.fill, [key]: val } }));
+  const toggleIn = (key, opt, order) => {
+    const cur = cfg.fill[key] || [];
+    const next = cur.includes(opt) ? cur.filter((k) => k !== opt) : [...cur, opt];
+    set(key, order.filter((k) => next.includes(k))); // keep option order for determinism
+  };
+  const disabled = conf.controls.some((c) => c.kind === "checkset" && !(cfg.fill[c.key] || []).length);
+  return (
+    <div className="ew-pconf">
+      <div className="ew-pconf-top">
+        <button className="ew-pconf-back" onClick={() => setCfg(null)} title="Back to patterns">←</button>
+        <span className="ew-pconf-title">{conf.label}</span>
+      </div>
+      {conf.controls.map((ctrl) => (
+        <div key={ctrl.key} className="ew-pconf-group">
+          <div className="ew-pconf-label">{ctrl.label}</div>
+          {ctrl.kind === "toggle" ? (
+            <label className="ew-pconf-toggle">
+              <input type="checkbox" checked={!!cfg.fill[ctrl.key]} onChange={(e) => set(ctrl.key, e.target.checked)} />
+              <span>{cfg.fill[ctrl.key] ? "Enabled" : "Disabled"}</span>
+            </label>
+          ) : (
+            <div className="ew-pconf-checks">
+              {ctrl.options.map(([val, lbl]) => {
+                const order = ctrl.options.map((o) => o[0]);
+                const on = (cfg.fill[ctrl.key] || []).includes(val);
+                return (
+                  <label key={val} className={"ew-pconf-chip" + (on ? " on" : "")}>
+                    <input type="checkbox" checked={on} onChange={() => toggleIn(ctrl.key, val, order)} />
+                    <span>{lbl}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ))}
+      <button className="ew-pconf-insert" onClick={onInsert} disabled={disabled}>Insert block</button>
+    </div>
+  );
+}
+
 const CSS = `
 .ew-root{
   --bg:#0C1530; --panel:#16213F; --panel2:#0F1A38; --line:#2A3556;
@@ -1350,6 +1412,7 @@ const CSS = `
   --display:"Mier B","Inter",system-ui,sans-serif;
   --body:"Inter",system-ui,sans-serif;
   --mono:"Space Mono",ui-monospace,monospace;
+  position:relative;
   display:flex; flex-direction:column; min-height:560px; max-height:100vh;
   background:var(--bg); color:var(--ink); font-family:var(--body);
   overflow:hidden;
@@ -1364,7 +1427,20 @@ const CSS = `
 .ew-gap{ width:10px; }
 .ew-zoom{ font-family:var(--mono); font-size:12px; color:var(--muted); min-width:44px; text-align:center; }
 .ew-totals{ font-family:var(--mono); font-size:11.5px; color:var(--accent); margin-left:6px; }
-.ew-hint{ margin-left:auto; font-family:var(--mono); font-size:10.5px; color:var(--faint); }
+.ew-hint{ font-family:var(--mono); font-size:10.5px; color:var(--faint); }
+.ew-menuwrap{ position:relative; display:inline-flex; }
+.ew-menu-backdrop{ position:fixed; inset:0; z-index:40; }
+.ew-menu{ position:absolute; top:calc(100% + 6px); left:0; z-index:41; min-width:190px;
+  background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:6px;
+  display:grid; gap:2px; box-shadow:0 12px 30px rgba(0,0,0,.35); }
+.ew-menu-h{ font-family:var(--mono); font-size:9.5px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--faint); padding:5px 8px 3px; }
+.ew-menu button{ text-align:left; width:100%; background:transparent; border:1px solid transparent;
+  border-radius:6px; padding:6px 8px; color:var(--ink); font-family:var(--mono); font-size:12px; cursor:pointer; }
+.ew-menu button:hover:not(:disabled){ background:var(--panel2); border-color:var(--accent); }
+.ew-menu button:disabled{ opacity:.35; cursor:default; }
+.ew-menu-sep{ height:1px; background:var(--line); margin:4px 2px; }
+.ew-seednote{ font-family:var(--mono); font-size:11px; color:var(--accent); }
 .ew-body{ display:flex; flex:1; min-height:0; }
 /* Themed scrollbars for the dock panels (palette + inspector). */
 .ew-palette, .ew-iscroll{ scrollbar-width:thin; scrollbar-color:var(--line) transparent; }
@@ -1376,6 +1452,32 @@ const CSS = `
   background:var(--accent); background-clip:padding-box; }
 .ew-palette{ width:264px; flex:none; overflow-y:auto; padding:10px;
   border-right:1px solid var(--line); background:var(--panel2); display:grid; gap:8px; align-content:start; }
+.ew-patterns{ display:grid; gap:6px; padding-bottom:8px; margin-bottom:2px; border-bottom:1px solid var(--line); }
+.ew-patterns-h{ font-family:var(--mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--faint); padding:2px 2px 2px; }
+.ew-pattern{ text-align:left; background:var(--panel); color:var(--ink); border:1px solid var(--line);
+  border-left:3px solid var(--accent); border-radius:8px; padding:7px 10px; cursor:pointer;
+  font-family:var(--display); font-weight:500; font-size:13px; }
+.ew-pattern:hover{ border-color:var(--accent); }
+.ew-pconf{ display:grid; gap:9px; background:var(--panel); border:1px solid var(--line);
+  border-radius:8px; padding:9px; }
+.ew-pconf-top{ display:flex; align-items:center; gap:7px; }
+.ew-pconf-back{ background:var(--panel2); color:var(--muted); border:1px solid var(--line);
+  border-radius:6px; width:24px; height:24px; cursor:pointer; font-size:13px; line-height:1; padding:0; }
+.ew-pconf-back:hover{ color:var(--ink); border-color:var(--accent); }
+.ew-pconf-title{ font-family:var(--display); font-weight:600; font-size:13px; color:var(--ink); }
+.ew-pconf-group{ display:grid; gap:5px; }
+.ew-pconf-label{ font-family:var(--mono); font-size:9.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); }
+.ew-pconf-checks{ display:flex; flex-wrap:wrap; gap:5px; }
+.ew-pconf-chip{ display:inline-flex; align-items:center; gap:5px; padding:4px 8px; border-radius:99px;
+  border:1px solid var(--line); background:var(--panel2); color:var(--muted); cursor:pointer; font-size:11.5px; user-select:none; }
+.ew-pconf-chip input{ display:none; }
+.ew-pconf-chip.on{ color:var(--bg); background:var(--accent); border-color:var(--accent); font-weight:600; }
+.ew-pconf-toggle{ display:inline-flex; align-items:center; gap:7px; font-size:12px; color:var(--muted); cursor:pointer; }
+.ew-pconf-toggle input{ accent-color:var(--accent); }
+.ew-pconf-insert{ margin-top:2px; background:var(--accent); color:var(--bg); border:none; border-radius:7px;
+  padding:7px 10px; cursor:pointer; font-family:var(--display); font-weight:600; font-size:12.5px; }
+.ew-pconf-insert:disabled{ opacity:.4; cursor:not-allowed; }
 .ew-search{ width:100%; box-sizing:border-box; background:var(--panel); color:var(--ink);
   border:1px solid var(--line); border-radius:7px; padding:6px 9px; font-family:var(--mono);
   font-size:12px; margin-bottom:2px; }
@@ -1409,9 +1511,13 @@ const CSS = `
 .ew-particle{ pointer-events:none; transition:opacity .2s; }
 .ew-particle.dim{ opacity:.1; }
 .ew-elbl{ font-family:var(--mono); font-size:11px; fill:var(--muted); pointer-events:none;
-  paint-order:stroke; stroke:#0C1530; stroke-width:4px; stroke-linejoin:round; transition:opacity .2s; }
+  paint-order:stroke; stroke:var(--bg); stroke-width:4px; stroke-linejoin:round; transition:opacity .2s; }
 .ew-elbl.dim{ opacity:.1; } .ew-elbl.on{ fill:var(--ink); }
 .ew-temp{ fill:none; stroke:var(--ink); stroke-width:1.6; stroke-dasharray:4 5; pointer-events:none; }
+.ew-wp{ fill:var(--tag); stroke:var(--bg); stroke-width:2; cursor:grab; }
+.ew-wp:hover{ stroke:var(--tag); }
+.ew-wp-add{ fill:var(--bg); stroke:var(--tag); stroke-width:2; opacity:.55; cursor:copy; }
+.ew-wp-add:hover{ opacity:1; }
 .ew-zone{ position:absolute; border:1.5px dashed var(--zc); border-radius:14px;
   background:color-mix(in srgb, var(--zc) 4%, transparent); pointer-events:none; }
 .ew-zone.sel{ border-style:solid; }
@@ -1421,6 +1527,9 @@ const CSS = `
   text-transform:uppercase; user-select:none; white-space:nowrap; }
 .ew-zgrip{ position:absolute; right:-7px; bottom:-7px; width:14px; height:14px; border-radius:3px;
   background:var(--panel2); border:2px solid var(--zc); cursor:nwse-resize; pointer-events:auto; z-index:4; }
+.ew-zport{ position:absolute; right:-6px; top:50%; margin-top:-6px; width:12px; height:12px; border-radius:99px;
+  background:var(--bg); border:2px solid var(--zc); cursor:crosshair; pointer-events:auto; z-index:4; }
+.ew-zport:hover{ background:var(--zc); }
 .ew-marquee{ position:absolute; border:1px dashed #4C8DFF; background:rgba(76,141,255,.08);
   pointer-events:none; }
 .ew-node{ position:absolute; border:1px solid var(--line); border-radius:10px;
@@ -1478,6 +1587,7 @@ const CSS = `
 .ew-size input{ width:64px !important; }
 .ew-size i{ color:var(--faint); font-style:normal; }
 .ew-btnrow{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.ew-ihint{ margin:8px 0 4px; font-size:11px; line-height:1.45; color:var(--muted); }
 .ew-btn{ background:var(--panel); color:var(--muted); border:1px solid var(--line); border-radius:6px;
   padding:5px 10px; font-family:var(--mono); font-size:11px; cursor:pointer; display:inline-block; }
 .ew-btn:hover:not(:disabled){ border-color:var(--accent); color:var(--ink); }
@@ -1490,7 +1600,61 @@ const CSS = `
   background:var(--panel); border:1px solid var(--tag); border-left:3px solid var(--tag);
   border-radius:8px; padding:8px 14px; font-family:"Mier B","Inter",sans-serif; font-size:13px;
   color:var(--ink); box-shadow:0 8px 24px rgba(0,0,0,.5); opacity:.92; }
-@media (prefers-reduced-motion: reduce){ .ew-particle{ display:none; } }
+/* ---- AI chat ---- */
+.ew-ai-toggle{ font-weight:600; }
+.ew-ai-toggle.on{ border-color:var(--accent) !important; color:var(--accent) !important; }
+.ew-chat{ position:absolute; right:16px; bottom:16px; z-index:20; width:380px;
+  max-height:min(74%, 660px); display:flex; flex-direction:column; overflow:hidden;
+  background:var(--panel2); border:1px solid var(--line); border-radius:14px;
+  box-shadow:0 16px 48px rgba(0,0,0,.5); }
+.ew-chat-head{ display:flex; align-items:center; gap:8px; padding:11px 13px;
+  border-bottom:1px solid var(--line); flex:none; }
+.ew-chat-head b{ font-family:var(--display); font-size:14px; }
+.ew-chat-head .ew-x{ margin-left:0; }
+.ew-chat-gear{ margin-left:auto; background:none; border:none; color:var(--muted);
+  font-size:15px; cursor:pointer; padding:2px 4px; }
+.ew-chat-gear:hover{ color:var(--ink); }
+.ew-chat-settings{ display:grid; gap:6px; padding:11px 13px; border-bottom:1px solid var(--line);
+  background:var(--panel); flex:none; max-height:52%; overflow-y:auto; }
+.ew-chat-settings input{ background:var(--panel2); color:var(--ink); border:1px solid var(--line);
+  border-radius:6px; padding:6px 9px; font-family:var(--mono); font-size:12px; }
+.ew-chat-settings input:focus{ outline:none; border-color:var(--accent); }
+.ew-chat-select{ background:var(--panel2); color:var(--ink); border:1px solid var(--line);
+  border-radius:7px; padding:6px 8px; font-family:var(--body); font-size:12px; }
+.ew-chat-select:focus{ outline:none; border-color:var(--accent); }
+.ew-chat-note code{ font-family:var(--mono); font-size:10px; color:var(--muted); }
+.ew-chat-note{ font-size:10.5px; line-height:1.45; color:var(--faint); margin:0; }
+.ew-chat-log{ flex:1; min-height:0; overflow-y:auto; padding:13px; display:flex;
+  flex-direction:column; gap:9px; scrollbar-width:thin; scrollbar-color:var(--line) transparent; }
+.ew-chat-log::-webkit-scrollbar{ width:10px; }
+.ew-chat-log::-webkit-scrollbar-thumb{ background:var(--line); border-radius:99px;
+  border:2px solid transparent; background-clip:padding-box; }
+.ew-msg{ padding:8px 11px; border-radius:11px; font-size:12.5px; line-height:1.5;
+  max-width:88%; white-space:pre-wrap; word-break:break-word; }
+.ew-msg.user{ align-self:flex-end; background:var(--accent); color:#06121f; }
+.ew-msg.ai{ align-self:flex-start; background:var(--panel); border:1px solid var(--line); color:var(--ink); }
+.ew-msg.error{ align-self:flex-start; color:var(--ink);
+  background:color-mix(in srgb, #F04E98 15%, transparent); border:1px solid #F04E98; }
+.ew-msg.status{ align-self:center; max-width:100%; text-align:center; background:none;
+  color:var(--faint); font-size:11px; padding:2px 4px; font-family:var(--mono); }
+.ew-thinking{ opacity:.7; animation:ew-pulse 1.1s ease-in-out infinite; }
+@keyframes ew-pulse{ 50%{ opacity:.35; } }
+.ew-chat-empty{ margin:auto; text-align:center; color:var(--faint); font-size:12px;
+  display:flex; flex-direction:column; gap:12px; padding:14px; }
+.ew-chat-chips{ display:flex; flex-direction:column; gap:6px; }
+.ew-chat-chips button{ background:var(--panel); color:var(--muted); border:1px solid var(--line);
+  border-radius:8px; padding:7px 10px; font-family:var(--body); font-size:12px; cursor:pointer; text-align:left; }
+.ew-chat-chips button:hover{ border-color:var(--accent); color:var(--ink); }
+.ew-chat-form{ display:flex; gap:7px; padding:10px; border-top:1px solid var(--line); flex:none; }
+.ew-chat-input{ flex:1; resize:none; background:var(--panel); color:var(--ink);
+  border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-family:var(--body);
+  font-size:12.5px; line-height:1.4; }
+.ew-chat-input:focus{ outline:none; border-color:var(--accent); }
+.ew-chat-send{ align-self:stretch; padding:0 14px; background:var(--accent); color:#06121f;
+  border:none; border-radius:8px; font-family:var(--mono); font-size:12px; font-weight:700; cursor:pointer; }
+.ew-chat-send:disabled{ opacity:.4; cursor:default; }
+
+@media (prefers-reduced-motion: reduce){ .ew-particle{ display:none; } .ew-thinking{ animation:none; } }
 
 /* ---- light theme overrides (follows the app's light/dark toggle) ---- */
 .ew-light{
@@ -1500,4 +1664,7 @@ const CSS = `
 .ew-light .ew-viewport{ background-image:radial-gradient(circle, #d3dcea 1px, transparent 1px); }
 .ew-light .ew-node{ box-shadow:0 1px 3px rgba(16,28,63,.10), 0 1px 2px rgba(16,28,63,.06); }
 .ew-light .ew-ghost{ box-shadow:0 10px 26px rgba(16,28,63,.18); }
+.ew-light .ew-chat{ box-shadow:0 16px 48px rgba(16,28,63,.22); }
+.ew-light .ew-msg.user{ color:#fff; }
+.ew-light .ew-chat-send{ color:#fff; }
 `;

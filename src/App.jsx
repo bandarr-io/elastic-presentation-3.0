@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { Analytics } from '@vercel/analytics/react'
 import { ThemeProvider, useTheme } from './context/ThemeContext'
 import { TeamProvider } from './context/TeamContext'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
@@ -1980,6 +1981,7 @@ function App() {
     <ThemeProvider>
       <TeamProvider>
         <AppContent />
+        <Analytics />
       </TeamProvider>
     </ThemeProvider>
   )
