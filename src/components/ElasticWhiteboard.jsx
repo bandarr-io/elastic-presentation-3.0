@@ -51,14 +51,97 @@ const fieldChips = (n) => {
   return out;
 };
 
-const stageKeyOf = (srcNode) => {
-  const t = TYPES[srcNode.type];
-  return t.flow || t.stage;
-};
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
 let UID = 1000;
 const uid = (p) => `${p}${UID++}`;
+
+/* Pure alignment maths shared by nodes and zones. `rects` are {id,x,y,w,h}. */
+const computeAlign = (rects, mode) => {
+  const minX = Math.min(...rects.map((r) => r.x)), maxR = Math.max(...rects.map((r) => r.x + r.w));
+  const minY = Math.min(...rects.map((r) => r.y)), maxB = Math.max(...rects.map((r) => r.y + r.h));
+  const cx = (minX + maxR) / 2, cy = (minY + maxB) / 2;
+  const out = {};
+  for (const r of rects) {
+    const p = {};
+    if (mode === "left") p.x = minX;
+    else if (mode === "right") p.x = maxR - r.w;
+    else if (mode === "centerH") p.x = cx - r.w / 2;
+    else if (mode === "top") p.y = minY;
+    else if (mode === "bottom") p.y = maxB - r.h;
+    else if (mode === "middle") p.y = cy - r.h / 2;
+    if (p.x != null) p.x = snap(p.x);
+    if (p.y != null) p.y = snap(p.y);
+    out[r.id] = p;
+  }
+  return out;
+};
+/* Equal-gap distribution keeping the two extreme rects fixed. axis: "h"|"v". */
+const computeDistribute = (rects, axis) => {
+  const key = axis === "h" ? "x" : "y", size = axis === "h" ? "w" : "h";
+  const rs = [...rects].sort((a, b) => a[key] - b[key]);
+  const start = rs[0][key], end = rs[rs.length - 1][key] + rs[rs.length - 1][size];
+  const gap = (end - start - rs.reduce((s, r) => s + r[size], 0)) / (rs.length - 1);
+  const out = {};
+  let cur = start;
+  for (const r of rs) { out[r.id] = { [key]: snap(cur) }; cur += r[size] + gap; }
+  return out;
+};
+
+/* Tiny glyph illustrating an alignment mode: a guide line + two bars snapped
+   to it. Inherits `currentColor` so it follows the button's text color. */
+const AlignIcon = ({ m }) => {
+  const horiz = m === "left" || m === "centerH" || m === "right";
+  const line = { stroke: "currentColor", strokeWidth: 1.2, strokeLinecap: "round" };
+  if (horiz) {
+    const gx = m === "left" ? 3.5 : m === "right" ? 12.5 : 8;
+    const bars = [{ y: 4, w: 9 }, { y: 9.6, w: 6 }];
+    return (
+      <svg width="16" height="16" viewBox="0 0 16 16">
+        <line x1={gx} y1={2} x2={gx} y2={14} {...line} />
+        {bars.map((b, i) => {
+          const x = m === "left" ? gx : m === "right" ? gx - b.w : gx - b.w / 2;
+          return <rect key={i} x={x} y={b.y} width={b.w} height="2.4" rx="1" fill="currentColor" />;
+        })}
+      </svg>
+    );
+  }
+  const gy = m === "top" ? 3.5 : m === "bottom" ? 12.5 : 8;
+  const bars = [{ x: 4, h: 9 }, { x: 9.6, h: 6 }];
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16">
+      <line x1={2} y1={gy} x2={14} y2={gy} {...line} />
+      {bars.map((b, i) => {
+        const y = m === "top" ? gy : m === "bottom" ? gy - b.h : gy - b.h / 2;
+        return <rect key={i} x={b.x} y={y} width="2.4" height={b.h} rx="1" fill="currentColor" />;
+      })}
+    </svg>
+  );
+};
+
+const ALIGN_MODES = [
+  { m: "left", title: "Align left" }, { m: "centerH", title: "Align horizontal centers" },
+  { m: "right", title: "Align right" }, { div: true },
+  { m: "top", title: "Align top" }, { m: "middle", title: "Align vertical centers" },
+  { m: "bottom", title: "Align bottom" },
+];
+/* Shared Align/Distribute panel used by both multi-node and multi-zone selections. */
+const AlignControls = ({ onAlign, onDistribute, canDistribute }) => (
+  <>
+    <h5>Align</h5>
+    <div className="ew-align">
+      {ALIGN_MODES.map((a, i) => (a.div
+        ? <span key={i} className="ew-adiv" />
+        : <button key={a.m} className="ew-abtn" title={a.title} onClick={() => onAlign(a.m)}><AlignIcon m={a.m} /></button>))}
+    </div>
+    <h5>Distribute</h5>
+    <div className="ew-btnrow">
+      <button className="ew-btn" disabled={!canDistribute} onClick={() => onDistribute("h")}>Horizontally</button>
+      <button className="ew-btn" disabled={!canDistribute} onClick={() => onDistribute("v")}>Vertically</button>
+    </div>
+    {!canDistribute && <p className="ew-ihint">Select 3+ to distribute evenly.</p>}
+  </>
+);
 
 /* ---- persistence (autosave board + user-saved seed presets) ---- */
 const BOARD_KEY = "ew-board";
@@ -83,7 +166,7 @@ const seedNodeStr = (n) => {
 };
 const seedEdgeStr = (e) => {
   const hasPts = e.pts && e.pts.length;
-  if (hasPts || e.bi) return `      { s: ${JSON.stringify(e.s)}, e: ${JSON.stringify(e.e)}${e.lbl ? `, lbl: ${JSON.stringify(e.lbl)}` : ""}${e.bi ? ", bi: true" : ""}${hasPts ? `, pts: ${JSON.stringify(e.pts)}` : ""} },`;
+  if (hasPts || e.bi || e.color) return `      { s: ${JSON.stringify(e.s)}, e: ${JSON.stringify(e.e)}${e.lbl ? `, lbl: ${JSON.stringify(e.lbl)}` : ""}${e.bi ? ", bi: true" : ""}${e.color ? `, color: ${JSON.stringify(e.color)}` : ""}${hasPts ? `, pts: ${JSON.stringify(e.pts)}` : ""} },`;
   return e.lbl
     ? `      [${JSON.stringify(e.s)}, ${JSON.stringify(e.e)}, ${JSON.stringify(e.lbl)}],`
     : `      [${JSON.stringify(e.s)}, ${JSON.stringify(e.e)}],`;
@@ -241,6 +324,8 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       setEdges((es) => es.filter((ed) => ed.id !== sel.id));
     } else if (sel.kind === "zone") {
       setZones((zs) => zs.filter((z) => z.id !== sel.id));
+    } else if (sel.kind === "zones") {
+      setZones((zs) => zs.filter((z) => !sel.ids.includes(z.id)));
     }
     setSel(null);
   };
@@ -276,6 +361,56 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       return out;
     });
     if (clones.length) setSel({ kind: "nodes", ids: clones });
+  };
+
+  const nodeRects = () => sel.ids.map((id) => ({ id, ...rectOf(nodeById[id]) }));
+
+  /* Align 2+ selected nodes to a shared edge/center of their bounding box. */
+  const alignNodes = (mode) => {
+    if (!sel || sel.kind !== "nodes" || sel.ids.length < 2) return;
+    const pos = computeAlign(nodeRects(), mode);
+    snapshot();
+    setNodes((ns) => ns.map((n) => (pos[n.id] ? { ...n, ...pos[n.id] } : n)));
+  };
+
+  /* Distribute 3+ selected nodes with equal gaps between them. axis: "h"|"v". */
+  const distributeNodes = (axis) => {
+    if (!sel || sel.kind !== "nodes" || sel.ids.length < 3) return;
+    const pos = computeDistribute(nodeRects(), axis);
+    snapshot();
+    setNodes((ns) => ns.map((n) => (pos[n.id] ? { ...n, ...pos[n.id] } : n)));
+  };
+
+  /* Nodes whose center sits inside a zone (mirrors zone-drag capture). */
+  const nodesInZone = (z) => nodes.filter((n) => {
+    const r = rectOf(n), cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    return cx >= z.x && cx <= z.x + z.w && cy >= z.y && cy <= z.y + z.h;
+  });
+
+  /* Apply a zone-position map, shifting each zone's contents by the same delta
+     so aligned/distributed zones keep the nodes they contain. */
+  const moveZones = (pos) => {
+    const shift = {};
+    for (const z of zones) {
+      const p = pos[z.id];
+      if (!p) continue;
+      const dx = (p.x != null ? p.x : z.x) - z.x, dy = (p.y != null ? p.y : z.y) - z.y;
+      if (dx || dy) for (const n of nodesInZone(z)) shift[n.id] = { dx, dy };
+    }
+    snapshot();
+    setZones((zs) => zs.map((z) => (pos[z.id] ? { ...z, ...pos[z.id] } : z)));
+    setNodes((ns) => ns.map((n) => (shift[n.id]
+      ? { ...n, x: snap(n.x + shift[n.id].dx), y: snap(n.y + shift[n.id].dy) } : n)));
+  };
+  const zoneRects = () => sel.ids.map((id) => zoneById[id]).filter(Boolean)
+    .map((z) => ({ id: z.id, x: z.x, y: z.y, w: z.w, h: z.h }));
+  const alignZones = (mode) => {
+    if (!sel || sel.kind !== "zones" || sel.ids.length < 2) return;
+    moveZones(computeAlign(zoneRects(), mode));
+  };
+  const distributeZones = (axis) => {
+    if (!sel || sel.kind !== "zones" || sel.ids.length < 3) return;
+    moveZones(computeDistribute(zoneRects(), axis));
   };
 
   /* ---------- AI: apply a model-generated document/edit ---------- */
@@ -489,7 +624,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       setNodes(clone(s.nodes));
       setEdges(s.edges.map((ed, i) => Array.isArray(ed)
         ? { id: `e${i}`, s: ed[0], e: ed[1], lbl: ed[2] }
-        : { id: `e${i}`, s: ed.s, e: ed.e, lbl: ed.lbl, ...(ed.pts ? { pts: ed.pts } : {}), ...(ed.bi ? { bi: true } : {}) }));
+        : { id: `e${i}`, s: ed.s, e: ed.e, lbl: ed.lbl, ...(ed.pts ? { pts: ed.pts } : {}), ...(ed.bi ? { bi: true } : {}), ...(ed.color ? { color: ed.color } : {}) }));
       setZones(clone(s.zones));
       sectionsRef.current = {};
     }
@@ -533,29 +668,6 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const hasCustom = (key) => !!readJSON(seedKey(key));
   const clearAll = () => { snapshot(); setNodes([]); setEdges([]); setZones([]); sectionsRef.current = {}; setSel(null); };
 
-  /* Deterministic multi-tenant SIEM starter: N tenant source zones on one
-     horizontal line, each feeding shared ingestion -> SIEM cluster -> SOC. */
-  const multiTenantSeed = (n = 3) => {
-    snapshot();
-    const tenants = Array.from({ length: n }, (_, i) => ({
-      id: `tenant${i}`, template: "dataZone", row: true,
-      fill: { label: `Tenant ${String.fromCharCode(65 + i)}`, sources: ["source", "syslog", "saas"], collectors: ["agent"] },
-    }));
-    const sections = [
-      ...tenants,
-      { id: "ingest", template: "sharedIngestion", fill: { tools: ["agent", "logstash", "kafka"] } },
-      { id: "siem", template: "cluster", fill: { label: "SIEM Cluster", tiers: ["hot", "cold", "frozen"], ingest: true, coord: true, master: true } },
-      { id: "soc", template: "userSpace", fill: { label: "SOC", consumers: ["kibana", "users"], idp: true } },
-    ];
-    const edges = [
-      ...tenants.map((t) => ({ source: t.id, target: "ingest" })),
-      { source: "ingest", target: "siem", label: "normalized events" },
-      { source: "siem", target: "soc" },
-    ];
-    const board = buildFromSections(sections, edges);
-    commitBoard({ nodes: board.nodes, edges: board.edges, zones: board.zones }, board.meta);
-  };
-
   const addZone = () => {
     snapshot();
     const el = viewportRef.current;
@@ -596,7 +708,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         setNodes(data.nodes.filter((n) => TYPES[n.type]));
         setEdges(data.edges.map((ed, i) => Array.isArray(ed)
           ? { id: `e${i}`, s: ed[0], e: ed[1], lbl: ed[2] }
-          : { id: `e${i}`, s: ed.s, e: ed.e, lbl: ed.lbl, ...(ed.pts ? { pts: ed.pts } : {}), ...(ed.bi ? { bi: true } : {}) }));
+          : { id: `e${i}`, s: ed.s, e: ed.e, lbl: ed.lbl, ...(ed.pts ? { pts: ed.pts } : {}), ...(ed.bi ? { bi: true } : {}), ...(ed.color ? { color: ed.color } : {}) }));
         setZones(Array.isArray(data.zones) ? data.zones : []);
         sectionsRef.current = {};
         setSel(null);
@@ -644,15 +756,13 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     let out = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x0} ${y0} ${W} ${H}" width="${W}" height="${H}" font-family="'Inter',system-ui,sans-serif">`;
     out += `<rect x="${x0}" y="${y0}" width="${W}" height="${H}" fill="${surface.bg}"/>`;
-    out += "<defs>" + Object.entries(stages).map(([k, c]) =>
-      `<marker id="xarr-${k}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="${c}"/></marker>`).join("") + "</defs>";
+    out += `<defs><marker id="xarr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke"/></marker></defs>`;
     for (const z of zones) {
       out += `<rect x="${z.x}" y="${z.y}" width="${z.w}" height="${z.h}" rx="14" fill="${z.color}" fill-opacity="0.045" stroke="${z.color}" stroke-opacity=".6" stroke-dasharray="7 5"/>`;
       out += `<text x="${z.x + 16}" y="${z.y - 8}" font-family="'Space Mono',monospace" font-size="11" letter-spacing="2" fill="${z.color}">${esc(z.label.toUpperCase())}</text>`;
     }
     for (const ed of edgeGeo) {
-      const key = ed.stageKey || "ops";
-      out += `<path d="${ed.d}" fill="none" stroke="${ed.color}" stroke-width="1.8" stroke-linecap="round" ${ed.dashed ? 'stroke-dasharray="5 6"' : ""} marker-end="url(#xarr-${key})"${ed.bi ? ` marker-start="url(#xarr-${key})"` : ""}/>`;
+      out += `<path d="${ed.d}" fill="none" stroke="${ed.color}" stroke-width="1.8" stroke-linecap="round" ${ed.dashed ? 'stroke-dasharray="5 6"' : ""} marker-end="url(#xarr)"${ed.bi ? ` marker-start="url(#xarr)"` : ""}/>`;
       if (ed.lbl) out += `<text x="${ed.mid.x}" y="${ed.mid.y - 7}" text-anchor="middle" font-family="'Space Mono',monospace" font-size="11" fill="${surface.muted}" stroke="${surface.bg}" stroke-width="4" paint-order="stroke">${esc(ed.lbl)}</text>`;
     }
     for (const n of nodes) {
@@ -726,10 +836,10 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       const pl = elbowPath(endpointRect(ed.s), endpointRect(ed.e), ed.pts);
       const mid = plMid(pl);
       const src = a || b;                          // colour from whichever end is a node
-      const stageKey = src ? stageKeyOf(src) : "ops";
       const dashed = (a && TYPES[a.type].ops) || (b && TYPES[b.type].ops) || false;
-      return { ...ed, d: roundedPath(pl), mid, len: mid.total,
-               stageKey, color: stages[stageKey], dashed };
+      // Per-edge override wins; otherwise inherit the source node's category accent.
+      const color = ed.color || (src ? nodeTag(src, stages) : stages.ops);
+      return { ...ed, d: roundedPath(pl), mid, len: mid.total, color, dashed };
     }), [edges, nodeById, zoneById, stages]);
 
   // wire canvas sized to content (+margin) so nothing clips on wide diagrams
@@ -794,9 +904,11 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         <button onClick={() => loadSeed("airgap")}
                 title={hasCustom("airgap") ? "Load your saved Air-gapped example" : "Load the built-in Air-gapped example"}>
           Air-gapped{hasCustom("airgap") ? " •" : ""}</button>
-        <button onClick={() => multiTenantSeed(3)}>Multi-tenant</button>
+        <button onClick={() => loadSeed("multitenant")}
+                title={hasCustom("multitenant") ? "Load your saved Multi-tenant architecture" : "Load the built-in Multi-tenant architecture"}>
+          Multi-tenant{hasCustom("multitenant") ? " •" : ""}</button>
         <span className="ew-menuwrap">
-          <button onClick={() => setSeedMenu((v) => !v)} title="Save or reset the Reference / Air-gapped presets">Presets ▾</button>
+          <button onClick={() => setSeedMenu((v) => !v)} title="Save or reset the built-in presets">Presets ▾</button>
           {seedMenu && (
             <>
               <div className="ew-menu-backdrop" onClick={() => setSeedMenu(false)} />
@@ -804,10 +916,12 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 <div className="ew-menu-h">Save current board as</div>
                 <button onClick={() => saveSeed("reference", "Reference")}>Reference</button>
                 <button onClick={() => saveSeed("airgap", "Air-gapped")}>Air-gapped</button>
+                <button onClick={() => saveSeed("multitenant", "Multi-tenant")}>Multi-tenant</button>
                 <div className="ew-menu-sep" />
                 <div className="ew-menu-h">Reset to built-in default</div>
                 <button onClick={() => resetSeed("reference", "Reference")} disabled={!hasCustom("reference")}>Reference</button>
                 <button onClick={() => resetSeed("airgap", "Air-gapped")} disabled={!hasCustom("airgap")}>Air-gapped</button>
+                <button onClick={() => resetSeed("multitenant", "Multi-tenant")} disabled={!hasCustom("multitenant")}>Multi-tenant</button>
                 <div className="ew-menu-sep" />
                 <div className="ew-menu-h">Ship as source default</div>
                 <button onClick={copySeedCode}>Copy board as SEEDS code</button>
@@ -900,14 +1014,15 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
             {/* zones (behind everything) */}
             {zones.map((z) => {
-              const isSel = sel && sel.kind === "zone" && sel.id === z.id;
+              const isSingle = sel && sel.kind === "zone" && sel.id === z.id;
+              const isMulti = sel && sel.kind === "zones" && sel.ids.includes(z.id);
               return (
-                <div key={z.id} className={"ew-zone" + (isSel ? " sel" : "")}
+                <div key={z.id} className={"ew-zone" + (isSingle || isMulti ? " sel" : "")}
                      style={{ left: z.x, top: z.y, width: z.w, height: z.h, "--zc": z.color }}>
                   <span className="ew-zlabel" onPointerDown={(e) => startZoneMove(e, z.id)}>{z.label}</span>
-                  {isSel && <span className="ew-zport" title="Drag to connect from this zone"
+                  {isSingle && <span className="ew-zport" title="Drag to connect from this zone"
                                   onPointerDown={(e) => startConnect(e, z.id)} />}
-                  {isSel && <span className="ew-zgrip" onPointerDown={(e) => startZoneResize(e, z.id)} />}
+                  {isSingle && <span className="ew-zgrip" onPointerDown={(e) => startZoneResize(e, z.id)} />}
                 </div>
               );
             })}
@@ -916,12 +1031,11 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                  width={wireBox.w} height={wireBox.h}
                  viewBox={`${wireBox.x} ${wireBox.y} ${wireBox.w} ${wireBox.h}`}>
               <defs>
-                {Object.entries(stages).map(([k, col]) => (
-                  <marker key={k} id={`ew-arr-${k}`} viewBox="0 0 10 10" refX="8" refY="5"
-                          markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                    <path d="M0,0 L10,5 L0,10 z" fill={col} />
-                  </marker>
-                ))}
+                {/* One arrowhead; `context-stroke` makes it match each line's own colour. */}
+                <marker id="ew-arr" viewBox="0 0 10 10" refX="8" refY="5"
+                        markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="context-stroke" />
+                </marker>
               </defs>
               {edgeGeo.map((ed) => {
                 const on = connected && (ed.s === hover || ed.e === hover);
@@ -934,8 +1048,8 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                     <path id={`ew-${ed.id}`} d={ed.d}
                           className={"ew-edge" + (ed.dashed ? " ew-dash" : "") + (dim ? " dim" : "") + (on || isSel ? " on" : "")}
                           stroke={ed.color}
-                          markerEnd={`url(#ew-arr-${ed.stageKey || "ops"})`}
-                          markerStart={ed.bi ? `url(#ew-arr-${ed.stageKey || "ops"})` : undefined} />
+                          markerEnd="url(#ew-arr)"
+                          markerStart={ed.bi ? "url(#ew-arr)" : undefined} />
                     {ed.lbl && (
                       <text x={ed.mid.x} y={ed.mid.y - 7} textAnchor="middle"
                             className={"ew-elbl" + (dim ? " dim" : "") + (on || isSel ? " on" : "")}>
@@ -1048,30 +1162,41 @@ export default function ElasticWhiteboard({ height = "100%" }) {
           if (sel.kind === "edge") {
             const ed = edges.find((x) => x.id === sel.id);
             if (!ed) return null;
-            const a = nodeById[ed.s];
+            const a = nodeById[ed.s], b = nodeById[ed.e];
             const hasShape = Array.isArray(ed.pts) && ed.pts.length > 0;
+            const autoColor = a ? nodeTag(a, stages) : (b ? nodeTag(b, stages) : stages.ops);
+            const setEd = (patch, guardKey) => {
+              if (guardKey) snapGuard(guardKey); else snapshot();
+              setEdges((es) => es.map((x) => (x.id === ed.id ? { ...x, ...patch } : x)));
+            };
             return (
               <div className="ew-inspector" onPointerDown={(e) => e.stopPropagation()}>
                 <div className="ew-ihead">
-                  <span className="ew-idot" style={{ background: a ? stages[stageKeyOf(a)] : stages.ops }} />
-                  <div className="ew-ititle"><b>Connection</b><small>{endpointName(ed.s)} → {endpointName(ed.e)}</small></div>
+                  <span className="ew-idot" style={{ background: ed.color || autoColor }} />
+                  <div className="ew-ititle"><b>Connection</b><small>{endpointName(ed.s)} {ed.bi ? "⇄" : "→"} {endpointName(ed.e)}</small></div>
                   <button className="ew-x" onClick={() => setSel(null)}>×</button>
                 </div>
                 <div className="ew-iscroll">
                   <section>
                     <div className="ew-frow"><span className="ew-flabel">Label</span>
                       <input value={ed.lbl || ""} placeholder="e.g. logs & metrics"
-                             onChange={(e) => {
-                               snapGuard("elbl:" + ed.id);
-                               setEdges((es) => es.map((x) => (x.id === ed.id ? { ...x, lbl: e.target.value || undefined } : x)));
-                             }} /></div>
+                             onChange={(e) => setEd({ lbl: e.target.value || undefined }, "elbl:" + ed.id)} /></div>
+                    <div className="ew-frow"><span className="ew-flabel">Direction</span>
+                      <label className="ew-check">
+                        <input type="checkbox" checked={!!ed.bi}
+                               onChange={(e) => setEd({ bi: e.target.checked || undefined })} />
+                        Bidirectional (arrows on both ends)
+                      </label></div>
+                    <div className="ew-frow"><span className="ew-flabel">Color</span>
+                      <div className="ew-btnrow">
+                        <input type="color" value={ed.color || autoColor}
+                               onChange={(e) => setEd({ color: e.target.value }, "ecol:" + ed.id)} />
+                        {ed.color && <button className="ew-btn" onClick={() => setEd({ color: undefined })}>Auto</button>}
+                      </div></div>
                     <p className="ew-ihint">Drag the hollow dots on the line to bend it; drag a solid dot to move a bend, double-click it to remove.</p>
                     <div className="ew-btnrow">
                       {hasShape && <button className="ew-btn" onClick={() => resetEdgeShape(ed.id)}>Reset shape</button>}
-                      <button className="ew-btn" onClick={() => {
-                        snapshot();
-                        setEdges((es) => es.map((x) => (x.id === ed.id ? { ...x, s: ed.e, e: ed.s } : x)));
-                      }}>⇄ Reverse direction</button>
+                      <button className="ew-btn" onClick={() => setEd({ s: ed.e, e: ed.s })}>⇄ Reverse direction</button>
                       <button className="ew-btn danger" onClick={() => {
                         snapshot();
                         setEdges((es) => es.filter((x) => x.id !== ed.id));
@@ -1120,6 +1245,28 @@ export default function ElasticWhiteboard({ height = "100%" }) {
               </div>
             );
           }
+          /* --- multiple zones --- */
+          if (sel.kind === "zones") {
+            return (
+              <div className="ew-inspector" onPointerDown={(e) => e.stopPropagation()}>
+                <div className="ew-ihead">
+                  <span className="ew-idot" style={{ background: "#8A9BB4" }} />
+                  <div className="ew-ititle"><b>{sel.ids.length} zones selected</b><small>align & distribute</small></div>
+                  <button className="ew-x" onClick={() => setSel(null)}>×</button>
+                </div>
+                <div className="ew-iscroll">
+                  <section>
+                    <AlignControls onAlign={alignZones} onDistribute={distributeZones}
+                                   canDistribute={sel.ids.length >= 3} />
+                    <p className="ew-ihint">Zones move their contents with them.</p>
+                  </section>
+                  <section>
+                    <button className="ew-btn danger" onClick={deleteSel}>Delete all zones</button>
+                  </section>
+                </div>
+              </div>
+            );
+          }
           /* --- multiple nodes --- */
           if (sel.ids.length > 1) {
             return (
@@ -1130,6 +1277,10 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                   <button className="ew-x" onClick={() => setSel(null)}>×</button>
                 </div>
                 <div className="ew-iscroll">
+                  <section>
+                    <AlignControls onAlign={alignNodes} onDistribute={distributeNodes}
+                                   canDistribute={sel.ids.length >= 3} />
+                  </section>
                   <section>
                     <div className="ew-btnrow">
                       <button className="ew-btn" disabled={!styleClip} onClick={() => applyStyle(sel.ids)}
@@ -1514,10 +1665,14 @@ const CSS = `
   paint-order:stroke; stroke:var(--bg); stroke-width:4px; stroke-linejoin:round; transition:opacity .2s; }
 .ew-elbl.dim{ opacity:.1; } .ew-elbl.on{ fill:var(--ink); }
 .ew-temp{ fill:none; stroke:var(--ink); stroke-width:1.6; stroke-dasharray:4 5; pointer-events:none; }
-.ew-wp{ fill:var(--tag); stroke:var(--bg); stroke-width:2; cursor:grab; }
-.ew-wp:hover{ stroke:var(--tag); }
-.ew-wp-add{ fill:var(--bg); stroke:var(--tag); stroke-width:2; opacity:.55; cursor:copy; }
-.ew-wp-add:hover{ opacity:1; }
+/* Edge bend handles use the theme accent (--tag isn't defined in the wires svg),
+   plus a bg halo + drop shadow so they stay legible over any line or node. */
+.ew-wp{ fill:var(--accent); stroke:var(--bg); stroke-width:2.5; cursor:grab;
+  filter:drop-shadow(0 1px 2.5px rgba(0,0,0,.5)); }
+.ew-wp:hover{ stroke:var(--ink); stroke-width:3; }
+.ew-wp-add{ fill:var(--bg); stroke:var(--accent); stroke-width:2.5; opacity:.85; cursor:copy;
+  filter:drop-shadow(0 1px 2px rgba(0,0,0,.4)); }
+.ew-wp-add:hover{ opacity:1; fill:var(--accent); }
 .ew-zone{ position:absolute; border:1.5px dashed var(--zc); border-radius:14px;
   background:color-mix(in srgb, var(--zc) 4%, transparent); pointer-events:none; }
 .ew-zone.sel{ border-style:solid; }
@@ -1596,6 +1751,13 @@ const CSS = `
 .ew-btn input[type=file]{ display:none; }
 .ew-swatch{ display:inline-block; width:9px; height:9px; border-radius:2px; margin-left:6px;
   vertical-align:middle; border:1px solid color-mix(in srgb, var(--ink) 25%, transparent); }
+.ew-check{ display:flex; align-items:center; gap:7px; font-size:11.5px; color:var(--muted); cursor:pointer; }
+.ew-check input[type=checkbox]{ accent-color:var(--accent); width:15px; height:15px; flex:none; }
+.ew-align{ display:flex; align-items:center; gap:4px; margin:2px 0 4px; }
+.ew-adiv{ width:1px; height:18px; background:var(--line); margin:0 4px; }
+.ew-abtn{ display:inline-flex; align-items:center; justify-content:center; width:28px; height:26px;
+  background:var(--panel); color:var(--muted); border:1px solid var(--line); border-radius:6px; cursor:pointer; }
+.ew-abtn:hover{ border-color:var(--accent); color:var(--ink); }
 .ew-ghost{ position:fixed; z-index:99; pointer-events:none; transform:translate(-50%,-50%);
   background:var(--panel); border:1px solid var(--tag); border-left:3px solid var(--tag);
   border-radius:8px; padding:8px 14px; font-family:"Mier B","Inter",sans-serif; font-size:13px;

@@ -97,6 +97,17 @@ export function useDragController(deps) {
   const startZoneMove = (e, id) => {
     if (e.button !== 0) return;
     e.stopPropagation();
+    if (e.shiftKey) {                                  /* toggle multi-zone selection */
+      setSel((prev) => {
+        const ids = prev && prev.kind === "zones" ? [...prev.ids]
+                  : prev && prev.kind === "zone" ? [prev.id] : [];
+        const i = ids.indexOf(id);
+        if (i >= 0) ids.splice(i, 1); else ids.push(id);
+        return ids.length > 1 ? { kind: "zones", ids }
+             : ids.length === 1 ? { kind: "zone", id: ids[0] } : null;
+      });
+      return;
+    }
     setSel({ kind: "zone", id });
     const z = zones.find((x) => x.id === id);
     const w = toWorld(e.clientX, e.clientY);

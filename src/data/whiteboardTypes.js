@@ -21,21 +21,36 @@ export const CATS = [
   "Air-Gapped Services", "Custom", "General",
 ];
 
+/* One Elastic-brand accent per category so a node's colour reads as its role.
+   Drawn from Elastic's core brand hues + the EUI visualization palette. Data
+   tiers are intentional exceptions (they keep their own semantic colours via
+   the per-type `color` below). Tweak these hexes to taste. */
+export const CAT_COLORS = {
+  "Core & UI":            "#00BFB3", // Elastic teal
+  "Nodes":                "#FEC514", // Elastic yellow
+  "Ingest & Processing":  "#1BA9F5", // Elastic blue
+  "OpenTelemetry (EDOT)": "#9170B8", // purple
+  "Beats":                "#54B399", // green
+  "Security":             "#E7664C", // alerting red-orange
+  "ML & NLP":             "#F04E98", // Elastic pink
+  "Maps & Geo":           "#6DCCB1", // mint
+  "Clients & Tooling":    "#6092C0", // muted blue
+  "Orchestration":        "#8A9BB4", // slate (control plane)
+  "Air-Gapped Services":  "#FF957D", // coral
+  "Custom":               "#D6BF57", // gold
+  "General":              "#98A2B3", // neutral grey
+};
+
 /* Typed node registry. `flow` overrides the color of connections leaving
    a type; `ops:true` renders its connections dashed (control-plane /
    optional); `color` overrides the accent; `fields` are type-specific
    settings rendered generically in the inspector.                      */
 export const TYPES = {
   /* --- Core & UI --- */
-  es:     { cat: "Core & UI", label: "Elasticsearch", sub: "Distributed search & analytics", stage: "store", w: 220, h: 80,
-    fields: [
-      { key: "masters", label: "Master nodes", kind: "number", min: 1, max: 9,   def: 3, unit: "masters" },
-      { key: "data",    label: "Data nodes",   kind: "number", min: 1, max: 200, def: 3, unit: "data" },
-      { key: "version", label: "Version",      kind: "text", placeholder: "8.x", pre: "v" },
-      { key: "ml",      label: "ML nodes",     kind: "toggle" },
-    ] },
   kibana: { cat: "Core & UI", label: "Kibana", sub: "Stack UI · dashboards · management", stage: "serve", w: 200, h: 76,
     fields: [{ key: "instances", label: "Instances", kind: "number", min: 1, max: 20, def: 2, unit: "inst" }] },
+  security:      { cat: "Core & UI", label: "Elastic Security", sub: "SIEM · XDR · endpoint", stage: "serve", w: 208, h: 76 },
+  observability: { cat: "Core & UI", label: "Elastic Observability", sub: "Logs · metrics · traces · APM", stage: "serve", w: 224, h: 76 },
   remote: { cat: "Core & UI", label: "Remote Cluster", sub: "Cross-cluster search & replication", stage: "store", w: 200, h: 76,
     fields: [
       { key: "mode",   label: "Mode", kind: "select", options: ["CCS", "CCR", "CCS + CCR"], def: "CCS" },
@@ -43,6 +58,13 @@ export const TYPES = {
     ] },
 
   /* --- Nodes (tiers & roles) --- */
+  es:     { cat: "Nodes", label: "Elasticsearch", sub: "Distributed search & analytics", stage: "store", w: 220, h: 80,
+    fields: [
+      { key: "masters", label: "Master nodes", kind: "number", min: 1, max: 9,   def: 3, unit: "masters" },
+      { key: "data",    label: "Data nodes",   kind: "number", min: 1, max: 200, def: 3, unit: "data" },
+      { key: "version", label: "Version",      kind: "text", placeholder: "8.x", pre: "v" },
+      { key: "ml",      label: "ML nodes",     kind: "toggle" },
+    ] },
   tier_hot:    { cat: "Nodes", label: "Hot Tier",    sub: "Indexing & recent data · fast SSD", stage: "store", color: "#ef6a5a", w: 248, h: 96,
     fields: [
       { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, def: 2, unit: "nodes" },
@@ -63,13 +85,13 @@ export const TYPES = {
       { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, def: 1, unit: "nodes" },
       { key: "capacity", label: "Capacity", kind: "text", placeholder: "object store size" },
     ] },
-  node_master: { cat: "Nodes", label: "Master Node", sub: "Cluster state · quorum", stage: "store", color: "#e2c766", w: 248, h: 96,
+  node_master: { cat: "Nodes", label: "Master Node", sub: "Cluster state · quorum", stage: "store", w: 248, h: 96,
     fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 9, def: 3, unit: "nodes" }] },
-  node_ml:     { cat: "Nodes", label: "ML Node", sub: "Anomaly detection · model inference", stage: "store", color: "#b48ce8", w: 248, h: 96,
+  node_ml:     { cat: "Nodes", label: "ML Node", sub: "Anomaly detection · model inference", stage: "store", w: 248, h: 96,
     fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 50, def: 2, unit: "nodes" }] },
   node_ingest: { cat: "Nodes", label: "Ingest Node", sub: "Ingest pipelines · enrichment", stage: "store", w: 248, h: 96,
     fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 50, def: 2, unit: "nodes" }] },
-  node_coord:  { cat: "Nodes", label: "Coordinating Node", sub: "Request routing · reduce phase", stage: "store", color: "#7f96ad", w: 248, h: 96,
+  node_coord:  { cat: "Nodes", label: "Coordinating Node", sub: "Request routing · reduce phase", stage: "store", w: 248, h: 96,
     fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 50, def: 2, unit: "nodes" }] },
 
   /* --- Ingest & Processing --- */
@@ -80,6 +102,7 @@ export const TYPES = {
     ] },
   fleet:    { cat: "Orchestration", label: "Fleet Server", sub: "Central Agent management", stage: "collect", ops: true, w: 180, h: 72,
     fields: [{ key: "instances", label: "Instances", kind: "number", min: 1, max: 20, def: 2, unit: "inst" }] },
+  streams:  { cat: "Ingest & Processing", label: "Streams", sub: "AI-powered log parsing & routing", stage: "process", w: 196, h: 72 },
   logstash: { cat: "Ingest & Processing", label: "Logstash", sub: "Ingest/transform · plugin ecosystem", stage: "process", w: 196, h: 76,
     fields: [
       { key: "pipelines", label: "Pipelines", kind: "number", min: 1, max: 50, def: 1, unit: "pipelines" },
@@ -169,7 +192,7 @@ export const TYPES = {
   connectors: { cat: "General", label: "Connectors & Crawler", sub: "Content sync · SDKs", stage: "collect", w: 204, h: 80 },
   kafka:      { cat: "General", label: "Kafka", sub: "Buffer / queue", stage: "process", w: 172, h: 72,
     fields: [{ key: "partitions", label: "Partitions", kind: "number", min: 1, max: 500, unit: "partitions" }] },
-  firewall:   { cat: "General", label: "Firewall / Proxy", sub: "Network boundary", stage: "ops", ops: true, color: "#FF957D", w: 186, h: 68,
+  firewall:   { cat: "General", label: "Firewall / Proxy", sub: "Network boundary", stage: "ops", ops: true, w: 186, h: 68,
     fields: [{ key: "kind", label: "Kind", kind: "select", options: ["Firewall", "Forward proxy", "Reverse proxy", "Air gap"], def: "Firewall" }] },
   idp:        { cat: "General", label: "Identity Provider", sub: "SSO · directory services", stage: "ops", ops: true, w: 190, h: 68,
     fields: [{ key: "protocol", label: "Protocol", kind: "select", options: ["SAML", "OIDC", "LDAP", "Active Directory"] }] },
@@ -210,7 +233,9 @@ for (const k of [
 ]) TYPES[k].fields = [...(TYPES[k].fields || []), ...HW];
 
 /* accent color for a type given the active stage palette */
-export const tagOf = (t, stages) => t.color || stages[t.stage];
+/* Accent for a type: explicit per-type `color` (data tiers) wins, then the
+   category colour, then the stage palette as a final fallback. */
+export const tagOf = (t, stages) => t.color || CAT_COLORS[t.cat] || (stages && stages[t.stage]);
 
 /* ---------------- templates ---------------- */
 
@@ -258,9 +283,9 @@ export const SEEDS = {
       { id: "a5",  type: "es",           x: 720,  y: 152 },
       { id: "a6",  type: "kibana",       x: 720,  y: 288 },
       { id: "a12", type: "mapserver",    x: 1040, y: 288 },
-      { id: "a8",  type: "epr",          x: 80,   y: 472 },
+      { id: "a8",  type: "epr",          x: 720,  y: 472 },
       { id: "a9",  type: "artifactreg",  x: 400,  y: 472 },
-      { id: "a10", type: "endpointrepo", x: 720,  y: 472 },
+      { id: "a10", type: "endpointrepo", x: 80,   y: 472 },
       { id: "a11", type: "docsbundle",   x: 1040, y: 472 },
       { id: "a13", type: "firewall",     x: 1400, y: 248 },
       { id: "a14", type: "ems",          x: 1720, y: 152, props: { access: "Via firewall" } },
@@ -270,6 +295,70 @@ export const SEEDS = {
       ["a1","a3"],["a2","a3"],["a3","a5"],["a4","a3"],["a5","a6"],
       ["a6","a8"],["a4","a9"],["a4","a10"],["a6","a11"],["a6","a12"],
       ["a6","a13"],["a13","a14"],["a13","a15"],
+    ],
+  },
+  multitenant: {
+    zones: [
+      { id: "tenant0__zone", x: 32, y: 8, w: 616, h: 418, label: "Tenant A", color: "#4B9FEA" },
+      { id: "tenant1__zone", x: 32, y: 464, w: 616, h: 418, label: "Tenant B", color: "#4B9FEA" },
+      { id: "tenant2__zone", x: 32, y: 920, w: 616, h: 418, label: "Tenant C", color: "#4B9FEA" },
+      { id: "ingest__zone", x: 880, y: 464, w: 308, h: 418, label: "Shared Ingestion Tools", color: "#19C2B4" },
+      { id: "siem__zone", x: 1392, y: 400, w: 968, h: 536, label: "SIEM Cluster", color: "#FEC514" },
+      { id: "sec1003__zone", x: 2528, y: 248, w: 940, h: 510, label: "User Space", color: "#F45C9C" },
+    ],
+    nodes: [
+      { id: "tenant0__src0", type: "source", x: 64, y: 56 },
+      { id: "tenant0__src1", type: "syslog", x: 64, y: 184 },
+      { id: "tenant0__src2", type: "saas", x: 64, y: 304 },
+      { id: "tenant0__col0", type: "agent", x: 368, y: 56 },
+      { id: "tenant1__src0", type: "source", x: 56, y: 512 },
+      { id: "tenant1__src1", type: "syslog", x: 56, y: 632 },
+      { id: "tenant1__src2", type: "saas", x: 56, y: 760 },
+      { id: "tenant1__col0", type: "agent", x: 368, y: 512 },
+      { id: "tenant2__src0", type: "source", x: 56, y: 968 },
+      { id: "tenant2__src1", type: "syslog", x: 56, y: 1088 },
+      { id: "tenant2__src2", type: "saas", x: 56, y: 1208 },
+      { id: "tenant2__col0", type: "agent", x: 368, y: 968 },
+      { id: "ingest__tool0", type: "agent", x: 912, y: 512 },
+      { id: "ingest__tool1", type: "logstash", x: 912, y: 632 },
+      { id: "ingest__tool2", type: "kafka", x: 912, y: 752 },
+      { id: "siem__hot", type: "tier_hot", x: 1752, y: 464 },
+      { id: "siem__cold", type: "tier_cold", x: 1752, y: 624 },
+      { id: "siem__frozen", type: "tier_frozen", x: 1752, y: 784 },
+      { id: "siem__ingest", type: "node_ingest", x: 1440, y: 624 },
+      { id: "siem__master", type: "node_master", x: 2064, y: 624 },
+      { id: "sec1003__kibana", type: "kibana", x: 2560, y: 464 },
+      { id: "sec1003__idp", type: "idp", x: 2560, y: 296 },
+      { id: "sec1003__thirdparty", type: "thirdparty", x: 2560, y: 632 },
+      { id: "sec1003__lb", type: "lb", x: 2872, y: 464 },
+      { id: "sec1003__users", type: "users", x: 3192, y: 464 },
+    ],
+    edges: [
+      ["tenant0__src0", "tenant0__col0"],
+      ["tenant0__src1", "tenant0__col0"],
+      ["tenant0__src2", "tenant0__col0"],
+      ["tenant1__src0", "tenant1__col0"],
+      ["tenant1__src1", "tenant1__col0"],
+      ["tenant1__src2", "tenant1__col0"],
+      ["tenant2__src0", "tenant2__col0"],
+      ["tenant2__src1", "tenant2__col0"],
+      ["tenant2__src2", "tenant2__col0"],
+      ["siem__hot", "siem__cold", "ILM"],
+      ["siem__cold", "siem__frozen", "ILM"],
+      ["siem__ingest", "siem__hot"],
+      { s: "siem__master", e: "siem__hot", bi: true },
+      { s: "siem__master", e: "siem__cold", bi: true },
+      { s: "siem__master", e: "siem__frozen", bi: true },
+      { s: "siem__master", e: "siem__ingest", bi: true },
+      ["tenant0__zone", "ingest__zone"],
+      ["tenant1__zone", "ingest__zone"],
+      ["tenant2__zone", "ingest__zone"],
+      ["ingest__zone", "siem__ingest", "normalized events"],
+      ["sec1003__kibana", "sec1003__idp"],
+      ["sec1003__kibana", "sec1003__thirdparty"],
+      ["sec1003__users", "sec1003__lb"],
+      ["sec1003__lb", "sec1003__kibana"],
+      ["sec1003__kibana", "siem__hot"],
     ],
   },
 };
