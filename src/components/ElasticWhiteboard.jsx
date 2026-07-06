@@ -949,7 +949,6 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         <span className="ew-gap" />
         <button onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">↺</button>
         <button onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">↻</button>
-        <button onClick={addZone}>+ Zone</button>
         <input ref={fileRef} type="file" accept="application/json" style={{ display: "none" }} onChange={importJSON} />
         <span className="ew-gap" />
         <button onClick={() => zoomBy(1 / 1.2)}>−</button>
@@ -976,11 +975,15 @@ export default function ElasticWhiteboard({ height = "100%" }) {
               <PatternConfig cfg={patternCfg} setCfg={setPatternCfg}
                 onInsert={() => { insertTemplate(patternCfg.id, patternCfg.fill); setPatternCfg(null); }} />
             ) : (
-              TEMPLATE_MENU.map((t) => (
-                <button key={t.id} className="ew-pattern"
-                        onClick={() => setPatternCfg({ id: t.id, fill: defaultFill(t.id) })}
-                        title={`Configure and insert the ${t.label} block`}>+ {t.label}</button>
-              ))
+              <>
+                {TEMPLATE_MENU.map((t) => (
+                  <button key={t.id} className="ew-pattern"
+                          onClick={() => setPatternCfg({ id: t.id, fill: defaultFill(t.id) })}
+                          title={`Configure and insert the ${t.label} block`}>+ {t.label}</button>
+                ))}
+                <button className="ew-pattern" onClick={addZone}
+                        title="Add an empty zone to group components">+ Zone</button>
+              </>
             )}
           </div>
           <input className="ew-search" placeholder="Search components…"

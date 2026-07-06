@@ -48,7 +48,7 @@ export const CAT_COLORS = {
 export const TYPES = {
   /* --- Core & UI --- */
   kibana: { cat: "Core & UI", label: "Kibana", sub: "Stack UI · dashboards · management", stage: "serve", w: 200, h: 76,
-    fields: [{ key: "instances", label: "Instances", kind: "number", min: 1, max: 20, def: 2, unit: "inst" }] },
+    fields: [{ key: "instances", label: "Instances", kind: "number", min: 1, max: 20, unit: "inst" }] },
   security:      { cat: "Core & UI", label: "Elastic Security", sub: "SIEM · XDR · endpoint", stage: "serve", w: 208, h: 76 },
   observability: { cat: "Core & UI", label: "Elastic Observability", sub: "Logs · metrics · traces · APM", stage: "serve", w: 224, h: 76 },
   remote: { cat: "Core & UI", label: "Remote Cluster", sub: "Cross-cluster search & replication", stage: "store", w: 200, h: 76,
@@ -60,39 +60,39 @@ export const TYPES = {
   /* --- Nodes (tiers & roles) --- */
   es:     { cat: "Nodes", label: "Elasticsearch", sub: "Distributed search & analytics", stage: "store", w: 220, h: 80,
     fields: [
-      { key: "masters", label: "Master nodes", kind: "number", min: 1, max: 9,   def: 3, unit: "masters" },
-      { key: "data",    label: "Data nodes",   kind: "number", min: 1, max: 200, def: 3, unit: "data" },
+      { key: "masters", label: "Master nodes", kind: "number", min: 1, max: 9,   unit: "masters" },
+      { key: "data",    label: "Data nodes",   kind: "number", min: 1, max: 200, unit: "data" },
       { key: "version", label: "Version",      kind: "text", placeholder: "8.x", pre: "v" },
       { key: "ml",      label: "ML nodes",     kind: "toggle" },
     ] },
   tier_hot:    { cat: "Nodes", label: "Hot Tier",    sub: "Indexing & recent data · fast SSD", stage: "store", color: "#ef6a5a", w: 248, h: 96,
     fields: [
-      { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, def: 2, unit: "nodes" },
+      { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, unit: "nodes" },
       { key: "capacity", label: "Capacity", kind: "text", placeholder: "e.g. 2 TB" },
     ] },
   tier_warm:   { cat: "Nodes", label: "Warm Tier",   sub: "Read-mostly · older data", stage: "store", color: "#f09c3e", w: 248, h: 96,
     fields: [
-      { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, def: 2, unit: "nodes" },
+      { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, unit: "nodes" },
       { key: "capacity", label: "Capacity", kind: "text", placeholder: "e.g. 10 TB" },
     ] },
   tier_cold:   { cat: "Nodes", label: "Cold Tier",   sub: "Infrequent access · cheaper HW", stage: "store", color: "#58a8e8", w: 248, h: 96,
     fields: [
-      { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, def: 1, unit: "nodes" },
+      { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, unit: "nodes" },
       { key: "capacity", label: "Capacity", kind: "text", placeholder: "e.g. 40 TB" },
     ] },
   tier_frozen: { cat: "Nodes", label: "Frozen Tier", sub: "Searchable snapshots · object store", stage: "store", color: "#9aa5b1", w: 248, h: 96,
     fields: [
-      { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, def: 1, unit: "nodes" },
+      { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, unit: "nodes" },
       { key: "capacity", label: "Capacity", kind: "text", placeholder: "object store size" },
     ] },
   node_master: { cat: "Nodes", label: "Master Node", sub: "Cluster state · quorum", stage: "store", w: 248, h: 96,
-    fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 9, def: 3, unit: "nodes" }] },
+    fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 9, unit: "nodes" }] },
   node_ml:     { cat: "Nodes", label: "ML Node", sub: "Anomaly detection · model inference", stage: "store", w: 248, h: 96,
-    fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 50, def: 2, unit: "nodes" }] },
+    fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 50, unit: "nodes" }] },
   node_ingest: { cat: "Nodes", label: "Ingest Node", sub: "Ingest pipelines · enrichment", stage: "store", w: 248, h: 96,
-    fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 50, def: 2, unit: "nodes" }] },
+    fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 50, unit: "nodes" }] },
   node_coord:  { cat: "Nodes", label: "Coordinating Node", sub: "Request routing · reduce phase", stage: "store", w: 248, h: 96,
-    fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 50, def: 2, unit: "nodes" }] },
+    fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 50, unit: "nodes" }] },
 
   /* --- Ingest & Processing --- */
   agent:    { cat: "Ingest & Processing", label: "Elastic Agent", sub: "Logs · metrics · APM · endpoint", stage: "collect", w: 190, h: 72,
@@ -101,7 +101,7 @@ export const TYPES = {
       { key: "policy", label: "Policy",      kind: "text", placeholder: "e.g. prod-linux" },
     ] },
   fleet:    { cat: "Orchestration", label: "Fleet Server", sub: "Central Agent management", stage: "collect", ops: true, w: 180, h: 72,
-    fields: [{ key: "instances", label: "Instances", kind: "number", min: 1, max: 20, def: 2, unit: "inst" }] },
+    fields: [{ key: "instances", label: "Instances", kind: "number", min: 1, max: 20, unit: "inst" }] },
   streams:  { cat: "Ingest & Processing", label: "Streams", sub: "AI-powered log parsing & routing", stage: "process", w: 196, h: 72 },
   logstash: { cat: "Ingest & Processing", label: "Logstash", sub: "Ingest/transform · plugin ecosystem", stage: "process", w: 196, h: 76,
     fields: [
