@@ -242,7 +242,7 @@ export const TEMPLATE_CONFIG = {
     controls: [
       { kind: "checkset", key: "sources", label: "Sources", def: ["source", "syslog", "saas"],
         options: [["source", "Servers / DBs"], ["syslog", "Syslog"], ["cloudsvc", "Cloud Services"], ["saas", "SaaS Apps"], ["k8s", "Kubernetes"]] },
-      { kind: "checkset", key: "collectors", label: "Collectors", def: ["agent"],
+      { kind: "checkset", key: "collectors", label: "Collectors", optional: true, def: ["agent"],
         options: [["agent", "Elastic Agent"], ["logstash", "Logstash"], ["beats", "Beats"], ["otel_collector", "EDOT Collector"], ["connectors", "Connectors / Crawler"]] },
     ],
   },
@@ -250,7 +250,7 @@ export const TEMPLATE_CONFIG = {
     label: "Ingestion Tools",
     controls: [
       { kind: "checkset", key: "tools", label: "Tools", def: ["agent", "logstash", "kafka"],
-        options: [["agent", "Elastic Agent"], ["apm", "APM Server"], ["logstash", "Logstash"], ["kafka", "Kafka"], ["otel_collector", "EDOT Collector"]] },
+        options: [["agent", "Elastic Agent"], ["apm", "APM Server"], ["logstash", "Logstash"], ["streams", "Streams"], ["kafka", "Kafka"], ["otel_collector", "EDOT Collector"]] },
     ],
   },
   management: {

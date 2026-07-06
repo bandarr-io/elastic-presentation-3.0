@@ -131,8 +131,6 @@ export const TYPES = {
   auditbeat:   { cat: "Beats", label: "Auditbeat",   sub: "Audit framework data",     stage: "collect", w: 160, h: 62 },
   packetbeat:  { cat: "Beats", label: "Packetbeat",  sub: "Network packet analytics", stage: "collect", w: 160, h: 62 },
   winlogbeat:  { cat: "Beats", label: "Winlogbeat",  sub: "Windows event logs",       stage: "collect", w: 160, h: 62 },
-  osquerybeat: { cat: "Beats", label: "Osquerybeat", sub: "Osquery results",          stage: "collect", w: 160, h: 62 },
-  cloudbeat:   { cat: "Beats", label: "Cloudbeat",   sub: "Cloud posture (CSPM)",     stage: "collect", w: 160, h: 62 },
 
   /* --- Security solution --- */
   defend: { cat: "Security", label: "Elastic Defend", sub: "Endpoint security via Agent + Fleet", stage: "collect", w: 196, h: 68,

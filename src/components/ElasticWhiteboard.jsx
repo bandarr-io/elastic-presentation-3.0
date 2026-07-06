@@ -209,6 +209,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const [openCats, setOpenCats] = useState(() => new Set(CATS.filter((c) => c !== "General")));
   const [patternCfg, setPatternCfg] = useState(null); // { id, fill } while configuring a Patterns block
   const [seedMenu, setSeedMenu] = useState(false);    // preset save/reset dropdown open
+  const [fileMenu, setFileMenu] = useState(false);    // export/import dropdown open
   const [seedNote, setSeedNote] = useState("");       // transient "saved" confirmation
   const [routeTick, setRouteTick] = useState(0);     // forces a full re-route after a drag ends
 
@@ -898,21 +899,34 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
       <div className="ew-toolbar">
         <span className="ew-title">Elastic Whiteboard</span>
-        <button onClick={() => loadSeed("reference")}
-                title={hasCustom("reference") ? "Load your saved Reference architecture" : "Load the built-in Reference architecture"}>
-          Reference{hasCustom("reference") ? " •" : ""}</button>
-        <button onClick={() => loadSeed("airgap")}
-                title={hasCustom("airgap") ? "Load your saved Air-gapped example" : "Load the built-in Air-gapped example"}>
-          Air-gapped{hasCustom("airgap") ? " •" : ""}</button>
-        <button onClick={() => loadSeed("multitenant")}
-                title={hasCustom("multitenant") ? "Load your saved Multi-tenant architecture" : "Load the built-in Multi-tenant architecture"}>
-          Multi-tenant{hasCustom("multitenant") ? " •" : ""}</button>
         <span className="ew-menuwrap">
-          <button onClick={() => setSeedMenu((v) => !v)} title="Save or reset the built-in presets">Presets ▾</button>
+          <button onClick={() => setFileMenu((v) => !v)} title="Import or export the board">File ▾</button>
+          {fileMenu && (
+            <>
+              <div className="ew-menu-backdrop" onClick={() => setFileMenu(false)} />
+              <div className="ew-menu">
+                <div className="ew-menu-h">Export</div>
+                <button onClick={() => { exportJSON(); setFileMenu(false); }}>JSON</button>
+                <button onClick={() => { exportSVG(); setFileMenu(false); }}>SVG</button>
+                <button onClick={() => { exportPNG(); setFileMenu(false); }}>PNG</button>
+                <div className="ew-menu-sep" />
+                <div className="ew-menu-h">Import</div>
+                <button onClick={() => { fileRef.current.click(); setFileMenu(false); }}>Import JSON…</button>
+              </div>
+            </>
+          )}
+        </span>
+        <span className="ew-menuwrap">
+          <button onClick={() => setSeedMenu((v) => !v)} title="Load, save, or reset architecture presets">Architectures ▾</button>
           {seedMenu && (
             <>
               <div className="ew-menu-backdrop" onClick={() => setSeedMenu(false)} />
               <div className="ew-menu">
+                <div className="ew-menu-h">Load architecture</div>
+                <button onClick={() => { loadSeed("reference"); setSeedMenu(false); }}>Reference{hasCustom("reference") ? " •" : ""}</button>
+                <button onClick={() => { loadSeed("airgap"); setSeedMenu(false); }}>Air-gapped{hasCustom("airgap") ? " •" : ""}</button>
+                <button onClick={() => { loadSeed("multitenant"); setSeedMenu(false); }}>Multi-tenant{hasCustom("multitenant") ? " •" : ""}</button>
+                <div className="ew-menu-sep" />
                 <div className="ew-menu-h">Save current board as</div>
                 <button onClick={() => saveSeed("reference", "Reference")}>Reference</button>
                 <button onClick={() => saveSeed("airgap", "Air-gapped")}>Air-gapped</button>
@@ -925,6 +939,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 <div className="ew-menu-sep" />
                 <div className="ew-menu-h">Ship as source default</div>
                 <button onClick={copySeedCode}>Copy board as SEEDS code</button>
+                <div className="ew-menu-note">• marks presets with a saved custom version</div>
               </div>
             </>
           )}
@@ -935,11 +950,6 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         <button onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">↺</button>
         <button onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">↻</button>
         <button onClick={addZone}>+ Zone</button>
-        <span className="ew-gap" />
-        <button onClick={exportJSON}>JSON</button>
-        <button onClick={() => fileRef.current.click()}>Import</button>
-        <button onClick={exportSVG}>SVG</button>
-        <button onClick={exportPNG}>PNG</button>
         <input ref={fileRef} type="file" accept="application/json" style={{ display: "none" }} onChange={importJSON} />
         <span className="ew-gap" />
         <button onClick={() => zoomBy(1 / 1.2)}>−</button>
@@ -1520,7 +1530,7 @@ function PatternConfig({ cfg, setCfg, onInsert }) {
     const next = cur.includes(opt) ? cur.filter((k) => k !== opt) : [...cur, opt];
     set(key, order.filter((k) => next.includes(k))); // keep option order for determinism
   };
-  const disabled = conf.controls.some((c) => c.kind === "checkset" && !(cfg.fill[c.key] || []).length);
+  const disabled = conf.controls.some((c) => c.kind === "checkset" && !c.optional && !(cfg.fill[c.key] || []).length);
   return (
     <div className="ew-pconf">
       <div className="ew-pconf-top">
@@ -1582,8 +1592,10 @@ const CSS = `
 .ew-menuwrap{ position:relative; display:inline-flex; }
 .ew-menu-backdrop{ position:fixed; inset:0; z-index:40; }
 .ew-menu{ position:absolute; top:calc(100% + 6px); left:0; z-index:41; min-width:190px;
+  max-height:calc(100vh - 120px); overflow:auto;
   background:var(--panel); border:1px solid var(--line); border-radius:9px; padding:6px;
   display:grid; gap:2px; box-shadow:0 12px 30px rgba(0,0,0,.35); }
+.ew-menu-note{ font-size:10px; color:var(--faint); padding:4px 8px 2px; line-height:1.4; }
 .ew-menu-h{ font-family:var(--mono); font-size:9.5px; letter-spacing:.08em; text-transform:uppercase;
   color:var(--faint); padding:5px 8px 3px; }
 .ew-menu button{ text-align:left; width:100%; background:transparent; border:1px solid transparent;
