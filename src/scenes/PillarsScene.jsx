@@ -86,13 +86,13 @@ function PillarsScene({ metadata = {} }) {
                   <span className="font-headline font-extrabold text-5xl leading-none select-none" style={{ color: `${color}33` }}>{p.number}</span>
                 </div>
 
-                <h3 className={`font-headline font-extrabold text-2xl leading-none mb-2 ${headText}`}>{p.name}</h3>
-                <p className="text-sm font-semibold mb-3" style={{ color }}>{p.tagline}</p>
-                <p className={`text-sm leading-snug mb-4 ${mutedText}`}>{p.description}</p>
+                <h3 className={`font-headline font-extrabold text-3xl leading-none mb-2 ${headText}`}>{p.name}</h3>
+                <p className="text-base font-semibold mb-3" style={{ color }}>{p.tagline}</p>
+                <p className={`text-base leading-snug mb-4 ${mutedText}`}>{p.description}</p>
 
                 <div className="flex flex-wrap gap-2 mt-auto">
                   {p.tags.map((t, i) => (
-                    <span key={i} className="text-xs font-semibold rounded-full px-2.5 py-1" style={{ backgroundColor: `${color}1c`, color }}>{t}</span>
+                    <span key={i} className="text-sm font-semibold rounded-full px-2.5 py-1" style={{ backgroundColor: `${color}1c`, color }}>{t}</span>
                   ))}
                 </div>
               </div>

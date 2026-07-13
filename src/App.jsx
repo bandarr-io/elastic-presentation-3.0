@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { Analytics } from '@vercel/analytics/react'
 import { ThemeProvider, useTheme } from './context/ThemeContext'
 import { TeamProvider } from './context/TeamContext'
+import { SceneMotionProvider, useSceneMotionControls } from './context/SceneMotionContext'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faSun, faMoon, faMagnifyingGlass, faGear, faMagnifyingGlass as faSearch, faChartColumn, faBrain, faDna, faShield, faClock, faRocket, faCoins, faForwardStep, faChartLine, faPlay, faPause, faRotateRight, faChevronRight, faChevronLeft, faBolt, faLayerGroup, faTimes, faCircleNodes } from '@fortawesome/free-solid-svg-icons'
 import SceneSettings, { useSceneConfiguration } from './components/SceneSettings'
@@ -39,9 +40,11 @@ import ThreeLayersScene from './scenes/ThreeLayersScene'
 import PillarsScene from './scenes/PillarsScene'
 import SignalsScene from './scenes/SignalsScene'
 import NightshiftScene from './scenes/NightshiftScene'
+import NightshiftSREScene from './scenes/NightshiftSREScene'
 import StreamsScene from './scenes/StreamsScene'
 import OtelScene from './scenes/OtelScene'
 import KubernetesScene from './scenes/KubernetesScene'
+import KubernetesMCPScene from './scenes/KubernetesMCPScene'
 import AgenticScene from './scenes/AgenticScene'
 import DiscoveryScene from './scenes/DiscoveryScene'
 import SurfacesScene from './scenes/SurfacesScene'
@@ -750,6 +753,7 @@ const AgendaScene = ({ scenes = [], sceneMetadata = {}, customDurations = {}, me
 
 function AppContent() {
   const { theme, toggleTheme } = useTheme()
+  const { controls: motionControls } = useSceneMotionControls()
   
   const allScenes = [
     // ── Act 1 — Open & reconnect ────────────────────────────────────────────
@@ -1034,6 +1038,14 @@ function AppContent() {
       defaultDisabled: true
     },
     {
+      id: 'nightshift-demo',
+      component: NightshiftSREScene,
+      title: 'Nightshift Live Demo',
+      duration: '3 min',
+      description: 'Watch Nightshift work an incident end-to-end: detect → investigate → remediate → learn.',
+      defaultDisabled: true
+    },
+    {
       id: 'obs-streams',
       component: StreamsScene,
       title: 'Streams',
@@ -1055,6 +1067,14 @@ function AppContent() {
       title: 'Kubernetes',
       duration: '3 min',
       description: 'OOTB Kubernetes dashboards plus autonomous root-cause analysis',
+      defaultDisabled: true
+    },
+    {
+      id: 'obs-mcp-app',
+      component: KubernetesMCPScene,
+      title: 'MCP App for Kubernetes',
+      duration: '3 min',
+      description: 'Claude drives Elastic via MCP: health \u2192 anomalies \u2192 explainer \u2192 blast radius',
       defaultDisabled: true
     },
     {
@@ -1355,12 +1375,16 @@ function AppContent() {
     sceneProps = { metadata: sceneMetadata?.['obs-signals'] || {} }
   } else if (currentSceneId === 'nightshift-sre') {
     sceneProps = { metadata: sceneMetadata?.['nightshift-sre'] || {} }
+  } else if (currentSceneId === 'nightshift-demo') {
+    sceneProps = { metadata: sceneMetadata?.['nightshift-demo'] || {} }
   } else if (currentSceneId === 'obs-streams') {
     sceneProps = { metadata: sceneMetadata?.['obs-streams'] || {} }
   } else if (currentSceneId === 'obs-otel') {
     sceneProps = { metadata: sceneMetadata?.['obs-otel'] || {} }
   } else if (currentSceneId === 'obs-kubernetes') {
     sceneProps = { metadata: sceneMetadata?.['obs-kubernetes'] || {} }
+  } else if (currentSceneId === 'obs-mcp-app') {
+    sceneProps = { metadata: sceneMetadata?.['obs-mcp-app'] || {} }
   } else if (currentSceneId === 'obs-agentic') {
     sceneProps = { metadata: sceneMetadata?.['obs-agentic'] || {} }
   } else if (currentSceneId === 'obs-discovery') {
@@ -1481,7 +1505,7 @@ function AppContent() {
       {/* Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 w-full py-4 border-t backdrop-blur-md bg-elastic-light-grey/85 dark:bg-elastic-dev-blue/85 border-elastic-dev-blue/10 dark:border-white/10 shadow-[0_-4px_20px_rgba(11,22,40,0.06)] dark:shadow-[0_-4px_20px_rgba(0,0,0,0.3)]">
         {/* Tiny credit line, centered and out of the way of the controls */}
-        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden lg:block text-[10px] tracking-wide whitespace-nowrap text-elastic-dev-blue/40 dark:text-white/40">
+        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden lg:block text-[5px] tracking-wide whitespace-nowrap text-elastic-dev-blue/40 dark:text-white/40">
           Built and managed by Daniel Barr | <a href="https://elastic.co" target="_blank" rel="noreferrer" className="pointer-events-auto hover:underline">elastic.co</a> | 2026
         </div>
         <div className="flex items-center justify-between max-w-[95%] mx-auto">
@@ -1513,7 +1537,50 @@ function AppContent() {
             >
               <FontAwesomeIcon icon={faGear} className="text-lg" />
             </button>
-            
+
+            {/* Custom content toggle - only scenes that repurpose the toggle with a
+                bespoke icon (e.g. reveal/hide). Generic auto-play is not shown. */}
+            {motionControls?.onTogglePlay && motionControls?.toggleIcon && (
+              <button
+                onClick={motionControls.onTogglePlay}
+                aria-pressed={motionControls.isPlaying}
+                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 ${
+                  motionControls.isPlaying
+                    ? theme === 'dark'
+                      ? 'bg-elastic-teal/30 text-elastic-teal'
+                      : 'bg-elastic-blue/20 text-elastic-blue'
+                    : theme === 'dark'
+                      ? 'bg-elastic-teal/20 hover:bg-elastic-teal/30 text-elastic-teal'
+                      : 'bg-elastic-blue/10 hover:bg-elastic-blue/20 text-elastic-blue'
+                }`}
+                title={motionControls.isPlaying
+                  ? (motionControls.toggleTitleActive || 'Pause auto-play')
+                  : (motionControls.toggleTitle || 'Auto-play')}
+              >
+                <FontAwesomeIcon
+                  icon={motionControls.isPlaying
+                    ? (motionControls.toggleIconActive || faPause)
+                    : (motionControls.toggleIcon || faPlay)}
+                  className={`text-sm ${motionControls.isPlaying || motionControls.toggleIcon ? '' : 'ml-0.5'}`}
+                />
+              </button>
+            )}
+
+            {/* Per-beat action button - narrative scenes that publish one (e.g. trigger an in-scene event) */}
+            {motionControls?.action && (
+              <button
+                onClick={motionControls.action.onClick}
+                disabled={motionControls.action.disabled}
+                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 disabled:opacity-40 disabled:hover:scale-100 ${
+                  theme === 'dark'
+                    ? 'bg-elastic-teal/20 hover:bg-elastic-teal/30 text-elastic-teal'
+                    : 'bg-elastic-blue/10 hover:bg-elastic-blue/20 text-elastic-blue'
+                }`}
+                title={motionControls.action.title}
+              >
+                <FontAwesomeIcon icon={motionControls.action.icon} className="text-sm" />
+              </button>
+            )}
 
             {/* Expand/collapse all agenda blocks - only visible on Agenda scene */}
             {currentSceneId === 'agenda' && (
@@ -1984,7 +2051,9 @@ function App() {
   return (
     <ThemeProvider>
       <TeamProvider>
-        <AppContent />
+        <SceneMotionProvider>
+          <AppContent />
+        </SceneMotionProvider>
         <Analytics />
       </TeamProvider>
     </ThemeProvider>

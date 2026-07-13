@@ -1,11 +1,12 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { animate, stagger } from 'animejs'
 import { useTheme } from '../context/ThemeContext'
+import { useSceneMotionControls } from '../context/SceneMotionContext'
 import SceneHeader from '../components/SceneHeader'
 import CountUp from '../components/CountUp'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { resolveIcon } from '../data/iconOptions'
-import { faCode, faFlask, faServer, faBolt } from '@fortawesome/free-solid-svg-icons'
+import { faCode, faFlask, faServer, faBolt, faEye, faEyeSlash } from '@fortawesome/free-solid-svg-icons'
 
 // Source: 01-world.html — AI multiplies every observability problem.
 const COLORS = { blue: '#0B64DD', teal: '#48EFCF', poppy: '#FF957D' }
@@ -59,6 +60,9 @@ function AIScaleScene({ metadata = {} }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   const rootRef = useRef(null)
+  const payoffRef = useRef(null)
+  const [payoffVisible, setPayoffVisible] = useState(false)
+  const { setControls } = useSceneMotionControls()
 
   const eyebrow = metadata.eyebrow || 'Observability · The AI Era'
   const titlePlain = metadata.titlePlain || 'The challenge you know. '
@@ -86,13 +90,38 @@ function AIScaleScene({ metadata = {} }) {
     return () => anim?.pause?.()
   }, [])
 
+  // Animate the payoff card in whenever it becomes visible (no full-scene replay).
+  useEffect(() => {
+    if (!payoffVisible || !payoffRef.current) return undefined
+    const anim = animate(payoffRef.current, {
+      opacity: [0, 1], translateY: [18, 0], scale: [0.98, 1], duration: 560, easing: 'easeOutQuad',
+    })
+    return () => anim?.pause?.()
+  }, [payoffVisible])
+
+  // Publish a single nav toggle that reveals/hides the payoff card.
+  useEffect(() => {
+    setControls({
+      isPlaying: payoffVisible,
+      onTogglePlay: () => setPayoffVisible((v) => !v),
+      toggleIcon: faEye,
+      toggleIconActive: faEyeSlash,
+      toggleTitle: 'Reveal the payoff',
+      toggleTitleActive: 'Hide the payoff',
+    })
+    return () => setControls(null)
+  }, [payoffVisible, setControls])
+
   return (
     <div className="h-full w-full flex flex-col px-8 pt-2 pb-4 overflow-hidden">
-      <div ref={rootRef} className="max-w-[1380px] mx-auto w-full flex-1 flex flex-col min-h-0">
+      <div className="max-w-[1380px] mx-auto w-full flex-1 flex flex-col min-h-0">
+        <div ref={rootRef} className="flex-1 min-h-0 flex flex-col">
         <div className="reveal">
           <SceneHeader eyebrow={eyebrow} titlePlain={titlePlain} titleAccent={titleAccent} subtitle={subtitle} />
         </div>
 
+        {/* Problem set — chips, scale stages, and the takeaway strip */}
+        <div className="flex-1 min-h-0 flex flex-col justify-center">
         {/* "What we built for" chip row */}
         <div className="reveal flex flex-wrap items-center justify-center gap-2 mb-4 shrink-0">
           <span className={`text-xs font-semibold uppercase tracking-wider ${mutedText}`}>Built for:</span>
@@ -102,7 +131,7 @@ function AIScaleScene({ metadata = {} }) {
         </div>
 
         {/* Stage grid */}
-        <div className="flex-1 min-h-0 flex items-center">
+        <div className="flex">
         <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-4">
           {stages.map((s) => {
             const color = accentFor(s.color)
@@ -138,20 +167,36 @@ function AIScaleScene({ metadata = {} }) {
         </div>
         </div>
 
-        {/* Result strip */}
-        <div className="reveal mt-4 grid grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
-          {results.map((r, i) => (
+        {/* Result strip — three consequences, then the payoff */}
+        <div className="reveal mt-5 grid grid-cols-1 md:grid-cols-3 gap-3 shrink-0">
+          {results.slice(0, 3).map((r, i) => (
             <div
               key={i}
-              className={`rounded-xl border px-4 py-3 text-sm font-semibold leading-snug ${headText}`}
+              className={`rounded-xl border px-5 py-4 text-base font-semibold leading-snug ${headText}`}
               style={{
-                borderColor: i === results.length - 1 ? `${accentFor(COLORS.poppy)}66` : (isDark ? 'rgba(255,255,255,0.1)' : 'rgba(16,28,63,0.1)'),
-                backgroundColor: i === results.length - 1 ? `${accentFor(COLORS.poppy)}14` : (isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.7)'),
+                borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(16,28,63,0.1)',
+                backgroundColor: isDark ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.7)',
               }}
             >
               {r}
             </div>
           ))}
+        </div>
+        {results[3] && (
+          <div
+            ref={payoffRef}
+            className={`mt-3 rounded-2xl border px-6 py-5 text-2xl font-extrabold leading-snug text-center shrink-0 ${headText}`}
+            style={{
+              borderColor: `${accentFor(COLORS.poppy)}66`,
+              backgroundColor: `${accentFor(COLORS.poppy)}14`,
+              opacity: payoffVisible ? 1 : 0,
+              visibility: payoffVisible ? 'visible' : 'hidden',
+            }}
+          >
+            {results[3]}
+          </div>
+        )}
+        </div>
         </div>
       </div>
     </div>

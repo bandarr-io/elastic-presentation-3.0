@@ -73,3 +73,56 @@ body {
 .glow-delayed-dark {
   animation: glowOnceDark 1.5s ease-in-out 3s 1;
 }
+
+/* ── Scene "live" motion loops (Observability system model, live dots) ────── */
+/* Colors are set inline per element; these only drive opacity/scale so they
+   stay theme- and status-color agnostic. */
+@keyframes motionBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+.motion-blink {
+  animation: motionBlink 1.4s ease-in-out infinite;
+}
+
+@keyframes motionPulseRing {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.02); }
+}
+
+/* Chat/message entrance — a newly streamed message fades and rises into place. */
+@keyframes motionMsgIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.motion-msg-in {
+  animation: motionMsgIn 0.34s ease-out both;
+}
+
+/* An absolutely-positioned bordered overlay (color set inline) that pulses to
+   flag critical / focus nodes without touching the node's own layout. */
+.motion-pulse-ring {
+  animation: motionPulseRing 2s ease-in-out infinite;
+}
+
+/* Live time-series charts — the plotted lines scroll left to mimic streaming
+   metrics. The chart draws two identical halves so a -50% shift loops seamlessly. */
+@keyframes motionChartScroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.motion-chart-scroll {
+  animation: motionChartScroll 9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .motion-blink,
+  .motion-pulse-ring,
+  .motion-msg-in,
+  .motion-chart-scroll {
+    animation: none;
+  }
+}

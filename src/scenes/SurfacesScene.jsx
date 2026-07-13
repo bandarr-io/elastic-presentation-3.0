@@ -37,6 +37,10 @@ function SurfacesScene({ metadata = {} }) {
   const rootRef = useRef(null)
   const [beat, setBeat] = useState(0)
   const [playKey, setPlayKey] = useState(0)
+  // Chat card (beat 2) streams its turns in sequence, with a typing indicator
+  // between them — mirrors the AI Assistant conversation in the Security scene.
+  const [chatStep, setChatStep] = useState(0)
+  const [chatTyping, setChatTyping] = useState(false)
 
   const eyebrow = metadata.eyebrow || 'Agentic Observability · Multi-Surface'
   const surfaces = metadata.surfaces || SURFACES
@@ -57,6 +61,23 @@ function SurfacesScene({ metadata = {} }) {
       opacity: [0, 1], translateY: [16, 0], duration: 460, delay: stagger(70), easing: 'easeOutQuad',
     })
     return () => anim?.pause?.()
+  }, [beat, playKey])
+
+  // Drive the chat conversation: reveal one turn at a time, showing the typing
+  // indicator while the "agent" works, then land the anomaly card last.
+  useEffect(() => {
+    if (beat !== 1) return undefined
+    setChatStep(0)
+    setChatTyping(false)
+    const timers = []
+    const at = (ms, fn) => timers.push(setTimeout(fn, ms))
+    at(400, () => setChatStep(1))            // user prompt
+    at(1100, () => setChatTyping(true))      // agent thinking
+    at(2100, () => { setChatTyping(false); setChatStep(2) }) // tool call
+    at(2600, () => setChatStep(3))           // "got the data"
+    at(3200, () => setChatTyping(true))      // rendering
+    at(4200, () => { setChatTyping(false); setChatStep(4) }) // anomaly card
+    return () => timers.forEach(clearTimeout)
   }, [beat, playKey])
 
   const goTo = (i) => { setBeat(i); setPlayKey((k) => k + 1) }
@@ -109,13 +130,13 @@ function SurfacesScene({ metadata = {} }) {
               {/* Features */}
               <div className="flex flex-col gap-3">
                 {MCP_FEATURES.map((f, i) => (
-                  <div key={i} className={`reveal rounded-2xl border flex items-center gap-3 p-4 ${cardBase}`}>
-                    <span className="w-11 h-11 rounded-xl flex items-center justify-center text-lg shrink-0" style={{ backgroundColor: `${accent}1f`, color: accent }}>
+                  <div key={i} className={`reveal rounded-2xl border flex items-center gap-3.5 p-5 ${cardBase}`}>
+                    <span className="w-12 h-12 rounded-xl flex items-center justify-center text-xl shrink-0" style={{ backgroundColor: `${accent}1f`, color: accent }}>
                       <FontAwesomeIcon icon={f.icon} />
                     </span>
                     <div className="min-w-0">
-                      <div className={`font-bold text-sm leading-tight ${headText}`}>{f.name}</div>
-                      <p className={`text-xs leading-snug mt-0.5 ${mutedText}`}>{f.desc}</p>
+                      <div className={`font-bold text-lg leading-tight ${headText}`}>{f.name}</div>
+                      <p className={`text-sm leading-snug mt-1 ${mutedText}`}>{f.desc}</p>
                     </div>
                   </div>
                 ))}
@@ -129,16 +150,23 @@ function SurfacesScene({ metadata = {} }) {
                   </span>
                   <span className="font-mono text-xs text-white/70 ml-1">K8s-Agentic-Investigation — Claude</span>
                 </div>
-                <div className="p-4 space-y-3">
-                  <div className="flex justify-end">
-                    <div className="rounded-2xl rounded-tr-sm px-3.5 py-2 text-sm text-white max-w-[80%]" style={{ backgroundColor: `${accent}26` }}>
-                      Call forge_ml_anomalies for entity “frontend”, last 1h. Render in the anomaly-explainer.
+                <div className="p-4 space-y-3 h-[380px] overflow-y-auto">
+                  {chatStep >= 1 && (
+                    <div className="flex justify-end motion-msg-in">
+                      <div className="rounded-2xl rounded-tr-sm px-3.5 py-2 text-sm text-white max-w-[80%]" style={{ backgroundColor: `${accent}26` }}>
+                        Call forge_ml_anomalies for entity “frontend”, last 1h. Render in the anomaly-explainer.
+                      </div>
                     </div>
-                  </div>
-                  <div className="font-mono text-xs text-white/55">&gt; forge_ml_anomalies entity: frontend · lookback: 1h</div>
-                  <div className="text-sm text-white/80">Got the data. Rendering it in the anomaly-explainer app.</div>
+                  )}
+                  {chatStep >= 2 && (
+                    <div className="font-mono text-xs text-white/55 motion-msg-in">&gt; forge_ml_anomalies entity: frontend · lookback: 1h</div>
+                  )}
+                  {chatStep >= 3 && (
+                    <div className="text-sm text-white/80 motion-msg-in">Got the data. Rendering it in the anomaly-explainer app.</div>
+                  )}
                   {/* anomaly card */}
-                  <div className="rounded-xl border p-3.5" style={{ borderColor: `${pink}59`, backgroundColor: `${pink}12` }}>
+                  {chatStep >= 4 && (
+                  <div className="rounded-xl border p-3.5 motion-msg-in" style={{ borderColor: `${pink}59`, backgroundColor: `${pink}12` }}>
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <FontAwesomeIcon icon={faTriangleExclamation} style={{ color: pink }} />
@@ -159,12 +187,22 @@ function SurfacesScene({ metadata = {} }) {
                           <div className="font-headline font-extrabold text-xl" style={{ color: s.accent ? pink : '#fff' }}>
                             {s.text != null
                               ? s.text
-                              : <CountUp value={s.value} format={(n) => `${s.prefix || ''}${n}${s.suffix || ''}`} replayKey={playKey} />}
+                              : <CountUp value={s.value} duration={1600} format={(n) => `${s.prefix || ''}${n}${s.suffix || ''}`} replayKey={playKey} />}
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
+                  )}
+                  {chatTyping && (
+                    <div className="flex justify-start motion-msg-in">
+                      <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-sm px-4 py-3" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }}>
+                        {[0, 1, 2].map((dot) => (
+                          <span key={dot} className="w-2 h-2 rounded-full bg-white/40 animate-bounce" style={{ animationDelay: `${dot * 0.15}s` }} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
