@@ -118,11 +118,32 @@ body {
   animation: motionChartScroll 9s linear infinite;
 }
 
+/* Soft glow on the cluster boundary for the opening architecture step.
+   Colour comes from the inline --arch-pulse custom property so it can stay
+   theme-aware. */
+@keyframes archBoundaryPulse {
+  0%, 100% { box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
+  50% { box-shadow: 0 0 34px var(--arch-pulse, rgba(255, 255, 255, 0.12)); }
+}
+
+.arch-boundary-pulse {
+  animation: archBoundaryPulse 2.2s ease-in-out infinite;
+}
+
+/* Flowing energy along the platform conduits/traces (Slide 6 concepts). */
+@keyframes secFlowOut { to { stroke-dashoffset: -32; } }
+@keyframes secFlowIn { to { stroke-dashoffset: 32; } }
+.sec-flow-out { animation: secFlowOut 0.9s linear infinite; }
+.sec-flow-in { animation: secFlowIn 0.9s linear infinite; }
+
 @media (prefers-reduced-motion: reduce) {
   .motion-blink,
   .motion-pulse-ring,
   .motion-msg-in,
-  .motion-chart-scroll {
+  .motion-chart-scroll,
+  .arch-boundary-pulse,
+  .sec-flow-out,
+  .sec-flow-in {
     animation: none;
   }
 }

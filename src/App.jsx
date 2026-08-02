@@ -11,6 +11,7 @@ import SceneHeader from './components/SceneHeader'
 
 import TeamScene from './scenes/TeamScene'
 import UnifiedStrategyScene from './scenes/UnifiedStrategyScene'
+import ElasticExplodedLogo3D from './scenes/ElasticExplodedLogo3D'
 import DataExplosionSceneV2 from './scenes/DataExplosionSceneV2'
 import CrossClusterScene from './scenes/CrossClusterScene'
 import SecurityScene from './scenes/SecurityScene'
@@ -29,6 +30,8 @@ import LogsDBScene from './scenes/LogsDBScene'
 import AIAssistantScene from './scenes/AIAssistantScene'
 import CustomerArchitectScene from './scenes/CustomerArchitectScene'
 import SecurityNarrativeVisualScene from './scenes/SecurityNarrativeVisualScene'
+import SecuritySOCModelScene from './scenes/SecuritySOCModelScene'
+import SecurityCapabilitiesScene from './scenes/SecurityCapabilitiesScene'
 import SecurityUseCasesScene from './scenes/SecurityUseCasesScene'
 import ElasticValueScene from './scenes/ElasticValueScene'
 import PlatformOperationsScene from './scenes/PlatformOperationsScene'
@@ -40,7 +43,6 @@ import ThreeLayersScene from './scenes/ThreeLayersScene'
 import PillarsScene from './scenes/PillarsScene'
 import SignalsScene from './scenes/SignalsScene'
 import NightshiftScene from './scenes/NightshiftScene'
-import NightshiftSREScene from './scenes/NightshiftSREScene'
 import StreamsScene from './scenes/StreamsScene'
 import OtelScene from './scenes/OtelScene'
 import KubernetesScene from './scenes/KubernetesScene'
@@ -816,6 +818,13 @@ function AppContent() {
     },
     // ── Act 3 — Platform (bridge to partner deep-dive) ──────────────────────
     {
+      id: 'elastic-exploded',
+      component: ElasticExplodedLogo3D,
+      title: 'Exploded Platform',
+      duration: '2 min',
+      description: 'Teardown of the Elastic logo — click to explode it into seven capability parts along one assembly axis, then reassemble'
+    },
+    {
       id: 'unified-strategy',
       component: UnifiedStrategyScene,
       title: 'Platform Overview',
@@ -834,8 +843,22 @@ function AppContent() {
       id: 'security-narrative-visual',
       component: SecurityNarrativeVisualScene,
       title: 'Security: Why Now',
-      duration: '4 min',
-      description: 'Count-up threat stats, attack-path kill-chain, bolt-on vs native, and the Senses/Brain/Hands platform model'
+      duration: '3 min',
+      description: 'Count-up threat stats, attack-path kill-chain, and bolt-on vs native SOC models'
+    },
+    {
+      id: 'security-soc-model',
+      component: SecuritySOCModelScene,
+      title: 'Pyramid \u2192 Diamond',
+      duration: '2 min',
+      description: 'The SOC operating model shift: the triage pyramid morphs into the diamond model'
+    },
+    {
+      id: 'security-capabilities',
+      component: SecurityCapabilitiesScene,
+      title: 'Senses \u00b7 Brain \u00b7 Hands',
+      duration: '3 min',
+      description: 'Deep-dive on the three native platform layers \u2014 data & visibility, machine-speed reasoning, and fast response \u2014 with competitive call-outs'
     },
     {
       id: 'security',
@@ -1035,14 +1058,6 @@ function AppContent() {
       title: 'Nightshift: AI SRE',
       duration: '4 min',
       description: 'The autonomous AI SRE — detect, investigate, remediate, audit. The end of on-call.',
-      defaultDisabled: true
-    },
-    {
-      id: 'nightshift-demo',
-      component: NightshiftSREScene,
-      title: 'Nightshift Live Demo',
-      duration: '3 min',
-      description: 'Watch Nightshift work an incident end-to-end: detect → investigate → remediate → learn.',
       defaultDisabled: true
     },
     {
@@ -1271,6 +1286,8 @@ function AppContent() {
     sceneProps = { metadata: sceneMetadata?.['ai-assistant'] || {} }
   } else if (currentSceneId === 'customer-architect') {
     sceneProps = { metadata: sceneMetadata?.['customer-architect'] || {} }
+  } else if (currentSceneId === 'elastic-exploded') {
+    sceneProps = { metadata: sceneMetadata?.['elastic-exploded'] || {} }
   } else if (currentSceneId === 'unified-strategy') {
     sceneProps = { metadata: sceneMetadata?.['unified-strategy'] || {} }
   } else if (currentSceneId === 'data-explosion') {
@@ -1296,6 +1313,10 @@ function AppContent() {
     sceneProps = { metadata: sceneMetadata?.['cross-cluster'] || {} }
   } else if (currentSceneId === 'security-narrative-visual') {
     sceneProps = { metadata: sceneMetadata?.['security-narrative-visual'] || {} }
+  } else if (currentSceneId === 'security-soc-model') {
+    sceneProps = { metadata: sceneMetadata?.['security-soc-model'] || {} }
+  } else if (currentSceneId === 'security-capabilities') {
+    sceneProps = { metadata: sceneMetadata?.['security-capabilities'] || {} }
   } else if (currentSceneId === 'security') {
     sceneProps = {
       externalStage: securityStage,
@@ -1375,8 +1396,6 @@ function AppContent() {
     sceneProps = { metadata: sceneMetadata?.['obs-signals'] || {} }
   } else if (currentSceneId === 'nightshift-sre') {
     sceneProps = { metadata: sceneMetadata?.['nightshift-sre'] || {} }
-  } else if (currentSceneId === 'nightshift-demo') {
-    sceneProps = { metadata: sceneMetadata?.['nightshift-demo'] || {} }
   } else if (currentSceneId === 'obs-streams') {
     sceneProps = { metadata: sceneMetadata?.['obs-streams'] || {} }
   } else if (currentSceneId === 'obs-otel') {

@@ -7,8 +7,7 @@ import SceneHeader from '../components/SceneHeader'
 import {
   faBolt, faClock, faBug, faTriangleExclamation,
   faDesktop, faGears, faLock, faDatabase,
-  faUserPen, faBan, faCircleCheck,
-  faEye, faBrain, faHandFist,
+  faUserPen, faBan,
   faArrowRightLong, faArrowLeftLong, faRotateRight, faSkull, faPlug,
 } from '@fortawesome/free-solid-svg-icons'
 
@@ -49,18 +48,10 @@ const MATURITY = [
     parts: ['Unified', 'No approval'] },
 ]
 
-// ─── Beat 4: Senses / Brain / Hands ──────────────────────────────────
-const CAPABILITIES = [
-  { name: 'Senses', tagline: 'Unified data & visibility', icon: faEye,       desc: 'One agent. A hybrid data mesh across cloud, edge, and on-prem — no egress, no rehydration.' },
-  { name: 'Brain',  tagline: 'Reason at machine speed',   icon: faBrain,     desc: 'Model-agnostic, data-grounded reasoning. BM25 + vector in one query, your choice of LLM.' },
-  { name: 'Hands',  tagline: 'Respond fast',              icon: faHandFist,  desc: 'Deterministic + agentic workflows as code. Full automation or human-on-the-loop.' },
-]
-
 const BEATS = [
   { key: 'why-now',  step: 'Why Now',      title: 'The world has changed.',          accentTitle: '',                        subtitle: 'Nation-state capabilities are now commodity. AI has collapsed the cost of attack. Breakout times are measured in seconds, not hours.' },
   { key: 'taxes',    step: 'The Taxes',    title: 'The industry taxes your SOC. ',   accentTitle: "It doesn't secure it.",   subtitle: 'The adversary follows the money — slipping through every gap the status quo leaves open.' },
   { key: 'agentic',  step: 'Agentic SOC',  title: "You can't bolt on an ",           accentTitle: 'agentic SOC.',            subtitle: 'Machine speed with human judgment requires a platform where data, AI, and automation are native — not stitched together.' },
-  { key: 'built',    step: 'Built as One', title: 'Built as one. ',                  accentTitle: 'Not stitched together.',  subtitle: 'Three capabilities a platform must have natively to operate at machine speed.' },
 ]
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -118,7 +109,6 @@ function SecurityNarrativeVisualScene({ metadata = {} }) {
           {beat === 0 && <ThreatBeat {...shared} />}
           {beat === 1 && <TaxKillChainBeat {...shared} />}
           {beat === 2 && <ArchitectureBeat {...shared} />}
-          {beat === 3 && <CapabilityLoopBeat {...shared} />}
         </div>
 
         {/* Stepper + replay */}
@@ -387,40 +377,5 @@ function ArchitectureBeat({ isDark, accent, danger, headText, mutedText, cardBas
 }
 
 function mutedColorVal(isDark) { return isDark ? 'rgba(255,255,255,0.55)' : 'rgba(11,100,221,0.55)' }
-
-// ─── Beat 4: Senses → Brain → Hands ──────────────────────────────────
-function CapabilityLoopBeat({ isDark, accent, headText, mutedText, cardBase }) {
-  const color = accent(COLORS.teal)
-
-  return (
-    <div className="flex flex-col gap-5">
-      <div className="relative">
-        {/* Static line connecting the three circle centers */}
-        <div className="absolute top-11 -translate-y-1/2 h-0.5" style={{ left: '16.67%', right: '16.67%', backgroundColor: `${color}40` }} />
-        <div className="relative grid grid-cols-3 gap-6">
-          {CAPABILITIES.map((c) => (
-            <div key={c.name} className="flex flex-col items-center text-center px-2">
-              <span className="w-[88px] h-[88px] rounded-full flex items-center justify-center mb-5 relative z-10" style={{ backgroundColor: isDark ? '#0B1F3A' : '#fff', border: `2px solid ${color}`, color }}>
-                <FontAwesomeIcon icon={c.icon} className="text-3xl" />
-              </span>
-              <div className={`rounded-2xl border p-6 w-full ${cardBase}`}>
-                <h3 className={`text-2xl font-bold ${headText}`}>{c.name}</h3>
-                <div className="text-sm font-semibold uppercase tracking-wider mb-2.5" style={{ color }}>{c.tagline}</div>
-                <p className={`text-base leading-snug ${mutedText}`}>{c.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="flex items-center justify-center gap-2">
-        <span className="text-sm font-semibold uppercase tracking-wider px-4 py-2 rounded-full" style={{ backgroundColor: `${color}1A`, color }}>
-          <FontAwesomeIcon icon={faCircleCheck} className="mr-1.5" />
-          A continuous loop — detect, reason, respond
-        </span>
-      </div>
-    </div>
-  )
-}
 
 export default SecurityNarrativeVisualScene

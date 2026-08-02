@@ -122,7 +122,7 @@ function Chip({ children, muted }) {
 function MetricCard({ label, value, display, unit, sev, spark, footer, replayKey }) {
   const s = SEV[sev]
   return (
-    <div className="reveal rounded-lg p-3 flex flex-col min-w-0" style={{ backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+    <div className="reveal rounded-lg p-2.5 flex flex-col min-w-0" style={{ backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-[10px] font-bold uppercase tracking-wider text-white/45 truncate">{label}</span>
         <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
@@ -136,7 +136,7 @@ function MetricCard({ label, value, display, unit, sev, spark, footer, replayKey
         {unit && <span className="text-[11px] text-white/45">{unit}</span>}
       </div>
       {spark
-        ? <div className="h-8 mt-2"><Sparkline vals={spark} color={s.color} /></div>
+        ? <div className="h-7 mt-1.5"><Sparkline vals={spark} color={s.color} /></div>
         : footer && <div className="text-[10px] mt-2" style={{ color: sev === 'ok' ? s.color : 'rgba(255,255,255,0.5)' }}>{footer}</div>}
     </div>
   )
@@ -166,7 +166,7 @@ const HEAT_COLORS = ['rgba(255,255,255,0.06)', SEV.minor.color, SEV.major.color,
 
 function HealthPanel({ playKey, headingBlock }) {
   return (
-    <div className="flex flex-col gap-3 min-h-0">
+    <div className="flex flex-col gap-2.5 min-h-0">
       {headingBlock}
       <div className="reveal flex items-center gap-2 flex-wrap text-[11px] font-mono text-white/50">
         <span>cluster: prod-us-east-1</span><span className="text-white/20">·</span>
@@ -241,7 +241,7 @@ const ANOMALIES = [
 
 function ExplorerPanel({ playKey, headingBlock }) {
   return (
-    <div className="flex flex-col gap-3 min-h-0">
+    <div className="flex flex-col gap-2.5 min-h-0">
       {headingBlock}
       <div className="reveal flex items-center gap-4 rounded-lg p-3" style={{ backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' }}>
         <SeverityDonut total={6} size={80} stroke={11} segments={[
@@ -304,7 +304,7 @@ const LATENCY_SERIES = [.28, .3, .27, .29, .31, .28, .3, .29, .32, .3, .34, .32,
 function ExplainerPanel({ playKey, headingBlock, onViewBlast }) {
   const { line, area } = useMemo(() => sparkPaths(LATENCY_SERIES), [])
   return (
-    <div className="flex flex-col gap-3 min-h-0">
+    <div className="flex flex-col gap-2.5 min-h-0">
       {headingBlock}
       <div className="reveal flex items-center gap-4">
         <div className="relative shrink-0" style={{ width: 84, height: 84 }}>
@@ -338,7 +338,7 @@ function ExplainerPanel({ playKey, headingBlock, onViewBlast }) {
 
       <div className="reveal rounded-lg p-3" style={{ backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' }}>
         <div className="text-[10px] font-bold uppercase tracking-wider text-white/40 mb-2">P99 latency · last 30m</div>
-        <div className="relative h-32">
+        <div className="relative h-24">
           <svg viewBox={`0 0 ${SPARK_W} ${SPARK_H}`} preserveAspectRatio="none" className="w-full h-full block">
             <line x1="0" x2={SPARK_W} y1={SPARK_H - 0.32 * (SPARK_H - 4) - 2} y2={SPARK_H - 0.32 * (SPARK_H - 4) - 2} stroke="rgba(255,255,255,0.25)" strokeWidth="0.5" strokeDasharray="2 2" vectorEffect="non-scaling-stroke" />
             <path d={area} fill={SEV.degraded.color} fillOpacity="0.16" stroke="none" />
@@ -378,7 +378,7 @@ const SAFE_SERVICES = ['checkout', 'frontend', 'payments', 'shipping']
 
 function BlastPanel({ headingBlock }) {
   return (
-    <div className="flex flex-col gap-3 min-h-0 flex-1">
+    <div className="flex flex-col gap-2.5 min-h-0 flex-1">
       {headingBlock}
       <div className="reveal relative flex-1 min-h-0 rounded-lg overflow-hidden" style={{ backgroundColor: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)' }}>
         {/* connector lines */}
@@ -539,7 +539,7 @@ function KubernetesMCPScene({ metadata = {} }) {
     <div className="h-full w-full flex flex-col px-8 pt-2 pb-3 overflow-hidden">
       <div className="max-w-[1600px] mx-auto w-full flex-1 flex flex-col min-h-0">
         {/* App header */}
-        <div className="flex items-end justify-between flex-shrink-0 pt-4 pb-3">
+        <div className="flex items-end justify-between flex-shrink-0 pt-2 pb-6">
           <div>
             <p className={`text-xs font-semibold uppercase tracking-eyebrow mb-2 ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>{eyebrow}</p>
             <h2 className={`font-headline text-3xl md:text-4xl font-extrabold leading-none ${headText}`}>
@@ -592,7 +592,7 @@ function KubernetesMCPScene({ metadata = {} }) {
             </div>
             <div className="flex-1 min-h-0 grid grid-cols-[220px_1fr]">
               <ChatSidebar beat={beat} />
-              <div className="min-h-0 overflow-y-auto p-4 flex flex-col">{panel}</div>
+              <div className="min-h-0 overflow-y-auto px-4 py-3 flex flex-col">{panel}</div>
             </div>
           </div>
         </div>

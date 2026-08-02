@@ -60,6 +60,15 @@ export default function LicensingEditor({ sceneMetadata, onUpdateSceneMetadata, 
   const setEnterpriseFeature = (i, patch) =>
     setEnterpriseFeatures(enterpriseFeatures.map((it, idx) => (idx === i ? { ...it, ...patch } : it)))
 
+  const DEFAULT_CONSUMPTION_FEATURES = [
+    { name: 'On-Prem Jina Models', desc: 'Self-hosted embed & rerank' },
+    { name: 'Workflows', desc: 'Orchestrate processes on demand' },
+  ]
+  const consumptionFeatures = meta.consumptionFeatures || DEFAULT_CONSUMPTION_FEATURES
+  const setConsumptionFeatures = (next) => update({ consumptionFeatures: next })
+  const setConsumptionFeature = (i, patch) =>
+    setConsumptionFeatures(consumptionFeatures.map((it, idx) => (idx === i ? { ...it, ...patch } : it)))
+
   const renderFeatureList = (items, defaults, setItems, setItem, addLabel) => (
     <div className="space-y-2">
       {items.map((feature, i) => (
@@ -111,19 +120,19 @@ export default function LicensingEditor({ sceneMetadata, onUpdateSceneMetadata, 
         <div className="space-y-3 mt-3">
           <div>
             <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Eyebrow</label>
-            <input type="text" value={meta.eyebrow || ''} onChange={(e) => update({ eyebrow: e.target.value })} className={inputClass} placeholder="Licensing" />
+            <input type="text" value={meta.eyebrow || ''} onChange={(e) => update({ eyebrow: e.target.value })} className={inputClass} placeholder="Licensing & Pricing" />
           </div>
           <div>
             <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Title Plain</label>
-            <input type="text" value={meta.titlePlain || ''} onChange={(e) => update({ titlePlain: e.target.value })} className={inputClass} placeholder="One License. " />
+            <input type="text" value={meta.titlePlain || ''} onChange={(e) => update({ titlePlain: e.target.value })} className={inputClass} placeholder="Pay for Outcomes, " />
           </div>
           <div>
             <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Title Accent</label>
-            <input type="text" value={meta.titleAccent || ''} onChange={(e) => update({ titleAccent: e.target.value })} className={inputClass} placeholder="Full Power." />
+            <input type="text" value={meta.titleAccent || ''} onChange={(e) => update({ titleAccent: e.target.value })} className={inputClass} placeholder="Not Overhead." />
           </div>
           <div>
             <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Subtitle</label>
-            <textarea rows={3} value={meta.subtitle || ''} onChange={(e) => update({ subtitle: e.target.value })} className={textareaClass} placeholder="One software SKU. No add-ons. No data caps." />
+            <textarea rows={3} value={meta.subtitle || ''} onChange={(e) => update({ subtitle: e.target.value })} className={textareaClass} placeholder="Newer capabilities like Workflows are priced by usage: start with a generous monthly allocation at no cost, and only pay for the executions that succeed." />
           </div>
         </div>
       </div>
@@ -180,6 +189,14 @@ export default function LicensingEditor({ sceneMetadata, onUpdateSceneMetadata, 
             <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Enterprise Tier Name</label>
             <input type="text" value={meta.enterpriseTierName || ''} onChange={(e) => update({ enterpriseTierName: e.target.value })} className={inputClass} placeholder="Enterprise" />
           </div>
+          <div>
+            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Consumption Tier Name</label>
+            <input type="text" value={meta.consumptionTierName || ''} onChange={(e) => update({ consumptionTierName: e.target.value })} className={inputClass} placeholder="Consumption" />
+          </div>
+          <div>
+            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Consumption Badge Label</label>
+            <input type="text" value={meta.consumptionBadgeLabel || ''} onChange={(e) => update({ consumptionBadgeLabel: e.target.value })} className={inputClass} placeholder="Coming Soon" />
+          </div>
         </div>
       </div>
 
@@ -221,6 +238,20 @@ export default function LicensingEditor({ sceneMetadata, onUpdateSceneMetadata, 
           <div>
             <label className={`text-xs mb-2 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Features</label>
             {renderFeatureList(enterpriseFeatures, DEFAULT_ENTERPRISE_FEATURES, setEnterpriseFeatures, setEnterpriseFeature, '+ Add Enterprise Feature')}
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>Consumption Section</h3>
+        <div className="space-y-3 mt-3">
+          <div>
+            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Section Subtitle</label>
+            <input type="text" value={meta.consumptionSectionSubtitle || ''} onChange={(e) => update({ consumptionSectionSubtitle: e.target.value })} className={inputClass} placeholder="— Pay for what you use" />
+          </div>
+          <div>
+            <label className={`text-xs mb-2 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Features</label>
+            {renderFeatureList(consumptionFeatures, DEFAULT_CONSUMPTION_FEATURES, setConsumptionFeatures, setConsumptionFeature, '+ Add Consumption Feature')}
           </div>
         </div>
       </div>

@@ -5,12 +5,13 @@ import SceneHeader from '../components/SceneHeader'
 import SceneStepper from '../components/SceneStepper'
 import FlowConnectors from '../components/FlowConnectors'
 import { useSceneMotion } from '../hooks/useSceneMotion'
+import { useReducedMotion } from '../hooks/useReducedMotion'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faDatabase, faBrain, faRobot, faShareNodes, faArrowUpLong,
   faLock, faArrowRightLong, faCompress, faPlay, faCheck,
   faArrowDownLong, faBolt, faArrowPointer, faEllipsis,
-  faCube, faServer, faCloud, faCodeBranch,
+  faCube, faServer, faCloud, faCodeBranch, faRotateLeft,
 } from '@fortawesome/free-solid-svg-icons'
 
 // Source: nightshift-architecture.html + nightshift-ai-index.html + nightshift-brain.html + nightshift-ai-economics.html
@@ -37,7 +38,8 @@ const AGENT_LAYER = {
 }
 const CONTEXT_LAYER = {
   name: 'Context Layer', label: 'Context Layer', sub: 'self-updating',
-  chips: ['failure signatures', 'fix outcomes', 'pattern library', 'knowledge indicators', 'system model', 'service topology', 'dependencies', 'anomaly events'],
+  // Ordered to match the story's reveal cadence (fills left-to-right).
+  chips: ['knowledge indicators', 'system model', 'service topology', 'dependencies', 'anomaly events', 'failure signatures', 'fix outcomes', 'pattern library'],
 }
 const DATA_CARDS = [
   { id: 'telemetry', name: 'Telemetry', label: 'Telemetry', sub: 'Signals · Elastic', tone: 'blue', chips: ['Logs', 'Traces', 'Metrics', 'Synthetics', 'Profiles'] },
@@ -55,6 +57,69 @@ const ARCH_EDGES = [
   { key: 'to-brain', from: 'agent', to: 'brain', fromSide: 'right', toSide: 'top', arrowEnd: true, orthogonal: true },
   { key: 'from-brain', from: 'brain', to: 'context', fromSide: 'left', toSide: 'right', arrowEnd: true },
 ]
+
+// The architecture beat is told as a 7-step story: the cluster lights up from
+// the data layer outward, the agent reaches its tools, and the loop closes back
+// into a self-updating Context Layer. Each step lists the cumulative set of
+// panels, connectors, and Context-Layer chips that should be lit by that point.
+// panel ids: agent, context, telemetry, artifacts, ext-agents, ext-systems, brain
+// arrow ids: data-ctx, ctx-agent (internal up-arrows) + FlowConnector keys
+//            (systems, agents, to-brain, from-brain)
+const KI = ['knowledge indicators', 'system model', 'service topology']
+const KI2 = [...KI, 'dependencies', 'anomaly events']
+const ARCH_STORY = [
+  {
+    title: 'Your system, ready',
+    desc: 'An Elastic cluster: waiting. Before a single alert, before a single connection. This is where Nightshift begins.',
+    pulse: true,
+    panels: ['telemetry', 'artifacts'],
+    arrows: [],
+    chips: [],
+  },
+  {
+    title: 'Your environment takes shape',
+    desc: 'Nightshift reads your telemetry and builds a live model: service topology, dependencies, and what normal looks like for every entity.',
+    panels: ['telemetry', 'artifacts', 'context'],
+    arrows: ['data-ctx'],
+    chips: KI,
+  },
+  {
+    title: 'Connect your systems',
+    desc: 'Connect your external systems. Nightshift enriches context with dependency graphs and anomaly events.',
+    panels: ['telemetry', 'artifacts', 'context', 'ext-systems'],
+    arrows: ['data-ctx', 'systems'],
+    chips: KI2,
+  },
+  {
+    title: 'The SRE Agent takes action',
+    desc: 'With full context in hand — topology, entity catalog, live signals — the SRE agent investigates and remediates. No blank slate. No manual correlation.',
+    panels: ['telemetry', 'artifacts', 'context', 'ext-systems', 'agent'],
+    arrows: ['data-ctx', 'systems', 'ctx-agent'],
+    chips: KI2,
+  },
+  {
+    title: 'The agent reaches out',
+    desc: 'The SRE agent loops in external agents — Claude, Cursor, and others — to coordinate action and share the load.',
+    panels: ['telemetry', 'artifacts', 'context', 'ext-systems', 'agent', 'ext-agents'],
+    arrows: ['data-ctx', 'systems', 'ctx-agent', 'agents'],
+    chips: KI2,
+  },
+  {
+    title: 'The agent feeds the brain',
+    desc: 'Every fix, every investigation, every outcome flows back into Elastic Brain — building global knowledge distilled across every deployment.',
+    panels: ['telemetry', 'artifacts', 'context', 'ext-systems', 'agent', 'ext-agents', 'brain'],
+    arrows: ['data-ctx', 'systems', 'ctx-agent', 'agents', 'to-brain'],
+    chips: KI2,
+  },
+  {
+    title: 'Nightshift, fully online',
+    desc: 'Elastic Brain distills accumulated knowledge back into every Context Layer. Every deployment learns from every other. The loop is closed.',
+    panels: ['telemetry', 'artifacts', 'context', 'ext-systems', 'agent', 'ext-agents', 'brain'],
+    arrows: ['data-ctx', 'systems', 'ctx-agent', 'agents', 'to-brain', 'from-brain'],
+    chips: [...KI2, 'failure signatures', 'fix outcomes', 'pattern library'],
+  },
+]
+const ARCH_LAST = ARCH_STORY.length - 1
 
 const YOUR_BRAIN = [
   'Your resolved incidents + investigation notes',
@@ -119,6 +184,7 @@ function NightshiftArchScene({ metadata = {} }) {
   const eyebrow = metadata.eyebrow || 'Elastic Observability · Inside Nightshift'
   const beats = (metadata.beats || BEATS).map((b, i) => ({ ...(BEATS[i] || {}), ...b }))
   const { beat, playKey, isPlaying, goTo, replay, toggleAutoplay } = useSceneMotion(beats)
+  const { prefersReducedMotion } = useReducedMotion()
   const current = beats[beat]
 
   // Beat 3 mini-sequence (button-driven): a freshly resolved incident in
@@ -131,25 +197,50 @@ function NightshiftArchScene({ metadata = {} }) {
     setBrainStage(1)
     brainTimer.current = setTimeout(() => setBrainStage(2), 1400)
   }, [])
+
+  // Beat 2 (Architecture) is a 7-step story. `archStep` drives which panels,
+  // connectors, and chips are lit; it auto-advances and can be stepped manually.
+  const [archStep, setArchStep] = useState(0)
+  const advanceArch = useCallback(() => setArchStep((s) => (s >= ARCH_LAST ? 0 : s + 1)), [])
+
   useEffect(() => {
     setBrainStage(0)
+    setArchStep(0)
     if (brainTimer.current) clearTimeout(brainTimer.current)
     return () => { if (brainTimer.current) clearTimeout(brainTimer.current) }
   }, [beat, playKey])
 
-  // Publish the "contribute pattern" trigger to the nav bar, but only on the
-  // Elastic Brain beat.
-  const brainAction = useMemo(() => (
-    beat === 2
-      ? {
+  // Auto-advance the architecture story (once through, no loop). Manual steps
+  // simply reschedule the next tick; reduced-motion users step by hand.
+  useEffect(() => {
+    if (beat !== 1 || archStep >= ARCH_LAST || prefersReducedMotion) return undefined
+    const t = setTimeout(() => setArchStep((s) => Math.min(s + 1, ARCH_LAST)), 3400)
+    return () => clearTimeout(t)
+  }, [beat, archStep, prefersReducedMotion])
+
+  // Per-beat nav action: contribute-pattern on the Brain beat, step/replay on
+  // the Architecture beat.
+  const stepAction = useMemo(() => {
+    if (beat === 2) {
+      return {
         onClick: runContribution,
         icon: brainStage === 2 ? faCheck : faPlay,
         title: brainStage === 0 ? 'Contribute anonymized pattern'
           : brainStage === 1 ? 'Extracting pattern…' : 'Pattern contributed',
         disabled: brainStage !== 0,
       }
-      : null
-  ), [beat, brainStage, runContribution])
+    }
+    if (beat === 1) {
+      const atEnd = archStep >= ARCH_LAST
+      return {
+        onClick: advanceArch,
+        icon: atEnd ? faRotateLeft : faArrowRightLong,
+        title: atEnd ? 'Replay the story' : `Next: ${ARCH_STORY[archStep + 1].title}`,
+        disabled: false,
+      }
+    }
+    return null
+  }, [beat, brainStage, runContribution, archStep, advanceArch])
 
   const accent = isDark ? '#48EFCF' : '#0B64DD'
   const onAccent = isDark ? '#04140f' : '#ffffff'
@@ -191,8 +282,16 @@ function NightshiftArchScene({ metadata = {} }) {
   )
 
   // A labelled layer inside the cluster (Agent / Context / Telemetry / Artifacts).
-  const clusterCard = ({ node, color, name, sub, label, chips }) => (
-    <div key={node} data-node={node} className="rounded-xl border p-3" style={{ borderColor: `${color}59`, backgroundColor: `${color}0e` }}>
+  // `active` dims the whole layer until the story lights it; `visibleChips`, when
+  // provided, reveals chips one set at a time (space is always reserved so the
+  // connector anchors stay put).
+  const clusterCard = ({ node, color, name, sub, label, chips, active = true, visibleChips = null }) => (
+    <div
+      key={node}
+      data-node={node}
+      className="rounded-xl border p-3"
+      style={{ borderColor: `${color}59`, backgroundColor: `${color}0e`, opacity: active ? 1 : 0.12, transition: 'opacity 0.45s ease' }}
+    >
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-baseline gap-2 flex-wrap">
           <span className="font-bold text-sm uppercase tracking-wide" style={{ color }}>{name}</span>
@@ -201,19 +300,44 @@ function NightshiftArchScene({ metadata = {} }) {
         <span className="text-[9px] font-bold uppercase tracking-wider shrink-0 mt-0.5" style={{ color: `${color}99` }}>{label}</span>
       </div>
       <div className="flex flex-wrap gap-1.5">
-        {chips.map((c, i) => (
-          <span key={i} className="text-[11px] rounded px-2 py-0.5" style={{ backgroundColor: `${color}1f`, color }}>{c}</span>
-        ))}
+        {chips.map((c, i) => {
+          const shown = !visibleChips || visibleChips.has(c)
+          return (
+            <span
+              key={i}
+              className="text-[11px] rounded px-2 py-0.5"
+              style={{ backgroundColor: `${color}1f`, color, opacity: shown ? 1 : 0, transform: shown ? 'none' : 'scale(0.8)', transition: 'opacity 0.3s ease, transform 0.3s ease' }}
+            >
+              {c}
+            </span>
+          )
+        })}
       </div>
     </div>
   )
+
+  // Architecture story — what's lit at the current step.
+  const story = ARCH_STORY[archStep] || ARCH_STORY[0]
+  const litPanels = new Set(story.panels)
+  const litArrows = new Set(story.arrows)
+  const litChips = new Set(story.chips)
+  const archEdges = ARCH_EDGES.filter((e) => litArrows.has(e.key))
+  const dimTransition = 'opacity 0.45s ease'
 
   return (
     <div className="h-full w-full flex flex-col px-8 pt-2 pb-3 overflow-hidden">
       <div className="max-w-[1340px] mx-auto w-full flex-1 flex flex-col min-h-0">
         <div ref={rootRef} className="flex-1 min-h-0 flex flex-col" key={`${beat}-${playKey}`}>
           <div className="reveal">
-            <SceneHeader eyebrow={current.eyebrow || eyebrow} titlePlain={current.titlePlain} titleAccent={current.titleAccent} subtitle={current.subtitle} />
+            {beat === 1 ? (
+              <SceneHeader
+                eyebrow={`Nightshift · Architecture · Step ${archStep + 1} of ${ARCH_STORY.length}`}
+                titlePlain={story.title}
+                subtitle={story.desc}
+              />
+            ) : (
+              <SceneHeader eyebrow={current.eyebrow || eyebrow} titlePlain={current.titlePlain} titleAccent={current.titleAccent} subtitle={current.subtitle} />
+            )}
           </div>
 
           {/* Beat 1 — Context Layer above every stack */}
@@ -255,14 +379,18 @@ function NightshiftArchScene({ metadata = {} }) {
               Context layers, so their connectors run straight through the middle. */}
           {beat === 1 && (
             <div ref={archRef} className="reveal relative flex-1 min-h-0">
-              <FlowConnectors containerRef={archRef} edges={ARCH_EDGES} playKey={playKey} defaultColor={accent} animateIn={false} />
+              {/* Only the connectors the story has reached so far. */}
+              <FlowConnectors containerRef={archRef} edges={archEdges} playKey={playKey} defaultColor={accent} animateIn={false} />
 
               <div
                 className="relative z-10 h-full grid gap-x-6 gap-y-1.5 content-center items-center"
                 style={{ gridTemplateColumns: '0.82fr 2.05fr 0.82fr', gridTemplateRows: 'repeat(6, auto)' }}
               >
-                {/* Cluster frame — spans the whole centre column */}
-                <div className="rounded-2xl border" style={{ gridColumn: 2, gridRow: '1 / -1', alignSelf: 'stretch', borderColor: `${accent}33`, background: isDark ? 'rgba(72,239,207,0.03)' : 'rgba(11,100,221,0.02)' }} />
+                {/* Cluster frame — spans the whole centre column; pulses on step 1 */}
+                <div
+                  className={`rounded-2xl border ${story.pulse ? 'arch-boundary-pulse' : ''}`}
+                  style={{ gridColumn: 2, gridRow: '1 / -1', alignSelf: 'stretch', borderColor: `${accent}33`, background: isDark ? 'rgba(72,239,207,0.03)' : 'rgba(11,100,221,0.02)', '--arch-pulse': `${accent}55` }}
+                />
 
                 {/* Cluster title */}
                 <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-center pt-3 px-3" style={{ gridColumn: 2, gridRow: 1, color: `${accent}cc` }}>
@@ -271,10 +399,10 @@ function NightshiftArchScene({ metadata = {} }) {
 
                 {/* Agent layer + External Agents (row 2) */}
                 <div className="px-3" style={{ gridColumn: 2, gridRow: 2 }}>
-                  {clusterCard({ node: 'agent', color: accent, name: AGENT_LAYER.name, label: AGENT_LAYER.label, chips: AGENT_LAYER.chips })}
+                  {clusterCard({ node: 'agent', color: accent, name: AGENT_LAYER.name, label: AGENT_LAYER.label, chips: AGENT_LAYER.chips, active: litPanels.has('agent') })}
                 </div>
                 <div className="relative z-10" style={{ gridColumn: 1, gridRow: 2 }}>
-                  <div data-node="ext-agents" className={`rounded-2xl border p-3 ${cardBase}`}>
+                  <div data-node="ext-agents" className={`rounded-2xl border p-3 ${cardBase}`} style={{ opacity: litPanels.has('ext-agents') ? 1 : 0.12, transition: dimTransition }}>
                     <div className={`text-xs font-bold mb-2.5 ${headText}`}>External Agents</div>
                     <div className="grid grid-cols-3 gap-2">
                       {EXT_AGENTS.map((a, i) => (
@@ -289,17 +417,17 @@ function NightshiftArchScene({ metadata = {} }) {
                   </div>
                 </div>
 
-                {/* Arrow (row 3) */}
-                <div className="flex justify-center" style={{ gridColumn: 2, gridRow: 3 }}>
+                {/* Arrow (row 3) — Context → Agent */}
+                <div className="flex justify-center" style={{ gridColumn: 2, gridRow: 3, opacity: litArrows.has('ctx-agent') ? 1 : 0.12, transition: dimTransition }}>
                   <FontAwesomeIcon icon={faArrowUpLong} className="text-xs" style={{ color: `${accent}99` }} />
                 </div>
 
                 {/* Context layer + External systems + Elastic Brain (row 4) */}
                 <div className="px-3" style={{ gridColumn: 2, gridRow: 4 }}>
-                  {clusterCard({ node: 'context', color: accent, name: CONTEXT_LAYER.name, sub: CONTEXT_LAYER.sub, label: CONTEXT_LAYER.label, chips: CONTEXT_LAYER.chips })}
+                  {clusterCard({ node: 'context', color: accent, name: CONTEXT_LAYER.name, sub: CONTEXT_LAYER.sub, label: CONTEXT_LAYER.label, chips: CONTEXT_LAYER.chips, active: litPanels.has('context'), visibleChips: litChips })}
                 </div>
                 <div className="relative z-10" style={{ gridColumn: 1, gridRow: 4 }}>
-                  <div data-node="ext-systems" className={`rounded-2xl border p-3 ${cardBase}`}>
+                  <div data-node="ext-systems" className={`rounded-2xl border p-3 ${cardBase}`} style={{ opacity: litPanels.has('ext-systems') ? 1 : 0.12, transition: dimTransition }}>
                     <div className={`text-xs font-bold ${headText}`}>External systems</div>
                     <div className={`text-[10px] mb-2.5 ${mutedText}`}>per user</div>
                     <div className="grid grid-cols-3 gap-2">
@@ -312,7 +440,7 @@ function NightshiftArchScene({ metadata = {} }) {
                   </div>
                 </div>
                 <div className="relative z-10" style={{ gridColumn: 3, gridRow: 4 }}>
-                  <div data-node="brain" className="rounded-2xl border p-4" style={{ borderColor: `${accent}66`, background: `linear-gradient(160deg, ${accent}1f, ${accent}08)` }}>
+                  <div data-node="brain" className="rounded-2xl border p-4" style={{ borderColor: `${accent}66`, background: `linear-gradient(160deg, ${accent}1f, ${accent}08)`, opacity: litPanels.has('brain') ? 1 : 0.12, transition: dimTransition }}>
                     <div className="flex items-center gap-2 mb-1">
                       <FontAwesomeIcon icon={faBrain} className="text-lg" style={{ color: accent }} />
                       <span className={`font-bold text-base ${headText}`}>Elastic Brain</span>
@@ -321,8 +449,8 @@ function NightshiftArchScene({ metadata = {} }) {
                   </div>
                 </div>
 
-                {/* Arrow (row 5) */}
-                <div className="flex justify-center" style={{ gridColumn: 2, gridRow: 5 }}>
+                {/* Arrow (row 5) — Data → Context */}
+                <div className="flex justify-center" style={{ gridColumn: 2, gridRow: 5, opacity: litArrows.has('data-ctx') ? 1 : 0.12, transition: dimTransition }}>
                   <FontAwesomeIcon icon={faArrowUpLong} className="text-xs" style={{ color: `${accent}99` }} />
                 </div>
 
@@ -330,7 +458,7 @@ function NightshiftArchScene({ metadata = {} }) {
                 <div className="px-3 pb-3" style={{ gridColumn: 2, gridRow: 6 }}>
                   <div className={`text-[9px] font-bold uppercase tracking-wider mb-1.5 ${mutedText}`}>Data Layer</div>
                   <div className="grid grid-cols-2 gap-3">
-                    {DATA_CARDS.map((dc) => clusterCard({ node: dc.id, color: toneColor(dc.tone), name: dc.name, sub: dc.sub, label: dc.label, chips: dc.chips }))}
+                    {DATA_CARDS.map((dc) => clusterCard({ node: dc.id, color: toneColor(dc.tone), name: dc.name, sub: dc.sub, label: dc.label, chips: dc.chips, active: litPanels.has(dc.id) }))}
                   </div>
                 </div>
               </div>
@@ -511,7 +639,7 @@ function NightshiftArchScene({ metadata = {} }) {
           )}
         </div>
 
-        <SceneStepper beats={beats} beat={beat} onGo={goTo} onReplay={replay} isPlaying={isPlaying} onTogglePlay={toggleAutoplay} action={brainAction} />
+        <SceneStepper beats={beats} beat={beat} onGo={goTo} onReplay={replay} isPlaying={isPlaying} onTogglePlay={toggleAutoplay} action={stepAction} />
       </div>
     </div>
   )

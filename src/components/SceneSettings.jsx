@@ -5,7 +5,8 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { 
   faGear, faXmark, faEye, faEyeSlash, faRotateLeft, faClock, faCheck,
   faUsers, faSliders, faPlus, faTrash, faGripVertical, faChevronDown,
-  faDownload, faUpload, faImage, faPalette, faArrowUp, faArrowDown
+  faDownload, faUpload, faImage, faPalette, faArrowUp, faArrowDown,
+  faMagnifyingGlass
 } from '@fortawesome/free-solid-svg-icons'
 import { DEFAULT_AGENDA_ITEMS } from '../data/agendaDefaults'
 import { DECK_PRESETS, DEFAULT_PRESET_ID, CUSTOM_PRESET_ID, presetConfig } from '../data/deckPresets'
@@ -316,27 +317,45 @@ function ConsolidationToolEditor({ metadata, onUpdate, isDark, inputClass }) {
   )
 }
 
-function SceneItem({ 
-  scene, 
-  index, 
-  isEnabled, 
-  isLastEnabled, 
-  onToggle, 
-  customDuration, 
+// Parse a leading integer out of a duration string ("5 min" -> 5). Returns 0
+// when unset/blank — durations are opt-in and hidden until a positive value is
+// entered.
+function parseMinutes(duration) {
+  const m = String(duration || '').match(/(\d+)/)
+  return m ? parseInt(m[1], 10) : 0
+}
+
+// A single scene row. `variant='deck'` renders a reorderable, removable row for
+// scenes currently in the presentation; `variant='library'` renders a compact
+// "add to deck" row for available scenes.
+function SceneItem({
+  scene,
+  deckIndex = 0,
+  variant = 'deck',
+  isLastEnabled = false,
+  onRemove,
+  onAdd,
+  onMoveUp,
+  onMoveDown,
+  canMoveUp = false,
+  canMoveDown = false,
+  customDuration,
   onUpdateDuration,
   sceneMetadata,
   onUpdateSceneMetadata,
   onReorder,
-  isDark 
+  isDark,
 }) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [isEditingDuration, setIsEditingDuration] = useState(false)
-  const [durationValue, setDurationValue] = useState(customDuration || scene.duration || '')
+  const [durationValue, setDurationValue] = useState(customDuration || '')
   const [isDragging, setIsDragging] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
 
+  const isDeck = variant === 'deck'
+
   const handleDurationSubmit = () => {
-    onUpdateDuration(scene.id, durationValue)
+    onUpdateDuration?.(scene.id, durationValue)
     setIsEditingDuration(false)
   }
 
@@ -345,41 +364,71 @@ function SceneItem({
     e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', scene.id)
   }
-
-  const handleDragEnd = () => {
-    setIsDragging(false)
-  }
-
+  const handleDragEnd = () => setIsDragging(false)
   const handleDragOver = (e) => {
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
     setIsDragOver(true)
   }
-
-  const handleDragLeave = () => {
-    setIsDragOver(false)
-  }
-
+  const handleDragLeave = () => setIsDragOver(false)
   const handleDrop = (e) => {
     e.preventDefault()
     setIsDragOver(false)
     const draggedId = e.dataTransfer.getData('text/plain')
-    if (draggedId !== scene.id) {
-      onReorder(draggedId, scene.id)
-    }
+    if (draggedId !== scene.id) onReorder?.(draggedId, scene.id)
   }
 
-  const displayDuration = customDuration || scene.duration
+  // Durations are opt-in: default to zero (hidden), only shown when explicitly
+  // set to a positive value.
+  const displayDuration = customDuration || ''
+  const durationMin = parseMinutes(customDuration)
   const metadata = sceneMetadata?.[scene.id] || {}
   const displayTitle = metadata.title || scene.title
-  const displayDescription = metadata.description || ''
-  const hasExpandableContent = true
+  const displayDescription = metadata.description || scene.description || ''
 
   const inputClass = `w-full px-3 py-2 text-sm rounded-lg border ${
     isDark
       ? 'bg-white/5 border-white/10 text-white placeholder-white/30'
       : 'bg-white border-elastic-dev-blue/10 text-elastic-dev-blue placeholder-elastic-dev-blue/30'
   }`
+
+  // ── Library variant: compact "add to deck" row ────────────────────────────
+  if (!isDeck) {
+    return (
+      <div className={`rounded-lg transition-all ${
+        isDark ? 'bg-white/[0.03] hover:bg-white/[0.07]' : 'bg-elastic-dev-blue/[0.03] hover:bg-elastic-dev-blue/[0.07]'
+      }`}>
+        <div className="p-2.5 flex items-center gap-2.5">
+          <button
+            onClick={() => onAdd?.(scene.id)}
+            title="Add to deck"
+            className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
+              isDark
+                ? 'bg-elastic-teal/20 text-elastic-teal hover:bg-elastic-teal/35'
+                : 'bg-elastic-blue/10 text-elastic-blue hover:bg-elastic-blue/25'
+            }`}
+          >
+            <FontAwesomeIcon icon={faPlus} className="text-xs" />
+          </button>
+          <button onClick={() => onAdd?.(scene.id)} className="flex-1 min-w-0 text-left">
+            <h3 className={`text-sm font-semibold truncate ${isDark ? 'text-white/85' : 'text-elastic-dev-blue'}`}>{displayTitle}</h3>
+            {displayDescription && (
+              <p className={`text-xs truncate mt-0.5 ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>{displayDescription}</p>
+            )}
+          </button>
+          {durationMin > 0 && (
+            <span className={`text-[11px] flex-shrink-0 ${isDark ? 'text-white/35' : 'text-elastic-dev-blue/35'}`}>{displayDuration}</span>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Deck variant: reorderable, removable row ───────────────────────────────
+  const arrows = [
+    { key: 'up', icon: faArrowUp, fn: onMoveUp, can: canMoveUp },
+    { key: 'down', icon: faArrowDown, fn: onMoveDown, can: canMoveDown },
+  ]
 
   return (
     <div
@@ -389,94 +438,46 @@ function SceneItem({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`rounded-xl transition-all ${
-        isDragging ? 'opacity-50 scale-95' : 'opacity-100 scale-100'
-      } ${
+      className={`rounded-lg transition-all ${isDragging ? 'opacity-50' : 'opacity-100'} ${
         isDragOver ? (isDark ? 'ring-2 ring-elastic-teal' : 'ring-2 ring-elastic-blue') : ''
-      } ${
-        isEnabled
-          ? isDark 
-            ? 'bg-elastic-teal/20 border-2 border-elastic-teal/50' 
-            : 'bg-elastic-blue/10 border-2 border-elastic-blue/30'
-          : isDark
-            ? 'bg-white/[0.03] border-2 border-transparent'
-            : 'bg-elastic-dev-blue/[0.03] border-2 border-transparent'
-      }`}
+      } ${isDark ? 'bg-elastic-teal/[0.12] border border-elastic-teal/30' : 'bg-elastic-blue/[0.06] border border-elastic-blue/20'}`}
     >
-      {/* Header - Always Visible */}
-      <div className="p-4 flex items-center gap-3">
-        {/* Drag Handle */}
-        <div className={`cursor-grab active:cursor-grabbing p-1 ${
-          isDark ? 'text-white/30 hover:text-white/60' : 'text-elastic-dev-blue/30 hover:text-elastic-dev-blue/60'
-        }`}>
+      <div className="p-2.5 flex items-center gap-2">
+        {/* Drag handle */}
+        <div className={`cursor-grab active:cursor-grabbing ${isDark ? 'text-white/30 hover:text-white/60' : 'text-elastic-dev-blue/30 hover:text-elastic-dev-blue/60'}`}>
           <FontAwesomeIcon icon={faGripVertical} className="text-sm" />
         </div>
-        {/* Toggle Button */}
-        <button
-          onClick={() => !isLastEnabled && onToggle(scene.id)}
-          disabled={isLastEnabled}
-          className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
-            isEnabled
-              ? isDark
-                ? 'bg-elastic-teal text-elastic-dev-blue'
-                : 'bg-elastic-blue text-white'
-              : isDark ? 'bg-white/10 text-white/40 hover:bg-white/20' : 'bg-elastic-dev-blue/10 text-elastic-dev-blue/40 hover:bg-elastic-dev-blue/20'
-          } ${isLastEnabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}
-        >
-          <FontAwesomeIcon icon={isEnabled ? faEye : faEyeSlash} className="text-sm" />
-        </button>
-
-        {/* Scene Info */}
-        <button
-          onClick={() => hasExpandableContent && setIsExpanded(!isExpanded)}
-          className={`flex-1 min-w-0 text-left flex items-center gap-2 ${hasExpandableContent ? 'cursor-pointer' : ''}`}
-        >
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <span className={`text-xs font-mono px-2 py-0.5 rounded ${
-              isDark ? 'bg-white/10 text-white/50' : 'bg-elastic-dev-blue/10 text-elastic-dev-blue/50'
-            }`}>
-              {index + 1}
-            </span>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <h3 className={`font-semibold truncate ${
-                  isEnabled
-                    ? isDark ? 'text-white' : 'text-elastic-dev-blue'
-                    : isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'
-                }`}>
-                  {displayTitle}
-                </h3>
-                {metadata.group && (
-                  <span className={`text-xs px-2 py-0.5 rounded ${
-                    isDark ? 'bg-elastic-blue/20 text-elastic-blue' : 'bg-elastic-blue/10 text-elastic-blue'
-                  }`}>
-                    {metadata.group}
-                  </span>
-                )}
-              </div>
-              {displayDescription && (
-                <p className={`text-xs truncate mt-0.5 ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>
-                  {displayDescription}
-                </p>
-              )}
-            </div>
-          </div>
-          {hasExpandableContent && (
-            <FontAwesomeIcon 
-              icon={faChevronDown} 
-              className={`text-xs transition-transform ${
-                isExpanded ? 'rotate-180' : ''
-              } ${
-                isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'
+        {/* Up / down arrows */}
+        <div className="flex flex-col gap-0.5 flex-shrink-0">
+          {arrows.map(({ key, icon, fn, can }) => (
+            <button
+              key={key}
+              onClick={() => can && fn?.(scene.id)}
+              disabled={!can}
+              className={`w-5 h-4 rounded flex items-center justify-center transition-all ${
+                can
+                  ? (isDark ? 'text-white/50 hover:text-white hover:bg-white/10' : 'text-elastic-dev-blue/50 hover:text-elastic-dev-blue hover:bg-elastic-dev-blue/10 cursor-pointer')
+                  : (isDark ? 'text-white/15 cursor-not-allowed' : 'text-elastic-dev-blue/15 cursor-not-allowed')
               }`}
-            />
-          )}
+            >
+              <FontAwesomeIcon icon={icon} className="text-[9px]" />
+            </button>
+          ))}
+        </div>
+        {/* Number + title (click to expand) */}
+        <button onClick={() => setIsExpanded(!isExpanded)} className="flex-1 min-w-0 text-left flex items-center gap-2">
+          <span className={`text-xs font-mono px-1.5 py-0.5 rounded flex-shrink-0 ${isDark ? 'bg-white/10 text-white/60' : 'bg-elastic-dev-blue/10 text-elastic-dev-blue/60'}`}>{deckIndex + 1}</span>
+          <div className="flex-1 min-w-0">
+            <h3 className={`text-sm font-semibold truncate ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>{displayTitle}</h3>
+            {displayDescription && <p className={`text-xs truncate mt-0.5 ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>{displayDescription}</p>}
+          </div>
+          <FontAwesomeIcon icon={faChevronDown} className={`text-xs flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''} ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`} />
         </button>
-
-        {/* Duration Editor */}
-        <div className="flex-shrink-0">
-          {isEditingDuration ? (
-            <div className="flex items-center gap-1">
+        {/* Duration — hidden by default; only shown once a positive time is set.
+            Set/clear it from the expanded panel below. */}
+        {(isEditingDuration || durationMin > 0) && (
+          <div className="flex-shrink-0">
+            {isEditingDuration ? (
               <input
                 type="text"
                 value={durationValue}
@@ -487,57 +488,68 @@ function SceneItem({
                 }}
                 onBlur={handleDurationSubmit}
                 autoFocus
-                className={`w-20 px-2 py-1 text-xs rounded border ${
-                  isDark 
-                    ? 'bg-white/10 border-white/20 text-white' 
-                    : 'bg-white border-elastic-dev-blue/20 text-elastic-dev-blue'
+                className={`w-16 px-2 py-1 text-xs rounded border ${
+                  isDark ? 'bg-white/10 border-white/20 text-white' : 'bg-white border-elastic-dev-blue/20 text-elastic-dev-blue'
                 }`}
-                placeholder="e.g. 5 min"
+                placeholder="5 min"
               />
+            ) : (
               <button
-                onClick={handleDurationSubmit}
-                className={`w-6 h-6 rounded flex items-center justify-center ${
-                  isDark ? 'bg-elastic-teal text-elastic-dev-blue' : 'bg-elastic-blue text-white'
+                onClick={() => setIsEditingDuration(true)}
+                className={`flex items-center gap-1 text-[11px] px-1.5 py-1 rounded transition-all ${
+                  isDark ? 'bg-white/10 text-white/50 hover:bg-white/20 hover:text-white/70' : 'bg-elastic-dev-blue/10 text-elastic-dev-blue/50 hover:bg-elastic-dev-blue/20'
                 }`}
+                title="Click to edit duration"
               >
-                <FontAwesomeIcon icon={faCheck} className="text-xs" />
+                <FontAwesomeIcon icon={faClock} className="text-[9px]" />
+                {displayDuration}
               </button>
-            </div>
-          ) : (
-            <button
-              onClick={() => setIsEditingDuration(true)}
-              className={`flex items-center gap-1 text-xs px-2 py-1 rounded transition-all ${
-                isDark 
-                  ? 'bg-white/10 text-white/50 hover:bg-white/20 hover:text-white/70' 
-                  : 'bg-elastic-dev-blue/10 text-elastic-dev-blue/50 hover:bg-elastic-dev-blue/20'
-              }`}
-              title="Click to edit duration"
-            >
-              <FontAwesomeIcon icon={faClock} className="text-[10px]" />
-              {displayDuration || 'Set time'}
-            </button>
-          )}
-        </div>
+            )}
+          </div>
+        )}
+        {/* Remove from deck */}
+        <button
+          onClick={() => !isLastEnabled && onRemove?.(scene.id)}
+          disabled={isLastEnabled}
+          title={isLastEnabled ? 'At least one scene must stay in the deck' : 'Remove from deck'}
+          className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 transition-all ${
+            isLastEnabled
+              ? (isDark ? 'text-white/15 cursor-not-allowed' : 'text-elastic-dev-blue/15 cursor-not-allowed')
+              : (isDark ? 'text-white/40 hover:text-red-400 hover:bg-red-400/10' : 'text-elastic-dev-blue/40 hover:text-red-500 hover:bg-red-500/10')
+          }`}
+        >
+          <FontAwesomeIcon icon={faXmark} className="text-sm" />
+        </button>
       </div>
 
-      {/* Expanded Details */}
+      {/* Expanded: rename the scene and set an optional duration */}
       {isExpanded && (
-        <div className={`px-4 pb-4 pt-0 space-y-3 border-t ${isDark ? 'border-white/10' : 'border-elastic-dev-blue/10'}`}>
-          <div className="pt-3">
-            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
-              Scene Title
-            </label>
-            <input
-              type="text"
-              value={displayTitle}
-              onChange={(e) => onUpdateSceneMetadata(scene.id, { title: e.target.value })}
-              className={inputClass}
-              placeholder={scene.title}
-            />
-            <p className={`text-xs mt-1 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>
-              Used in the nav bar and the agenda's expanded scene list.
-            </p>
-          </div>
+        <div className={`px-2.5 pb-3 pt-0 border-t ${isDark ? 'border-white/10' : 'border-elastic-dev-blue/10'}`}>
+          <label className={`text-xs mb-1 block pt-3 ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Scene Title</label>
+          <input
+            type="text"
+            value={displayTitle}
+            onChange={(e) => onUpdateSceneMetadata?.(scene.id, { title: e.target.value })}
+            className={inputClass}
+            placeholder={scene.title}
+          />
+          <p className={`text-xs mt-1 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>
+            Used in the nav bar and the agenda's expanded scene list.
+          </p>
+
+          <label className={`text-xs mb-1 block pt-3 ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Duration (optional)</label>
+          <input
+            type="text"
+            value={durationValue}
+            onChange={(e) => setDurationValue(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleDurationSubmit() }}
+            onBlur={handleDurationSubmit}
+            className={inputClass}
+            placeholder="e.g. 5 min"
+          />
+          <p className={`text-xs mt-1 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>
+            Leave blank to hide the time. Shown on the scene row and in the agenda when set.
+          </p>
         </div>
       )}
     </div>
@@ -869,6 +881,7 @@ export default function SceneSettings({
   const setIsOpen = onOpenChange || setInternalIsOpen
   const [activeTab, setActiveTab] = useState('scenes')
   const [showAgendaEditor, setShowAgendaEditor] = useState(false)
+  const [librarySearch, setLibrarySearch] = useState('')
   const { theme } = useTheme()
   const { teamConfig, updateTeamConfig } = useTeamConfig()
   const isDark = theme === 'dark'
@@ -877,17 +890,58 @@ export default function SceneSettings({
   const enabledCount = enabledSceneIds.length
   const totalCount = scenes.length
 
-  const handleReorder = (draggedId, targetId) => {
-    const sceneIds = scenes.map(s => s.id)
-    const draggedIndex = sceneIds.indexOf(draggedId)
-    const targetIndex = sceneIds.indexOf(targetId)
-    
-    if (draggedIndex !== -1 && targetIndex !== -1) {
-      const newOrder = [...sceneIds]
-      newOrder.splice(draggedIndex, 1)
-      newOrder.splice(targetIndex, 0, draggedId)
-      onUpdateOrder(newOrder)
-    }
+  // Scenes are split into the working deck (enabled, in play order) and the
+  // library (everything else). The saved `order` is kept as [deck…, library…]
+  // so the deck always reads off the front of the list.
+  const deckScenes = scenes.filter(s => enabledSceneIds.includes(s.id))
+  const libraryScenes = scenes.filter(s => !enabledSceneIds.includes(s.id))
+
+  const searchQuery = librarySearch.trim().toLowerCase()
+  const filteredLibrary = searchQuery
+    ? libraryScenes.filter(s => {
+        const title = (sceneMetadata?.[s.id]?.title || s.title || '').toLowerCase()
+        const desc = (s.description || '').toLowerCase()
+        return title.includes(searchQuery) || desc.includes(searchQuery) || s.id.toLowerCase().includes(searchQuery)
+      })
+    : libraryScenes
+
+  const commitDeckOrder = (deckIds) => {
+    onUpdateOrder([...deckIds, ...libraryScenes.map(s => s.id)])
+  }
+
+  // Drag-and-drop reorder within the deck.
+  const reorderDeck = (draggedId, targetId) => {
+    const ids = deckScenes.map(s => s.id)
+    const from = ids.indexOf(draggedId)
+    const to = ids.indexOf(targetId)
+    if (from === -1 || to === -1) return
+    const next = [...ids]
+    next.splice(from, 1)
+    next.splice(to, 0, draggedId)
+    commitDeckOrder(next)
+  }
+
+  // Arrow-button reorder (dir: -1 up, +1 down).
+  const moveInDeck = (sceneId, dir) => {
+    const ids = deckScenes.map(s => s.id)
+    const i = ids.indexOf(sceneId)
+    const j = i + dir
+    if (i === -1 || j < 0 || j >= ids.length) return
+    const next = [...ids]
+    ;[next[i], next[j]] = [next[j], next[i]]
+    commitDeckOrder(next)
+  }
+
+  const addToDeck = (sceneId) => {
+    const deckIds = deckScenes.map(s => s.id)
+    const rest = libraryScenes.map(s => s.id).filter(id => id !== sceneId)
+    onUpdateOrder([...deckIds, sceneId, ...rest])
+    onToggle(sceneId)
+  }
+
+  const removeFromDeck = (sceneId) => {
+    if (deckScenes.length <= 1) return
+    onToggle(sceneId)
   }
 
   const handleExportAll = () => {
@@ -954,14 +1008,8 @@ export default function SceneSettings({
     event.target.value = '' // Reset input
   }
 
-  // Calculate total presentation time
-  const totalTime = scenes
-    .filter(s => enabledSceneIds.includes(s.id))
-    .reduce((acc, s) => {
-      const duration = customDurations?.[s.id] || s.duration || ''
-      const match = duration.match(/(\d+)/)
-      return acc + (match ? parseInt(match[1]) : 0)
-    }, 0)
+  // Total presentation time — sums only explicitly-set durations (opt-in).
+  const totalTime = deckScenes.reduce((acc, s) => acc + parseMinutes(customDurations?.[s.id]), 0)
 
   return (
     <>
@@ -991,7 +1039,7 @@ export default function SceneSettings({
       {/* Settings Panel - Content */}
       {isOpen && (
         <div
-          className={`fixed right-0 top-0 bottom-0 w-[960px] z-50 shadow-2xl overflow-hidden flex flex-col transition-transform duration-300 ${
+          className={`fixed right-0 top-0 bottom-0 w-[1240px] max-w-[95vw] z-50 shadow-2xl overflow-hidden flex flex-col transition-transform duration-300 ${
             isDark ? 'bg-elastic-dev-blue' : 'bg-white'
           }`}
         >
@@ -1004,7 +1052,7 @@ export default function SceneSettings({
                 </h2>
                 <p className={`text-sm mt-1 ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
                   {activeTab === 'scenes' 
-                    ? `${enabledCount} of ${totalCount} scenes • ~${totalTime} min total`
+                    ? `${enabledCount} of ${totalCount} scenes${totalTime > 0 ? ` • ~${totalTime} min total` : ''}`
                     : activeTab === 'team'
                     ? 'Customize your team'
                     : 'Customize scene content'}
@@ -1184,16 +1232,16 @@ export default function SceneSettings({
                   )}
                 </div>
 
-                {/* Instructions & Reset */}
-                <div className="mb-4 flex items-center justify-between">
+                {/* Deck builder toolbar */}
+                <div className="mb-3 flex items-center justify-between gap-3">
                   <p className={`text-xs ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>
-                    Drag to reorder • Click to expand • Eye to toggle
+                    Add scenes from the library, drag or use arrows to reorder, ✕ to remove.
                   </p>
                   <button
                     onClick={onReset}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 transition-all ${
-                      isDark 
-                        ? 'bg-white/10 hover:bg-white/20 text-white/70' 
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 flex-shrink-0 transition-all ${
+                      isDark
+                        ? 'bg-white/10 hover:bg-white/20 text-white/70'
                         : 'bg-elastic-dev-blue/10 hover:bg-elastic-dev-blue/20 text-elastic-dev-blue/70'
                     }`}
                   >
@@ -1202,29 +1250,86 @@ export default function SceneSettings({
                   </button>
                 </div>
 
-                {/* Scene List */}
-                <div className="space-y-2">
-                  {scenes.map((scene, index) => {
-                    const isEnabled = enabledSceneIds.includes(scene.id)
-                    const isLastEnabled = isEnabled && enabledCount === 1
+                {/* Two-column deck builder */}
+                <div className="grid grid-cols-2 gap-4 items-start">
+                  {/* In this deck */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2 px-1">
+                      <span className={`text-sm font-semibold flex items-center gap-2 ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>
+                        <FontAwesomeIcon icon={faSliders} className={isDark ? 'text-elastic-teal' : 'text-elastic-blue'} />
+                        In this deck
+                      </span>
+                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-white/10 text-white/60' : 'bg-elastic-dev-blue/10 text-elastic-dev-blue/60'}`}>
+                        {deckScenes.length} scene{deckScenes.length === 1 ? '' : 's'}{totalTime > 0 ? ` · ~${totalTime} min` : ''}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {deckScenes.map((scene, i) => (
+                        <SceneItem
+                          key={scene.id}
+                          scene={scene}
+                          variant="deck"
+                          deckIndex={i}
+                          isLastEnabled={deckScenes.length === 1}
+                          onRemove={removeFromDeck}
+                          onMoveUp={(id) => moveInDeck(id, -1)}
+                          onMoveDown={(id) => moveInDeck(id, 1)}
+                          canMoveUp={i > 0}
+                          canMoveDown={i < deckScenes.length - 1}
+                          customDuration={customDurations?.[scene.id]}
+                          onUpdateDuration={onUpdateDuration}
+                          sceneMetadata={sceneMetadata}
+                          onUpdateSceneMetadata={onUpdateSceneMetadata}
+                          onReorder={reorderDeck}
+                          isDark={isDark}
+                        />
+                      ))}
+                    </div>
+                  </div>
 
-                    return (
-                      <SceneItem
-                        key={scene.id}
-                        scene={scene}
-                        index={index}
-                        isEnabled={isEnabled}
-                        isLastEnabled={isLastEnabled}
-                        onToggle={onToggle}
-                        customDuration={customDurations?.[scene.id]}
-                        onUpdateDuration={onUpdateDuration}
-                        sceneMetadata={sceneMetadata}
-                        onUpdateSceneMetadata={onUpdateSceneMetadata}
-                        onReorder={handleReorder}
-                        isDark={isDark}
+                  {/* Scene library */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2 px-1">
+                      <span className={`text-sm font-semibold flex items-center gap-2 ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>
+                        <FontAwesomeIcon icon={faImage} className={isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'} />
+                        Scene library
+                      </span>
+                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-white/10 text-white/60' : 'bg-elastic-dev-blue/10 text-elastic-dev-blue/60'}`}>
+                        {libraryScenes.length}
+                      </span>
+                    </div>
+                    <div className="relative mb-2">
+                      <FontAwesomeIcon icon={faMagnifyingGlass} className={`absolute left-3 top-1/2 -translate-y-1/2 text-xs ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`} />
+                      <input
+                        type="text"
+                        value={librarySearch}
+                        onChange={(e) => setLibrarySearch(e.target.value)}
+                        placeholder="Search scenes…"
+                        className={`w-full pl-8 pr-3 py-2 text-sm rounded-lg border ${
+                          isDark ? 'bg-white/5 border-white/10 text-white placeholder-white/30' : 'bg-white border-elastic-dev-blue/10 text-elastic-dev-blue placeholder-elastic-dev-blue/30'
+                        }`}
                       />
-                    )
-                  })}
+                    </div>
+                    <div className="space-y-2">
+                      {filteredLibrary.length === 0 ? (
+                        <p className={`text-xs text-center py-6 ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>
+                          {searchQuery ? 'No scenes match your search.' : 'Every scene is already in your deck.'}
+                        </p>
+                      ) : (
+                        filteredLibrary.map((scene) => (
+                          <SceneItem
+                            key={scene.id}
+                            scene={scene}
+                            variant="library"
+                            onAdd={addToDeck}
+                            customDuration={customDurations?.[scene.id]}
+                            sceneMetadata={sceneMetadata}
+                            isDark={isDark}
+                          />
+                        ))
+                      )}
+                    </div>
+                  </div>
                 </div>
               </>
             ) : activeTab === 'team' ? (
@@ -1541,6 +1646,7 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
           <option value="elastic-value">Metrics Dashboard</option>
           <option value="value-by-team">Card Grid</option>
           <option value="security-use-cases">Visual Gallery</option>
+          <option value="elastic-exploded">Exploded Platform</option>
           <option value="unified-strategy">Platform Overview</option>
           <option value="ai-assistant">AI Capability Map</option>
           <option value="security-narrative-visual">Security: Why Now</option>
@@ -2958,6 +3064,87 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
               })}
               className={inputClass}
               placeholder="Accelerate mission outcomes by finding insights from any data source"
+            />
+            <p className={`text-xs mt-1 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>
+              Descriptive subtitle below the main title
+            </p>
+          </div>
+        </div>
+      )}
+
+      {selectedScene === 'elastic-exploded' && (
+        <div className="space-y-6 mt-6">
+          <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>
+            Exploded Platform Content
+          </h3>
+
+          <div>
+            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
+              Eyebrow Text
+            </label>
+            <input
+              type="text"
+              value={sceneMetadata?.['elastic-exploded']?.eyebrow || ''}
+              onChange={(e) => onUpdateSceneMetadata('elastic-exploded', {
+                ...sceneMetadata?.['elastic-exploded'],
+                eyebrow: e.target.value
+              })}
+              className={inputClass}
+              placeholder="The Elastic Search AI Platform"
+            />
+          </div>
+
+          <div>
+            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
+              Title (Plain)
+            </label>
+            <input
+              type="text"
+              value={sceneMetadata?.['elastic-exploded']?.titlePlain || ''}
+              onChange={(e) => onUpdateSceneMetadata('elastic-exploded', {
+                ...sceneMetadata?.['elastic-exploded'],
+                titlePlain: e.target.value
+              })}
+              className={inputClass}
+              placeholder="From ingest to action. "
+            />
+            <p className={`text-xs mt-1 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>
+              First part of the title, in the standard ink color
+            </p>
+          </div>
+
+          <div>
+            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
+              Title (Accent)
+            </label>
+            <input
+              type="text"
+              value={sceneMetadata?.['elastic-exploded']?.titleAccent || ''}
+              onChange={(e) => onUpdateSceneMetadata('elastic-exploded', {
+                ...sceneMetadata?.['elastic-exploded'],
+                titleAccent: e.target.value
+              })}
+              className={inputClass}
+              placeholder="One engine."
+            />
+            <p className={`text-xs mt-1 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>
+              Second part of the title, in the accent color
+            </p>
+          </div>
+
+          <div>
+            <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
+              Subtitle
+            </label>
+            <textarea
+              rows={3}
+              value={sceneMetadata?.['elastic-exploded']?.subtitle || ''}
+              onChange={(e) => onUpdateSceneMetadata('elastic-exploded', {
+                ...sceneMetadata?.['elastic-exploded'],
+                subtitle: e.target.value
+              })}
+              className={textareaClass}
+              placeholder="Ingestion, search, ML, and automation are usually separate products held together by connectors and sync jobs. In Elastic, they are layers of the same engine, working on the same data in place. Click the logo to take it apart."
             />
             <p className={`text-xs mt-1 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>
               Descriptive subtitle below the main title
