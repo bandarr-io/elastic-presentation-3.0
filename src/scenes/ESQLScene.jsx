@@ -323,6 +323,7 @@ function ESQLScene({ metadata = {}, externalStage = 0, onStageChange }) {
                 return (
                   <div
                     key={lineIdx}
+                    role="button"
                     onClick={() => isRevealed && setActiveStage(line.stageIdx)}
                     className={`flex items-center rounded px-1 transition-all duration-200 ${
                       isRevealed && !isActive ? 'cursor-pointer hover:bg-white/[0.04]' : isActive ? '' : 'cursor-default'

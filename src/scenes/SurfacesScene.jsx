@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { animate, stagger } from 'animejs'
 import { useTheme } from '../context/ThemeContext'
+import { useSceneMotion } from '../hooks/useSceneMotion'
 import SceneHeader from '../components/SceneHeader'
 import SceneStepper from '../components/SceneStepper'
 import CountUp from '../components/CountUp'
@@ -35,8 +36,6 @@ function SurfacesScene({ metadata = {} }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   const rootRef = useRef(null)
-  const [beat, setBeat] = useState(0)
-  const [playKey, setPlayKey] = useState(0)
   // Chat card (beat 2) streams its turns in sequence, with a typing indicator
   // between them — mirrors the AI Assistant conversation in the Security scene.
   const [chatStep, setChatStep] = useState(0)
@@ -45,6 +44,7 @@ function SurfacesScene({ metadata = {} }) {
   const eyebrow = metadata.eyebrow || 'Agentic Observability · Multi-Surface'
   const surfaces = metadata.surfaces || SURFACES
   const beats = (metadata.beats || BEATS).map((b, i) => ({ ...(BEATS[i] || {}), ...b }))
+  const { beat, playKey, goTo, replay } = useSceneMotion(beats)
   const current = beats[beat]
 
   const accent = isDark ? '#48EFCF' : '#0B64DD'
@@ -79,8 +79,6 @@ function SurfacesScene({ metadata = {} }) {
     at(4200, () => { setChatTyping(false); setChatStep(4) }) // anomaly card
     return () => timers.forEach(clearTimeout)
   }, [beat, playKey])
-
-  const goTo = (i) => { setBeat(i); setPlayKey((k) => k + 1) }
 
   return (
     <div className="h-full w-full flex flex-col px-8 pt-2 pb-3 overflow-hidden">
@@ -209,7 +207,7 @@ function SurfacesScene({ metadata = {} }) {
           )}
         </div>
 
-        <SceneStepper beats={beats} beat={beat} onGo={goTo} onReplay={() => setPlayKey((k) => k + 1)} />
+        <SceneStepper beats={beats} beat={beat} onGo={goTo} onReplay={replay} />
       </div>
     </div>
   )

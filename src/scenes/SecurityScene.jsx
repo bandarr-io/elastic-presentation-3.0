@@ -741,6 +741,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
                       {attackStories.map((story, i) => (
                         <div
                           key={story.id}
+                          role="button"
                           ref={el => { storyRefs.current[i] = el }}
                           style={{ borderLeftColor: isDark ? story.color : '#0B64DD', opacity: 0 }}
                           className={`rounded-xl border-l-4 px-4 py-2.5 cursor-pointer transition-colors ${

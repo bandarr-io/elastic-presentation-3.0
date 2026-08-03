@@ -1,13 +1,14 @@
 import { useEffect, useRef } from 'react'
 import { createPresenterChannel } from './presenterChannel'
 import { presenterBridge } from './presenterBridge'
+import { resolveClickPath } from './domClick'
 
 /**
  * Executes one presenter command against the audience deck. Beat-first:
  * `next`/`prev` walk the active scene's beats (bridge) or lifted stage before
  * crossing scene boundaries. Exported for unit testing.
  */
-export function executePresenterCommand(msg, { bridge, stageControls, onNextScene, onPrevScene, onGoToScene }) {
+export function executePresenterCommand(msg, { bridge, stageControls, onNextScene, onPrevScene, onGoToScene, sceneActions = [] }) {
   switch (msg.action) {
     case 'next':
       if (bridge && bridge.beat < bridge.beatCount - 1) {
@@ -43,6 +44,19 @@ export function executePresenterCommand(msg, { bridge, stageControls, onNextScen
     case 'toggleAutoplay':
       bridge?.toggleAutoplay()
       break
+    case 'sceneAction': {
+      const target = sceneActions.find((a) => a.id === msg.actionId)
+      if (target && !target.disabled) target.run()
+      break
+    }
+    case 'domClick': {
+      // Clicks forwarded from the presenter's preview: re-resolve the element
+      // inside this tab's scene root and click it.
+      const root = typeof document !== 'undefined' ? document.querySelector('[data-scene-root]') : null
+      if (!root) break
+      resolveClickPath(root, msg)?.click()
+      break
+    }
   }
 }
 
@@ -65,6 +79,10 @@ export function executePresenterCommand(msg, { bridge, stageControls, onNextScen
  * @param {Function} state.onGoToScene - (sceneId) => void
  * @param {Object|null} state.stageControls - { stage, count, setStage } for
  *   scenes whose step state is lifted into App instead of useSceneMotion.
+ * @param {Array} [state.sceneActions] - [{ id, label, disabled?, run }] in-scene
+ *   trigger buttons currently available; broadcast without `run`.
+ * @param {Object} [state.previewProps] - serializable interactive props for the
+ *   current scene (signals, demo phase…), mirrored into the presenter preview.
  */
 export function usePresenterSync(state) {
   const stateRef = useRef(state)
@@ -79,24 +97,30 @@ export function usePresenterSync(state) {
       const beatState = bridge
         ? {
             beat: bridge.beat,
+            playKey: bridge.playKey ?? 0,
             beatCount: bridge.beatCount,
             beatLabels: bridge.beatLabels,
             isPlaying: bridge.isPlaying,
+            canReplay: true,
           }
         : s.stageControls
           ? {
               beat: s.stageControls.stage,
+              playKey: 0,
               beatCount: s.stageControls.count,
               beatLabels: [],
               isPlaying: false,
+              canReplay: false,
             }
-          : { beat: 0, beatCount: 0, beatLabels: [], isPlaying: false }
+          : { beat: 0, playKey: 0, beatCount: 0, beatLabels: [], isPlaying: false, canReplay: false }
 
       channel.post({
         type: 'state',
         sceneId: s.sceneId,
         sceneIndex: s.sceneIndex,
         sceneCount: s.sceneCount,
+        actions: (s.sceneActions || []).map(({ id, label, disabled }) => ({ id, label, disabled: !!disabled })),
+        preview: s.previewProps || {},
         ...beatState,
       })
     }
@@ -110,6 +134,7 @@ export function usePresenterSync(state) {
         onNextScene: s.onNextScene,
         onPrevScene: s.onPrevScene,
         onGoToScene: s.onGoToScene,
+        sceneActions: s.sceneActions || [],
       })
     }
 
@@ -131,9 +156,13 @@ export function usePresenterSync(state) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Re-broadcast on scene changes and lifted-stage changes (bridge changes
-  // notify via the subscription above).
+  // Re-broadcast on scene, lifted-stage, action, or preview-state changes
+  // (bridge changes notify via the subscription above).
+  const actionsSignature = JSON.stringify(
+    (state.sceneActions || []).map(({ id, label, disabled }) => ({ id, label, disabled: !!disabled })),
+  )
+  const previewSignature = JSON.stringify(state.previewProps || {})
   useEffect(() => {
     broadcastRef.current()
-  }, [state.sceneId, state.stageControls?.stage, state.stageControls?.count])
+  }, [state.sceneId, state.stageControls?.stage, state.stageControls?.count, actionsSignature, previewSignature])
 }

@@ -81,6 +81,7 @@ const HeroScene = ({ metadata = {} }) => {
           </p>
 
           <div
+            role="button"
             onClick={handleSearchBarClick}
             className={`relative cursor-text transition-all duration-300 ${
               isClicked ? 'scale-[1.01]' : ''

@@ -102,6 +102,7 @@ function NextStepsScene({ metadata = {} }) {
               return (
                 <div
                   key={step.phase}
+                  role="button"
                   className="flex flex-col items-center text-center gap-2 cursor-pointer group"
                   onClick={() => setActiveStep(isActive ? null : i)}
                 >

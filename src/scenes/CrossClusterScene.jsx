@@ -1,5 +1,6 @@
 import { animate, createMotionPath, stagger } from 'animejs'
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react'
+import { useSceneMotion } from '../hooks/useSceneMotion'
 import { useTheme } from '../context/ThemeContext'
 import SceneHeader from '../components/SceneHeader'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
@@ -148,7 +149,10 @@ function CrossClusterScene({ metadata = {} }) {
   const sitePositions = useMemo(() => computeSitePositions(resolvedSites.length), [resolvedSites.length])
 
   // ── State ─────────────────────────────────────────────────────────────────
-  const [stage,            setStage]            = useState(0)
+  // Stage lives in useSceneMotion so the presenter view can drive it too.
+  const { beat: stage, playKey, goTo: goToStage } = useSceneMotion(
+    STAGES.map((s) => ({ key: s.id, step: s.label })),
+  )
   const [queryPhase,       setQueryPhase]       = useState('idle')
   const [replicationPhase, setReplicationPhase] = useState('idle')
   const [isAnimating,      setIsAnimating]      = useState(false)
@@ -286,7 +290,7 @@ function CrossClusterScene({ metadata = {} }) {
     }
     requestAnimationFrame(init)
     return () => { animations.forEach(a => a?.pause?.()); timersRef.current.forEach(clearTimeout) }
-  }, [stage, setupPaths])
+  }, [stage, playKey, setupPaths])
 
   // ── Stage 1: entrance ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -322,7 +326,7 @@ function CrossClusterScene({ metadata = {} }) {
     }
     requestAnimationFrame(init)
     return () => animations.forEach(a => a?.pause?.())
-  }, [stage, setupS1Paths])
+  }, [stage, playKey, setupS1Paths])
 
   // ── Stage 1: search animation ─────────────────────────────────────────────
   const runS1Search = useCallback(() => {
@@ -394,6 +398,16 @@ function CrossClusterScene({ metadata = {} }) {
     streamTimersRef.current = []
     s1StreamBallRefs.current.forEach(b => b && animate(b, { opacity: 0, duration: 300 }))
   }, [])
+
+  // Presenter-driven stage changes bypass the navigator's onClick, so mirror
+  // its cleanup whenever the stage moves for any reason.
+  const lastStageRef = useRef(stage)
+  useEffect(() => {
+    if (lastStageRef.current !== stage) {
+      lastStageRef.current = stage
+      stopS1Stream()
+    }
+  }, [stage, stopS1Stream])
 
   const startS1Stream = useCallback(() => {
     if (!setupS1Paths()) return
@@ -1316,7 +1330,7 @@ function CrossClusterScene({ metadata = {} }) {
               return (
                 <button
                   key={s.id}
-                  onClick={() => { stopS1Stream(); setStage(i) }}
+                  onClick={() => { stopS1Stream(); goToStage(i) }}
                   className="relative z-10 group flex flex-col items-center py-7"
                   title={s.label}
                 >

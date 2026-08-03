@@ -71,6 +71,24 @@ describe('executePresenterCommand', () => {
     expect(handlers.onNextScene).toHaveBeenCalled()
   })
 
+  it('runs enabled scene actions by id and ignores disabled ones', () => {
+    const handlers = makeSceneHandlers()
+    const runQuery = vi.fn()
+    const running = vi.fn()
+    const sceneActions = [
+      { id: 'mesh-query', label: 'Run query', disabled: false, run: runQuery },
+      { id: 'demo-next', label: 'Demo next', disabled: true, run: running },
+    ]
+    executePresenterCommand({ action: 'sceneAction', actionId: 'mesh-query' }, { bridge: null, stageControls: null, sceneActions, ...handlers })
+    expect(runQuery).toHaveBeenCalled()
+
+    executePresenterCommand({ action: 'sceneAction', actionId: 'demo-next' }, { bridge: null, stageControls: null, sceneActions, ...handlers })
+    expect(running).not.toHaveBeenCalled()
+
+    // Unknown ids are a no-op rather than an error.
+    executePresenterCommand({ action: 'sceneAction', actionId: 'missing' }, { bridge: null, stageControls: null, sceneActions, ...handlers })
+  })
+
   it('clamps goToBeat on lifted stages and routes goToScene', () => {
     const handlers = makeSceneHandlers()
     const stageControls = { stage: 0, count: 3, setStage: vi.fn() }

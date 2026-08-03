@@ -123,6 +123,7 @@ export function useSceneMotion(beats = [], { holdMs = 3400, loop = false } = {})
     if (follow != null) return undefined
     const controls = {
       beat,
+      playKey,
       beatCount: count,
       beatLabels: beatLabelsKey ? beatLabelsKey.split('\u0000') : [],
       isPlaying,
@@ -132,7 +133,7 @@ export function useSceneMotion(beats = [], { holdMs = 3400, loop = false } = {})
     }
     presenterBridge.register(controls)
     return () => presenterBridge.unregister(controls)
-  }, [follow, beat, count, isPlaying, goTo, replay, toggleAutoplay, beatLabelsKey])
+  }, [follow, beat, playKey, count, isPlaying, goTo, replay, toggleAutoplay, beatLabelsKey])
 
   return { beat, playKey, isPlaying, goTo, replay, play, stop, toggleAutoplay, beatCount: count }
 }

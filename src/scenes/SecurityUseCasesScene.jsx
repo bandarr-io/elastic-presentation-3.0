@@ -139,6 +139,7 @@ function SecurityUseCasesScene({ metadata = {} }) {
 
       {isOpen && active && (
         <div
+          role="button"
           className="fixed inset-0 z-[9999] flex items-center justify-center p-6 md:p-10"
           style={{ background: 'rgba(8,12,22,0.92)', backdropFilter: 'blur(6px)' }}
           onClick={close}

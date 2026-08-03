@@ -50,6 +50,7 @@ const BusinessValueScene = ({ selectedCard, setSelectedCard, showUnifiedMessage,
           {valueCards.map((card, index) => (
             <div
               key={index}
+              role="button"
               onClick={() => {
                 setSelectedCard(card)
                 setShowUnifiedMessage(false)

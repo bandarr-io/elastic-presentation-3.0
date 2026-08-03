@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faChevronLeft, faChevronRight, faForward, faBackward, faPlay, faPause,
-  faRotateRight, faCircle, faUpRightFromSquare, faStopwatch,
+  faRotateRight, faCircle, faUpRightFromSquare, faStopwatch, faBoltLightning,
+  faMagnifyingGlass,
 } from '@fortawesome/free-solid-svg-icons'
 import { useTheme } from '../context/ThemeContext'
 import { SceneMotionFollow } from '../context/SceneMotionFollowContext'
@@ -14,12 +15,15 @@ import ScenePreview from './ScenePreview'
 /**
  * Preview instances get inert stand-ins for the interactive props AppContent
  * normally supplies. `stage` lets the current-scene preview mirror the
- * audience's lifted stage (broadcast as `beat` for those scenes).
+ * audience's lifted stage (broadcast as `beat` for those scenes), and `live`
+ * overlays the audience's broadcast interactive state (signals, demo phase…)
+ * so trigger-driven animations play in the preview too.
  */
-function buildPreviewProps(sceneId, { sceneMetadata, orderedScenes, customDurations, enabledScenes }, stage = 0) {
+function buildPreviewProps(sceneId, { sceneMetadata, orderedScenes, customDurations, enabledScenes }, stage = 0, live = null) {
   const metadata = sceneMetadata?.[sceneId] || {}
   const noop = () => {}
-  switch (sceneId) {
+  const base = (() => {
+    switch (sceneId) {
     case 'agenda':
       return { scenes: orderedScenes, sceneMetadata, customDurations, metadata, expanded: {}, setExpanded: noop, expandAllSignal: 0 }
     case 'business-value':
@@ -46,7 +50,9 @@ function buildPreviewProps(sceneId, { sceneMetadata, orderedScenes, customDurati
       return { tools: metadata.tools, metadata }
     default:
       return { metadata }
-  }
+    }
+  })()
+  return live ? { ...base, ...live } : base
 }
 
 const LIFTED_STAGE_SCENES = new Set(['security', 'schema', 'esql', 'services', 'elastic-overview'])
@@ -114,9 +120,35 @@ function PresenterView() {
   const nextScene = enabledScenes[currentIndex + 1] || null
 
   const beat = deckState?.beat ?? 0
+  const playKey = deckState?.playKey ?? 0
   const beatCount = deckState?.beatCount ?? 0
   const beatLabels = deckState?.beatLabels ?? []
   const hasBeats = beatCount > 1
+  const hasNextStep = hasBeats && beat < beatCount - 1
+  const hasPrevStep = hasBeats && beat > 0
+  const canReplay = deckState?.canReplay ?? false
+  const sceneActions = deckState?.actions ?? []
+
+  // Broadcast `*Signal` values are cumulative counters. Rebase them to zero at
+  // the moment this presenter first sees each scene, so mounting the preview
+  // doesn't replay animations the audience triggered before we were watching.
+  const signalBaseRef = useRef({ sceneId: null, base: {} })
+  const livePreview = (() => {
+    const raw = deckState?.preview
+    if (!raw) return null
+    if (signalBaseRef.current.sceneId !== deckState.sceneId) {
+      const base = {}
+      for (const [key, value] of Object.entries(raw)) {
+        if (key.endsWith('Signal') && typeof value === 'number') base[key] = value
+      }
+      signalBaseRef.current = { sceneId: deckState.sceneId, base }
+    }
+    const rebased = { ...raw }
+    for (const [key, offset] of Object.entries(signalBaseRef.current.base)) {
+      if (typeof rebased[key] === 'number') rebased[key] = Math.max(0, rebased[key] - offset)
+    }
+    return rebased
+  })()
 
   // ── Timer + clock ──────────────────────────────────────────────────────────
   const [now, setNow] = useState(() => new Date())
@@ -163,6 +195,17 @@ function PresenterView() {
   }
 
   const goToSceneId = (sceneId) => sendCommand('goToScene', { sceneId })
+
+  // ── Scene jump menu (mirrors the audience nav's selector) ─────────────────
+  const [sceneMenuOpen, setSceneMenuOpen] = useState(false)
+  const [sceneQuery, setSceneQuery] = useState('')
+  const openSceneMenu = () => {
+    setSceneQuery('')
+    setSceneMenuOpen((open) => !open)
+  }
+  useEffect(() => {
+    setSceneMenuOpen(false)
+  }, [deckState?.sceneId])
 
   useEffect(() => {
     const onKeyDown = (e) => {
@@ -234,6 +277,11 @@ function PresenterView() {
       ? 'bg-elastic-teal/20 hover:bg-elastic-teal/30 text-elastic-teal'
       : 'bg-elastic-blue/10 hover:bg-elastic-blue/20 text-elastic-blue'
   }`
+  const sceneJumpBtn = `h-9 px-4 rounded-full flex items-center gap-2 text-xs font-semibold transition-all disabled:opacity-30 ${
+    isDark
+      ? 'bg-white/[0.06] hover:bg-white/[0.12] text-white/70'
+      : 'bg-white hover:bg-elastic-blue/10 text-elastic-dev-blue/70 border border-elastic-dev-blue/10'
+  }`
 
   return (
     <div className="min-h-screen flex flex-col bg-elastic-light-grey dark:bg-elastic-dev-blue transition-colors duration-300">
@@ -289,9 +337,9 @@ function PresenterView() {
       </header>
 
       {/* ── Main: previews + notes ── */}
-      <main className="flex-1 min-h-0 grid grid-cols-3 gap-4 p-4">
+      <main className="flex-1 min-h-0 grid grid-cols-[minmax(0,5fr)_minmax(0,2fr)] gap-4 p-4">
         {/* Current scene */}
-        <section className="col-span-2 flex flex-col gap-3 min-h-0">
+        <section className="flex flex-col gap-3 min-h-0">
           <div className="flex items-baseline justify-between">
             <h2 className={`text-lg font-bold ${strongText}`}>
               {currentScene ? sceneTitle(currentScene) : '—'}
@@ -304,13 +352,17 @@ function PresenterView() {
             )}
           </div>
 
-          <div className={`rounded-2xl overflow-hidden ${panelClass}`}>
+          <div className={`flex-1 min-h-0 rounded-2xl overflow-hidden ${panelClass}`}>
             {CurrentComponent && (
-              <SceneMotionFollow beat={beat} playKey={0}>
+              <SceneMotionFollow beat={beat} playKey={playKey}>
                 <div key={currentScene.id} className="h-full w-full">
-                  <ScenePreview>
-                    <div className="h-full w-full flex items-center justify-center bg-elastic-light-grey dark:bg-elastic-dev-blue">
-                      <CurrentComponent {...buildPreviewProps(currentScene.id, previewContext, currentStage)} />
+                  <ScenePreview
+                    fill
+                    interactive
+                    onClickableClick={(info) => sendCommand('domClick', info)}
+                  >
+                    <div data-scene-root className="h-full w-full flex items-center justify-center bg-elastic-light-grey dark:bg-elastic-dev-blue">
+                      <CurrentComponent {...buildPreviewProps(currentScene.id, previewContext, currentStage, livePreview)} />
                     </div>
                   </ScenePreview>
                 </div>
@@ -344,16 +396,40 @@ function PresenterView() {
                   </button>
                 )
               })}
-              <button
-                onClick={() => sendCommand('replay')}
-                className={`ml-1 px-3 py-1.5 rounded-full text-xs font-semibold ${
-                  isDark ? 'text-white/55 hover:text-white/80 bg-white/[0.04]' : 'text-elastic-dev-blue/55 hover:text-elastic-dev-blue/80 bg-white'
-                }`}
-                title="Replay current step's animation"
-              >
-                <FontAwesomeIcon icon={faRotateRight} className="mr-1.5 text-[10px]" />
-                Replay
-              </button>
+              {canReplay && (
+                <button
+                  onClick={() => sendCommand('replay')}
+                  className={`ml-1 px-3 py-1.5 rounded-full text-xs font-semibold ${
+                    isDark ? 'text-white/55 hover:text-white/80 bg-white/[0.04]' : 'text-elastic-dev-blue/55 hover:text-elastic-dev-blue/80 bg-white'
+                  }`}
+                  title="Replay current step's animation"
+                >
+                  <FontAwesomeIcon icon={faRotateRight} className="mr-1.5 text-[10px]" />
+                  Replay
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* In-scene triggers (animations, demos) available right now */}
+          {sceneActions.length > 0 && (
+            <div className="flex items-center flex-wrap gap-2">
+              <span className={`text-[11px] font-bold uppercase tracking-eyebrow ${mutedText}`}>Triggers</span>
+              {sceneActions.map((action) => (
+                <button
+                  key={action.id}
+                  onClick={() => sendCommand('sceneAction', { actionId: action.id })}
+                  disabled={action.disabled}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all disabled:opacity-40 ${
+                    isDark
+                      ? 'border-elastic-teal/40 text-elastic-teal bg-elastic-teal/10 hover:bg-elastic-teal/20'
+                      : 'border-elastic-blue/30 text-elastic-blue bg-elastic-blue/5 hover:bg-elastic-blue/15'
+                  }`}
+                >
+                  <FontAwesomeIcon icon={faBoltLightning} className="text-[10px]" />
+                  {action.label}
+                </button>
+              ))}
             </div>
           )}
         </section>
@@ -428,42 +504,145 @@ function PresenterView() {
 
       {/* ── Footer: transport controls ── */}
       <footer className={`flex items-center justify-between px-6 py-3 border-t ${isDark ? 'border-white/10' : 'border-elastic-dev-blue/10'}`}>
-        {/* Scene jump */}
+        {/* Scene jump (always skips remaining steps) */}
         <div className="flex items-center gap-2">
+          <span className={`text-[11px] font-bold uppercase tracking-eyebrow mr-1 ${mutedText}`}>Scene</span>
           <button
             onClick={() => { const prev = enabledScenes[currentIndex - 1]; if (prev) goToSceneId(prev.id) }}
             disabled={currentIndex <= 0}
-            className={controlBtn}
-            title="Previous scene (skips steps)"
+            className={sceneJumpBtn}
+            title="Jump to previous scene (skips steps)"
           >
-            <FontAwesomeIcon icon={faBackward} className="text-sm" />
+            <FontAwesomeIcon icon={faBackward} className="text-xs" />
+            Prev scene
           </button>
+
+          {/* Current scene readout + jump-to menu */}
+          <div className="relative">
+            <button
+              onClick={openSceneMenu}
+              className={`group flex items-center gap-2.5 pl-3.5 pr-3 py-2 rounded-full border shadow-sm transition-all ${
+                isDark
+                  ? 'bg-white/[0.08] border-white/20 hover:border-elastic-teal/50'
+                  : 'bg-white border-elastic-dev-blue/20 hover:border-elastic-blue/40 hover:shadow'
+              }`}
+              title="Jump to scene"
+            >
+              <span className={`text-sm font-semibold leading-none max-w-56 truncate ${strongText}`}>
+                {currentScene ? sceneTitle(currentScene) : '—'}
+              </span>
+              <span className={`text-xs font-mono leading-none tabular-nums ${accentText}`}>
+                {currentIndex + 1} / {enabledScenes.length}
+              </span>
+              <FontAwesomeIcon
+                icon={faChevronRight}
+                className={`text-[10px] transition-transform duration-200 ${sceneMenuOpen ? '-rotate-90' : 'rotate-0'} ${
+                  isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'
+                }`}
+              />
+            </button>
+
+            {sceneMenuOpen && (
+              <>
+                {/* Click-away backdrop */}
+                <button
+                  className="fixed inset-0 z-40 cursor-default"
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  onClick={() => setSceneMenuOpen(false)}
+                />
+                <div
+                  className={`absolute bottom-full left-0 mb-3 z-50 w-72 rounded-2xl border shadow-2xl overflow-hidden ${
+                    isDark ? 'bg-elastic-dev-blue border-white/10' : 'bg-white border-elastic-dev-blue/10'
+                  }`}
+                >
+                  {/* Search */}
+                  <div className={`flex items-center gap-2 px-3 py-2.5 border-b ${isDark ? 'border-white/10' : 'border-elastic-dev-blue/10'}`}>
+                    <FontAwesomeIcon icon={faMagnifyingGlass} className={`text-xs ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`} />
+                    <input
+                      autoFocus
+                      value={sceneQuery}
+                      onChange={(e) => setSceneQuery(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Escape') setSceneMenuOpen(false) }}
+                      placeholder="Jump to scene…"
+                      className={`flex-1 bg-transparent text-sm outline-none ${
+                        isDark ? 'text-white placeholder:text-white/30' : 'text-elastic-dark-ink placeholder:text-elastic-dev-blue/30'
+                      }`}
+                    />
+                  </div>
+
+                  {/* Scene list */}
+                  <div className="max-h-72 overflow-y-auto py-1">
+                    {enabledScenes
+                      .map((scene, index) => ({ scene, index, title: sceneTitle(scene) }))
+                      .filter(({ title }) => title.toLowerCase().includes(sceneQuery.trim().toLowerCase()))
+                      .map(({ scene, index, title }) => {
+                        const isActive = index === currentIndex
+                        return (
+                          <button
+                            key={scene.id}
+                            onClick={() => { goToSceneId(scene.id); setSceneMenuOpen(false) }}
+                            className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${
+                              isActive
+                                ? isDark ? 'bg-elastic-teal/15' : 'bg-elastic-blue/10'
+                                : isDark ? 'hover:bg-white/[0.06]' : 'hover:bg-elastic-dev-blue/[0.05]'
+                            }`}
+                          >
+                            <span className={`w-6 text-right text-xs font-mono tabular-nums shrink-0 ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>
+                              {index + 1}
+                            </span>
+                            <span className={`flex-1 min-w-0 truncate text-sm ${
+                              isActive
+                                ? `font-semibold ${accentText}`
+                                : isDark ? 'text-white/80' : 'text-elastic-dark-ink/80'
+                            }`}>
+                              {title}
+                            </span>
+                          </button>
+                        )
+                      })}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
           <button
             onClick={() => { if (nextScene) goToSceneId(nextScene.id) }}
             disabled={!nextScene}
-            className={controlBtn}
-            title="Next scene (skips steps)"
+            className={sceneJumpBtn}
+            title="Jump to next scene (skips steps)"
           >
-            <FontAwesomeIcon icon={faForward} className="text-sm" />
+            Next scene
+            <FontAwesomeIcon icon={faForward} className="text-xs" />
           </button>
         </div>
 
-        {/* Step-first prev / next */}
-        <div className="flex items-center gap-3">
-          <button onClick={() => sendCommand('prev')} className={controlBtn} title="Back (step-first) — ←">
-            <FontAwesomeIcon icon={faChevronLeft} />
-          </button>
-          <button
-            onClick={() => sendCommand('next')}
-            className={`h-11 px-6 rounded-full flex items-center gap-3 font-semibold transition-all hover:scale-105 ${
-              isDark ? 'bg-elastic-teal text-elastic-dev-blue hover:bg-elastic-teal/90' : 'bg-elastic-blue text-white hover:bg-elastic-blue/90'
-            }`}
-            title="Advance (step-first) — Space / →"
-          >
-            Next
-            <FontAwesomeIcon icon={faChevronRight} className="text-sm" />
-          </button>
-        </div>
+        {/* Step prev / next — only for scenes that have steps. Space / → still
+            advance step-first (then scene) even when this group is hidden. */}
+        {hasBeats && (
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => sendCommand('prev')}
+              disabled={!hasPrevStep}
+              className={controlBtn}
+              title="Previous step — ←"
+            >
+              <FontAwesomeIcon icon={faChevronLeft} />
+            </button>
+            <button
+              onClick={() => sendCommand('next')}
+              disabled={!hasNextStep}
+              className={`h-11 px-6 rounded-full flex items-center gap-3 font-semibold transition-all hover:scale-105 disabled:opacity-30 disabled:hover:scale-100 ${
+                isDark ? 'bg-elastic-teal text-elastic-dev-blue hover:bg-elastic-teal/90' : 'bg-elastic-blue text-white hover:bg-elastic-blue/90'
+              }`}
+              title="Next step — Space / →"
+            >
+              Next step
+              <FontAwesomeIcon icon={faChevronRight} className="text-sm" />
+            </button>
+          </div>
+        )}
 
         {/* Up-next hint */}
         <div className={`text-sm font-medium ${mutedText}`}>

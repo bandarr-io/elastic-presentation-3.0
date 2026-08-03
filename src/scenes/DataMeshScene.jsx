@@ -918,6 +918,7 @@ function DataMeshScene({ scenes = [], onNavigate, metadata = {}, runQuerySignal 
                             const active = selectedArch === type
                             return (
                               <div key={type}
+                                role="button"
                                 className={`rounded-xl border-2 p-6 flex flex-col items-center gap-3 cursor-pointer transition-all ${
                                   active
                                     ? isDark ? 'bg-white/[0.06]' : 'bg-white/80'

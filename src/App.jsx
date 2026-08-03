@@ -313,6 +313,115 @@ function AppContent() {
     }
   })()
 
+  // In-scene trigger buttons currently available in the nav bar, mirrored to
+  // the presenter view so animations can be fired remotely. Each entry's `run`
+  // stays in this tab; only { id, label, disabled } is broadcast.
+  const sceneActions = (() => {
+    const actions = []
+    if (currentSceneId === 'agenda') {
+      actions.push({
+        id: 'agenda-toggle-all',
+        label: agendaAnyExpanded ? 'Collapse all' : 'Expand all',
+        run: () => { if (agendaAnyExpanded) setAgendaExpanded({}); else setAgendaExpandAllSignal(n => n + 1) },
+      })
+    }
+    if (currentSceneId === 'business-value' && businessValueSelectedCard && !businessValueShowUnified) {
+      actions.push({ id: 'bv-unified', label: 'Show unified message', run: () => setBusinessValueShowUnified(true) })
+    }
+    if (currentSceneId === 'data-explosion') {
+      actions.push({ id: 'reveal-verdict', label: 'Reveal verdict', run: () => setDataExplosionVerdictSignal(n => n + 1) })
+    }
+    if (currentSceneId === 'security') {
+      actions.push({ id: 'security-play', label: 'Play animation', run: () => setSecurityPlaySignal(n => n + 1) })
+      if (securityAlertPhase === 'flooding' || securityAlertPhase === 'connecting') {
+        actions.push({ id: 'security-phase', label: 'Show attack story', run: () => setSecurityPhaseSignal(n => n + 1) })
+      }
+    }
+    if (currentSceneId === 'data-mesh') {
+      if (dataMeshPlayState.canPlay) {
+        actions.push({ id: 'mesh-play', label: 'Play typing', run: () => setDataMeshPlaySignal(n => n + 1) })
+      }
+      if (dataMeshActivateMeshState.canActivate) {
+        actions.push({ id: 'mesh-activate', label: 'Activate mesh', run: () => setDataMeshActivateMeshSignal(n => n + 1) })
+      }
+      if (dataMeshQueryState.canRun) {
+        actions.push({
+          id: 'mesh-query',
+          label: dataMeshQueryState.isRunning ? 'Running query…' : 'Run query',
+          disabled: dataMeshQueryState.isRunning,
+          run: () => setDataMeshRunQuerySignal(n => n + 1),
+        })
+      }
+      if (dataMeshSummaryState.canToggle) {
+        actions.push({
+          id: 'mesh-summary',
+          label: dataMeshSummaryState.isShowing ? 'Back to cards' : 'Compare all',
+          run: () => setDataMeshSummarySignal(n => n + 1),
+        })
+      }
+    }
+    if (currentSceneId === 'data-tiering') {
+      actions.push({ id: 'tiering-toggle', label: dataTieringIsRunning ? 'Pause flow' : 'Start flow', run: () => setDataTieringIsRunning(r => !r) })
+      actions.push({ id: 'tiering-reset', label: 'Reset', run: () => { setDataTieringIsRunning(false); setDataTieringResetSignal(n => n + 1) } })
+    }
+    if (currentSceneId === 'services' && servicesStage === 2) {
+      actions.push({ id: 'demo-back', label: 'Demo back', disabled: demoPhase === 'idle', run: handleDemoBack })
+      actions.push({ id: 'demo-reset', label: 'Reset demo', disabled: demoPhase === 'idle', run: () => setDemoPhase('idle') })
+      actions.push({ id: 'demo-next', label: 'Demo next', disabled: demoPhase === 'complete', run: handleDemoAdvance })
+    }
+    // Controls the active scene published to the nav (per-beat action button
+    // and bespoke toggles like AI Scale's reveal/hide).
+    if (motionControls?.action) {
+      actions.push({
+        id: 'scene-action',
+        label: motionControls.action.title || 'Trigger',
+        disabled: motionControls.action.disabled,
+        run: () => motionControls.action.onClick?.(),
+      })
+    }
+    if (motionControls?.onTogglePlay && motionControls?.toggleIcon) {
+      actions.push({
+        id: 'scene-toggle',
+        label: motionControls.isPlaying
+          ? (motionControls.toggleTitleActive || 'Pause auto-play')
+          : (motionControls.toggleTitle || 'Auto-play'),
+        run: () => motionControls.onTogglePlay(),
+      })
+    }
+    return actions
+  })()
+
+  // Live interactive state (signals, demo phase, selections) mirrored to the
+  // presenter's current-scene preview so trigger-driven animations render
+  // there too. Values must be serializable and use the scene's prop names.
+  const previewProps = (() => {
+    switch (currentSceneId) {
+      case 'agenda':
+        return { expanded: agendaExpanded, expandAllSignal: agendaExpandAllSignal }
+      case 'business-value':
+        return { selectedCard: businessValueSelectedCard, showUnifiedMessage: businessValueShowUnified }
+      case 'data-explosion':
+        return { verdictSignal: dataExplosionVerdictSignal }
+      case 'data-mesh':
+        return {
+          runQuerySignal: dataMeshRunQuerySignal,
+          playSignal: dataMeshPlaySignal,
+          summarySignal: dataMeshSummarySignal,
+          activateMeshSignal: dataMeshActivateMeshSignal,
+        }
+      case 'security':
+        return { playSignal: securityPlaySignal, phaseAdvanceSignal: securityPhaseSignal }
+      case 'schema':
+        return { playSignal: schemaPlaySignal }
+      case 'services':
+        return { demoPhase }
+      case 'data-tiering':
+        return { isRunning: dataTieringIsRunning, resetSignal: dataTieringResetSignal }
+      default:
+        return {}
+    }
+  })()
+
   usePresenterSync({
     sceneId: currentSceneId,
     sceneIndex: currentScene,
@@ -324,6 +433,8 @@ function AppContent() {
       if (idx >= 0) navigateToScene(idx)
     },
     stageControls: liftedStageControls,
+    sceneActions,
+    previewProps,
   })
 
   const openPresenterView = () => {
@@ -403,7 +514,7 @@ function AppContent() {
       />
 
       {/* Scene Container */}
-      <div className="h-[calc(100vh-76px)] flex items-center justify-center">
+      <div className="h-[calc(100vh-76px)] flex items-center justify-center" data-scene-root>
         <Scene {...sceneProps} />
       </div>
       

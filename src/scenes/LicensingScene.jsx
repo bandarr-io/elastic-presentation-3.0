@@ -211,6 +211,7 @@ function LicensingScene({ metadata = {} }) {
           return (
             <div
               key={feature.name}
+              role="button"
               className={`p-2 rounded-xl border cursor-pointer transition-all duration-300 relative overflow-hidden ${
                 unlocked ? (isHovered ? '' : neutralCardClass) : lockedCardClass
               }`}
