@@ -185,9 +185,28 @@ function PresenterView() {
   }, [])
 
   // ── Notes ──────────────────────────────────────────────────────────────────
-  const notes = sceneMetadata?.[currentScene?.id]?.speakerNotes || ''
-  const setNotes = (value) => {
+  // Scene-level notes plus optional per-beat notes (beatNotes[beatIndex]).
+  const sceneNotes = sceneMetadata?.[currentScene?.id]?.speakerNotes || ''
+  const beatNotes = sceneMetadata?.[currentScene?.id]?.beatNotes || []
+  const beatNote = beatNotes[beat] || ''
+
+  // Which note the textarea shows: follows the beat by default (step note when
+  // one exists), but a tab click pins the choice until the beat/scene changes.
+  const [pinnedNotesTab, setPinnedNotesTab] = useState(null)
+  useEffect(() => {
+    setPinnedNotesTab(null)
+  }, [currentScene?.id, beat])
+  const notesTab = hasBeats ? (pinnedNotesTab ?? (beatNote ? 'step' : 'scene')) : 'scene'
+
+  const setSceneNotes = (value) => {
     if (currentScene) updateSceneMetadata(currentScene.id, { speakerNotes: value })
+  }
+  const setBeatNote = (value) => {
+    if (!currentScene) return
+    const next = [...beatNotes]
+    while (next.length <= beat) next.push('')
+    next[beat] = value
+    updateSceneMetadata(currentScene.id, { beatNotes: next })
   }
 
   // ── Next-step hint ─────────────────────────────────────────────────────────
@@ -364,11 +383,41 @@ function PresenterView() {
 
           {/* Speaker notes */}
           <div className={`flex-1 min-h-0 flex flex-col rounded-xl p-4 gap-2 ${panelClass}`}>
-            <h3 className={`text-xs font-bold uppercase tracking-eyebrow ${mutedText}`}>Speaker notes</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className={`text-xs font-bold uppercase tracking-eyebrow ${mutedText}`}>Speaker notes</h3>
+              {hasBeats && (
+                <div className="flex items-center gap-1">
+                  {[
+                    { id: 'scene', label: 'Scene', hasContent: Boolean(sceneNotes) },
+                    { id: 'step', label: beatLabels[beat] || `Step ${beat + 1}`, hasContent: Boolean(beatNote) },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setPinnedNotesTab(tab.id)}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all ${
+                        notesTab === tab.id
+                          ? isDark ? 'bg-elastic-teal/20 text-elastic-teal' : 'bg-elastic-blue/15 text-elastic-blue'
+                          : isDark ? 'text-white/45 hover:text-white/75' : 'text-elastic-dev-blue/45 hover:text-elastic-dev-blue/75'
+                      }`}
+                    >
+                      {tab.label}
+                      {tab.hasContent && (
+                        <span className={`w-1.5 h-1.5 rounded-full ${isDark ? 'bg-elastic-teal' : 'bg-elastic-blue'}`} />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Notes for this scene — visible only here. Edits are saved to the deck config."
+              key={notesTab === 'step' ? `step-${currentScene?.id}-${beat}` : `scene-${currentScene?.id}`}
+              value={notesTab === 'step' ? beatNote : sceneNotes}
+              onChange={(e) => (notesTab === 'step' ? setBeatNote(e.target.value) : setSceneNotes(e.target.value))}
+              placeholder={
+                notesTab === 'step'
+                  ? `Notes for this step (${beatLabels[beat] || `step ${beat + 1}`}) — shown when the step is active.`
+                  : 'Notes for this scene — visible only here. Edits are saved to the deck config.'
+              }
               className={`flex-1 min-h-0 w-full resize-none bg-transparent outline-none text-lg leading-relaxed ${
                 isDark ? 'text-white placeholder:text-white/25' : 'text-elastic-dark-ink placeholder:text-elastic-dev-blue/30'
               }`}

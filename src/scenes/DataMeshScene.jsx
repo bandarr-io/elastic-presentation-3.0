@@ -2,6 +2,7 @@ import { animate, stagger } from 'animejs'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTheme } from '../context/ThemeContext'
 import { useReducedMotion } from '../hooks/useReducedMotion'
+import { useSceneMotion } from '../hooks/useSceneMotion'
 import SceneHeader from '../components/SceneHeader'
 import { easingPresets } from '../animations/utils/easing'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
@@ -89,7 +90,6 @@ function DataMeshScene({ scenes = [], onNavigate, metadata = {}, runQuerySignal 
   }, [scenes, onNavigate])
 
   // ── State ─────────────────────────────────────────────────────────────────
-  const [stage,          setStage]          = useState(0)
   const [showAnswer,     setShowAnswer]     = useState(false)
   const [meshActive,     setMeshActive]     = useState(false)
   const [queryActive,    setQueryActive]    = useState(false)
@@ -134,6 +134,9 @@ function DataMeshScene({ scenes = [], onNavigate, metadata = {}, runQuerySignal 
 
   // Stage nav — allow per-stage label overrides
   const stages = STAGES.map((s, i) => ({ ...s, label: (metadata.stageLabels || [])[i] || s.label }))
+
+  // Stage state lives in useSceneMotion so the presenter view can drive it.
+  const { beat: stage, goTo } = useSceneMotion(stages.map((s) => ({ key: s.id, step: s.label })))
 
   // Stage 0 — The Question
   const questionText  = metadata.question      || 'Why do we collect data?'
@@ -466,10 +469,9 @@ function DataMeshScene({ scenes = [], onNavigate, metadata = {}, runQuerySignal 
   }, [isTyping, searchComplete, questionText, shouldAnimate, getDuration])
 
   // ── Stage navigation ──────────────────────────────────────────────────────
-  const goToStage = useCallback((i) => {
+  const resetStageSubState = useCallback(() => {
     timersRef.current.forEach(clearTimeout)
     timersRef.current = []
-    setStage(i)
     setShowAnswer(false)
     setMeshActive(false)
     setQueryActive(false)
@@ -479,6 +481,23 @@ function DataMeshScene({ scenes = [], onNavigate, metadata = {}, runQuerySignal 
     setSelectedArch(null)
     setShowSummary(false)
   }, [])
+
+  const handledStageRef = useRef(stage)
+
+  const goToStage = useCallback((i) => {
+    handledStageRef.current = i
+    resetStageSubState()
+    goTo(i)
+  }, [goTo, resetStageSubState])
+
+  // Presenter-driven stage changes arrive through useSceneMotion without
+  // passing goToStage; reset the per-stage sub-state for those here.
+  useEffect(() => {
+    if (handledStageRef.current !== stage) {
+      handledStageRef.current = stage
+      resetStageSubState()
+    }
+  }, [stage, resetStageSubState])
 
   // ── Query animation (Stage 4) ─────────────────────────────────────────────
   const runQuery = useCallback(() => {

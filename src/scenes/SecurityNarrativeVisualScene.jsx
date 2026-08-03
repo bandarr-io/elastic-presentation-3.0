@@ -2,6 +2,7 @@ import { animate, stagger } from 'animejs'
 import { useEffect, useRef, useState } from 'react'
 import { useTheme } from '../context/ThemeContext'
 import { useReducedMotion } from '../hooks/useReducedMotion'
+import { useSceneMotion } from '../hooks/useSceneMotion'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import SceneHeader from '../components/SceneHeader'
 import {
@@ -62,12 +63,11 @@ function SecurityNarrativeVisualScene({ metadata = {} }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   const headerRef = useRef(null)
-  const [beat, setBeat] = useState(0)
-  // Bumped on every stepper click (incl. the active one) so animations replay.
-  const [playKey, setPlayKey] = useState(0)
 
   const eyebrow = metadata.eyebrow || 'Elastic Security · Why Now'
   const beats = (metadata.beats || BEATS).map((b, i) => ({ ...(BEATS[i] || {}), ...b }))
+  // Beat state lives in useSceneMotion so the presenter view can drive it.
+  const { beat, playKey, goTo, replay } = useSceneMotion(beats)
 
   const accent = (c) => (isDark ? c : COLORS.blue)
   const danger = COLORS.pink
@@ -84,8 +84,6 @@ function SecurityNarrativeVisualScene({ metadata = {} }) {
     return () => anim?.pause?.()
   }, [beat])
 
-  const goTo = (i) => { setBeat(i); setPlayKey((k) => k + 1) }
-  const replay = () => setPlayKey((k) => k + 1)
   const current = beats[beat]
   const shared = { isDark, accent, danger, headText, mutedText, cardBase }
 

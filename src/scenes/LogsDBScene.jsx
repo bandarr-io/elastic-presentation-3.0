@@ -1,6 +1,7 @@
 import { animate } from 'animejs'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { useTheme } from '../context/ThemeContext'
+import { useSceneMotion } from '../hooks/useSceneMotion'
 import SceneHeader from '../components/SceneHeader'
 import { resolveIcon } from '../data/iconOptions'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
@@ -89,10 +90,11 @@ function AnimatedNumber({ value, suffix = '' }) {
   return <span ref={ref}>{`${Math.round(prev.current)}${suffix}`}</span>
 }
 
+const MODE_KEYS = ['standard', 'logsdb']
+
 function LogsDBScene({ metadata = {} }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
-  const [mode, setMode] = useState('standard')
 
   const titleParts = metadata.titleParts || ['More Data.', 'Lower Cost.', 'Better Visibility.']
   const eyebrow = metadata.eyebrow || 'Store More. Spend Less.'
@@ -104,6 +106,12 @@ function LogsDBScene({ metadata = {} }) {
     standard: { ...DEFAULT_MODES.standard, ...(metadata.modes?.standard || {}) },
     logsdb: { ...DEFAULT_MODES.logsdb, ...(metadata.modes?.logsdb || {}) },
   }
+
+  // The Standard/LogsDB toggle rides useSceneMotion beats so the presenter
+  // view can flip it too.
+  const { beat, goTo } = useSceneMotion(MODE_KEYS.map((key) => ({ key, step: modes[key].label })))
+  const mode = MODE_KEYS[beat] || 'standard'
+  const setMode = (key) => goTo(MODE_KEYS.indexOf(key))
 
   const isLogsDB = mode === 'logsdb'
   const m = modes[mode]
