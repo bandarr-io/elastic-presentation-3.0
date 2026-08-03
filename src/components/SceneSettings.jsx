@@ -95,6 +95,22 @@ export function useSceneConfiguration(initialScenes) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(config))
   }, [config])
 
+  // Cross-tab sync: adopt config written by another tab (e.g. the presenter
+  // view saving speaker notes while the deck tab is open). The storage event
+  // never fires in the tab that wrote the value, so this cannot loop.
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key !== STORAGE_KEY || !e.newValue) return
+      try {
+        setConfig(JSON.parse(e.newValue))
+      } catch {
+        // Ignore malformed writes; the local config stays authoritative.
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
   const applyPreset = (presetId) => {
     const allIds = initialScenes.map(s => s.id)
     const preset = presetConfig(presetId, allIds)
@@ -549,6 +565,18 @@ function SceneItem({
           />
           <p className={`text-xs mt-1 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>
             Leave blank to hide the time. Shown on the scene row and in the agenda when set.
+          </p>
+
+          <label className={`text-xs mb-1 block pt-3 ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Speaker Notes (optional)</label>
+          <textarea
+            value={metadata.speakerNotes || ''}
+            onChange={(e) => onUpdateSceneMetadata?.(scene.id, { speakerNotes: e.target.value })}
+            rows={3}
+            className={`${inputClass} resize-y`}
+            placeholder="Talking points for this scene…"
+          />
+          <p className={`text-xs mt-1 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>
+            Shown only in the presenter view.
           </p>
         </div>
       )}
