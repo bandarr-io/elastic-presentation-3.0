@@ -1,96 +1,52 @@
 # Elastic Presentation
 
-A React-based interactive presentation tool for Elastic field teams. Walk prospects through Elastic's platform, capabilities, and value with a polished, customizable presentation — all running locally in the browser.
+A React-based interactive presentation platform for Elastic field teams. It walks
+prospects and customers through Elastic's platform, capabilities, and value with
+polished animated scenes — all running locally in the browser with no backend.
+
+**Quick facts** (for humans and LLMs):
+
+- Single-page React 18 + Vite app, hash-routed (`/#/<scene-id>`), no server or database.
+- A presentation is an ordered, enabled subset of **52 registered scenes** (`src/data/sceneRegistry.jsx`).
+- **Deck presets** (`src/data/deckPresets.js`) are out-of-the-box flows: New Prospect (default), Technical Deep-Dive, Observability, Security, All Scenes, No Scenes.
+- Scenes can have internal animation steps ("**beats**" via the `useSceneMotion` hook, or lifted "**stages**" managed in `App.jsx`).
+- A **presenter view** (`/#/presenter`) opens in a second tab and drives the audience tab over `BroadcastChannel`, with speaker notes and live previews.
+- An **architecture whiteboard** scene (`/#/whiteboard`) provides a live drag-and-drop canvas for Elastic deployment diagrams.
+- All user configuration persists to `localStorage`; content is customizable per scene through a Settings panel.
 
 ---
 
 ## Table of Contents
 
-- [Storyline](#storyline)
 - [Getting Started](#getting-started)
 - [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
-- [Scenes](#scenes)
-- [Customization](#customization)
-  - [Scene Settings](#scene-settings)
-  - [Team Settings](#team-settings)
-  - [Per-Scene Content](#per-scene-content)
-- [Navigation](#navigation)
+- [Core Concepts](#core-concepts)
+- [Out-of-the-Box Flows (Deck Presets)](#out-of-the-box-flows-deck-presets)
+- [Scene Library](#scene-library)
 - [Presenter View](#presenter-view)
 - [Architecture Whiteboard](#architecture-whiteboard)
+- [Customization (Settings Panel)](#customization-settings-panel)
+- [Navigation](#navigation)
+- [Scene Motion System](#scene-motion-system)
 - [Theming](#theming)
 - [Persistence](#persistence)
-
----
-
-## Storyline
-
-This deck is tuned for a specific audience: **your customer**, an established Elastic customer running a large self-managed, on-premises cluster. The narrative isn't a generic pitch — it reconnects, validates the value they've already built, then points to where the platform goes next.
-
-The default story runs in five acts. The platform/data deep-dive is intentionally handed off to a separate presentation, so most of those scenes ship **disabled by default**.
-
-### Act 1 — Open & reconnect
-Re-establish the relationship and set expectations.
-
-1. **Hero** — opening / branding
-2. **Agenda** — what we'll cover
-3. **Team Introductions** — who's in the room to support them
-4. **About Elastic** — brief "who we are now"
-
-### Act 2 — Where the customer is today (validate the investment)
-Lead with their reality. This is the most credible, specific material and earns the right to talk about more.
-
-5. **Desired Outcomes** — the shared goals we're measuring against
-6. **Current Architecture** — where Elastic already sits in their environment
-7. **Value Delivered** — the on-prem platform by the numbers (scale, efficiency, consolidation)
-8. **By Team** — how every department relies on it, ending on the *90% less time gathering* impact
-9. **Security Use Cases** — live dashboards, AI workflows, and investigations (lightbox gallery)
-
-### Act 3 — Platform (bridge to the deep-dive)
-10. **Platform Overview** — all your data, real-time, at scale
-11. **AI Capability Map** — reactive today, agentic now, autonomous next
-Hands off to a partner's deck.
-
-### Act 4 — AI & Security (the differentiation peak)
-The forward-looking story, placed late so it crescendos right before the ask.
-12. **Security: Why Now** — threat stats, attack-path kill-chain, bolt-on vs. native, Senses/Brain/Hands
-13. **Security** — AI-driven security operations
-
-### Act 5 — Commercials & close
-14. **Licensing** — tiers and what's included
-15. **Customer Architect** — the dedicated partner who walks the journey
-16. **Services** — transform faster with Professional Services
-17. **Next Steps** — close and drive to action
-
-### Disabled by default
-These remain in the codebase and are one toggle away in **Scene Settings** — re-enable for a more technical room or when the platform deep-dive isn't being handled elsewhere:
-
-`Problem Patterns` · `Data Explosion` · `LogsDB` · `Data Mesh` · `Cross-Cluster` · `Schema` · `Access Control` · `Data Tiering` · `Consolidation` · `ES|QL` · `Run On-Prem` · `Panel`
-
-### How the order is controlled
-- The canonical default order and enabled set come from the `allScenes` array in `src/App.jsx`. A scene is hidden by default when its definition carries `defaultDisabled: true`.
-- `useSceneConfiguration` (in `src/components/SceneSettings.jsx`) persists per-user order/enabled state to `localStorage`. A versioned migration (`ORDER_VERSION`) re-applies the canonical default order and enabled set when it changes, while preserving your custom durations and per-scene content edits.
-- Any of this can be overridden live in the **Scene Settings** panel; use **Reset** to return to the defaults above.
+- [Project Structure](#project-structure)
+- [Testing](#testing)
 
 ---
 
 ## Getting Started
 
 ```bash
-# Install dependencies
-npm install
-
-# Start the development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Preview the production build
-npm run preview
+npm install        # install dependencies
+npm run dev        # start the dev server (http://localhost:5173)
+npm run build      # production build
+npm run preview    # preview the production build
+npm test           # run the Vitest unit tests
 ```
 
-The app runs at `http://localhost:5173` by default and uses hash-based routing (`/#/scene-id`).
+Routing is hash-based: `http://localhost:5173/#/<scene-id>` deep-links to any
+scene, and `#/presenter` opens the presenter view.
 
 ---
 
@@ -103,138 +59,123 @@ The app runs at `http://localhost:5173` by default and uses hash-based routing (
 | Routing | react-router-dom 7 (HashRouter) |
 | Styling | Tailwind CSS 3 |
 | Animation | anime.js 4 |
-| Icons | Font Awesome (free-solid) |
+| Icons | Font Awesome (free-solid), simple-icons |
+| Testing | Vitest |
 | Analytics | Vercel Analytics |
 | Fonts | Mier B (headlines), Inter (body), Space Mono (code) |
 
 ---
 
-## Project Structure
+## Core Concepts
 
-```
-presentation-2.0/
-├── public/                     # Static assets (fonts, logos, images)
-├── src/
-│   ├── main.jsx                # App entry — HashRouter setup
-│   ├── App.jsx                 # Scene registry, routing, global nav, inline scenes
-│   ├── index.css               # Tailwind base, fonts, custom keyframes
-│   ├── components/
-│   │   ├── SceneSettings.jsx   # Settings panel + useSceneConfiguration hook
-│   │   ├── Navigation.jsx      # Global prev/next nav buttons
-│   │   ├── ProgressBar.jsx     # Bottom progress indicator
-│   │   ├── ErrorBoundary.jsx
-│   │   ├── ElasticWhiteboard.jsx  # Interactive architecture canvas
-│   │   └── whiteboard/         # Whiteboard gestures, history + docs
-│   ├── presenter/              # Presenter view: cross-tab sync, previews, notes
-│   ├── context/
-│   │   ├── ThemeContext.jsx     # Dark/light mode
-│   │   └── TeamContext.jsx      # Team member data
-│   ├── scenes/                 # All active scene components
-│   │   └── _backup/            # Archived older versions
-│   ├── data/                   # Scene registry, deck presets, whiteboard catalog
-│   ├── animations/             # Reusable animation utilities
-│   ├── utils/                  # Whiteboard geometry/AI and other helpers
-│   └── hooks/                  # Custom React hooks (useSceneMotion, …)
-├── tailwind.config.js
-└── vite.config.js
-```
+| Term | Meaning |
+|---|---|
+| **Scene** | A full-screen slide, registered in `src/data/sceneRegistry.jsx` with an `id`, `title`, `description`, `duration`, and optional `defaultDisabled` flag. |
+| **Deck preset** | A named flow that enables exactly one set of scenes in a fixed order (everything else is disabled). Selected in Scene Settings. Any manual change switches the deck to *Custom*. |
+| **Beat** | An internal animation step inside a scene, driven by the `useSceneMotion` hook. Beats are advanced by the global Next control and the presenter view. |
+| **Stage** | Like a beat, but for scenes whose step state is lifted into `App.jsx` (`liftedStageControls`). Behaves the same from the presenter's perspective. |
+| **Presenter bridge** | The mechanism (`src/presenter/presenterBridge.js`) that exposes a scene's beat/stage controls to the cross-tab sync layer. |
+| **Scene metadata** | Per-scene user edits (title, duration, group, speaker notes, per-beat notes, content fields) stored in `localStorage` and editable in the Settings panel. |
+| **Group** | Scenes sharing a `group` name appear as a single entry on the auto-generated Agenda slide. |
 
 ---
 
-## Scenes
+## Out-of-the-Box Flows (Deck Presets)
 
-The presentation is made up of **scenes** — individual full-screen slides. Scenes are registered in `App.jsx` and can be enabled, disabled, reordered, and customized via the Settings panel.
+Presets live in `src/data/deckPresets.js` and are applied from the **Scenes** tab
+of the Settings panel. Applying a preset enables exactly its scenes, in order;
+every other scene is moved after them and disabled. Per-scene durations and
+content edits are preserved when switching presets. The default preset is
+**New Prospect**.
 
-### Available Scenes
-
-| Scene | ID | Description |
+| Preset | ID | Intent |
 |---|---|---|
-| **Hero** | `hero` | Opening screen with animated search bar and Elastic branding |
-| **Agenda** | `agenda` | Auto-generated agenda from enabled scenes, adaptive grid layout |
-| **Team** | `team` | Team introductions pulled from Team Settings |
-| **About Elastic** | `about` | Company stats and platform overview |
-| **Business Value** | `business-value` | Four core value pillars: Risk, Time, Resilience, Cost |
-| **Problem Patterns** | `problem-patterns` | Filterable problem patterns across Observability, Security, and Search |
-| **Unified Strategy** | `unified-strategy` | Full platform diagram: data sources → capabilities → solutions |
-| **Data Explosion** | `data-explosion` | Animated chart showing structured vs. unstructured data growth |
-| **Data Mesh** | `data-mesh` | Multi-stage story: data silos → unified Elastic mesh |
-| **Cross-Cluster** | `cross-cluster` | Cross-cluster search and replication architecture |
-| **Security** | `security` | AI-driven security: attack discovery, threat hunting, automation |
-| **Schema** | `schema` | Schema on Read vs. Schema on Write comparison with ECS |
-| **Access Control** | `access-control` | RBAC/ABAC, field-level security, PII masking |
-| **Data Tiering** | `data-tiering` | Hot, warm, cold, and frozen tier lifecycle |
-| **Licensing** | `licensing` | Free vs. Enterprise feature comparison |
-| **Consolidation** | `consolidation` | Before/after: tool sprawl → Elastic consolidation |
-| **ES\|QL** | `esql` | ES\|QL pipeline stages with live query examples |
-| **Services** | `services` | Professional services journey with Zero Downtime Migration demo |
-| **Next Steps** | `next-steps` | Call to action, de-risking options, and team contact panel |
-| **Panel** | `panel` | Featured panel discussion layout with speaker cards |
-| **Architecture Whiteboard** | `whiteboard` | Live drag-and-drop canvas for whiteboarding Elastic architectures — typed components, zones, styled connections, presets, AI assist, and SVG/PNG export ([full docs](src/components/whiteboard/README.md)) |
-
-### Scene Groups
-
-Scenes can be grouped under a shared agenda entry using the `group` metadata field in Scene Settings. All scenes sharing the same group name will appear as a single item on the Agenda slide.
+| **New Prospect** *(default)* | `new-prospect` | Net-new pitch — market context first, no existing-footprint assumptions. 16 scenes ending in pricing, services, and next steps. |
+| **Technical Deep-Dive** | `technical` | Architecture and platform internals for architects and platform teams — planes, node types, tiering, schema, cross-cluster, ES\|QL, deployment models, through a full reference deployment. |
+| **Observability** | `observability` | The Observability story — from efficient datastore to the autonomous AI SRE (Nightshift). Uses the 14 `obs-*` / `nightshift-*` scenes. |
+| **Security** | `security` | Modern threat landscape → AI-driven SecOps → tool consolidation, governance, and commercials. |
+| **All Scenes** | `all-scenes` | Everything enabled in registration order — the full library. Newly added scenes are always included. |
+| **No Scenes** | `no-scenes` | Blank slate — only Hero. Build a custom flow from scratch. |
 
 ---
 
-## Customization
+## Scene Library
 
-All customization is done through the **Settings panel**, accessible via the gear icon in the top navigation bar. Settings are automatically saved to `localStorage` and persist across sessions.
+All 52 scenes, grouped as they appear in `src/data/sceneRegistry.jsx`. "Default"
+indicates whether the scene ships enabled before any preset/customization is
+applied (the New Prospect preset governs the actual default flow).
 
-### Scene Settings
+### Opening & narrative core (enabled by default)
 
-The **Scenes** tab lets you:
+| Scene | ID | What it shows |
+|---|---|---|
+| Hero | `hero` | Opening screen with animated search bar and Elastic branding |
+| Agenda | `agenda` | Auto-generated agenda from enabled scenes, adaptive grid layout |
+| Team Introductions | `team` | The people in the room, pulled from Team Settings |
+| About Elastic | `about` | Who we are and what we do — company stats |
+| Desired Outcomes | `business-value` | Key areas where Elastic delivers value |
+| Metrics Dashboard | `elastic-value` | Configurable layout — hero stat cards, stat grid, bottom-line banner |
+| Card Grid | `value-by-team` | Configurable layout — icon cards with an impact banner |
+| Visual Gallery | `security-use-cases` | Configurable layout — image cards with an expandable lightbox |
+| Exploded Platform | `elastic-exploded` | 3D-style teardown of the Elastic logo into seven capability parts |
+| Platform Overview | `unified-strategy` | All your data, real-time, at scale — the full platform diagram |
+| AI Capability Map | `ai-assistant` | Reactive today, agentic now, autonomous next |
+| Security: Why Now | `security-narrative-visual` | Count-up threat stats, attack-path kill-chain, bolt-on vs native SOC |
+| Pyramid → Diamond | `security-soc-model` | The SOC operating model shift, animated morph |
+| Senses · Brain · Hands | `security-capabilities` | The three native platform layers with competitive call-outs |
+| Security | `security` | AI-driven security operations: attack discovery, investigation, automated response |
+| Licensing | `licensing` | Subscription tiers and what comes with each |
+| Pricing / ROM | `pricing-rom` | Customizable rough-order-of-magnitude quote with live-computed totals |
+| Customer Architect | `customer-architect` | The dedicated partner who walks the journey with the customer |
+| Services | `services` | Professional Services journey with Zero Downtime Migration demo |
+| Next Steps | `next-steps` | Close the conversation and drive to action; team contact panel |
 
-- **Enable / disable** individual scenes — disabled scenes are hidden from the presentation and the agenda
-- **Reorder** scenes by dragging them up and down the list
-- **Set custom durations** shown on the Agenda slide
-- **Assign a group** to cluster scenes under a single agenda entry
+### Platform deep-dive (disabled by default)
 
-### Team Settings
+| Scene | ID | What it shows |
+|---|---|---|
+| Panel | `panel` | Featured panel discussion layout with speaker cards |
+| Problem Patterns | `problem-patterns` | Filterable common challenges across Observability, Security, Search |
+| Data Explosion | `data-explosion` | Animated chart — structured vs. unstructured data growth |
+| LogsDB | `logsdb` | More data, lower cost, better visibility |
+| Data Mesh | `data-mesh` | Multi-stage story: data silos → unified Elastic mesh |
+| Cross-Cluster | `cross-cluster` | Distributed search and replication across environments |
+| Schema | `schema` | Schema on Read vs Schema on Write — why ECS matters |
+| Access Control | `access-control` | RBAC/ABAC, field-level security, PII masking |
+| Data Tiering | `data-tiering` | Hot, warm, cold, and frozen lifecycle management |
+| Consolidation | `consolidation` | Before/after: tool sprawl → unified Elastic platform |
+| ES\|QL | `esql` | One pipeline from raw data to answers |
+| Deployment Models | `platform-operations` | Self-Managed, Cloud Hosted, Serverless — switchable via side nav |
+| Platform Value | `platform-value` | Closing hero — the platform's value as a whole |
 
-The **Team** tab lets you configure the people presenting. Each team member has:
+### Observability story (disabled by default; used by the Observability preset)
 
-| Field | Description |
-|---|---|
-| Name | Full name |
-| Role | Job title (e.g. Account Executive, Solutions Architect) |
-| Email | Contact email |
-| Phone | Contact phone or scheduling link |
-| Photo | Avatar image URL |
-| Color | Accent color for their card |
+| Scene | ID | What it shows |
+|---|---|---|
+| The AI-Scale Challenge | `obs-ai-scale` | AI multiplies every observability problem — dev ×100, staging ×10, prod ?× |
+| Track Record | `obs-heritage` | From the ELK Stack to the Agentic Era |
+| Three Layers | `obs-three-layers` | Elasticsearch → AI Index → Nightshift |
+| Three Pillars | `obs-pillars` | Streams, Signals, and Nightshift define the roadmap |
+| Signals & Efficiency | `obs-signals` | Five signals on one platform, plus datastore efficiency benchmarks |
+| Streams | `obs-streams` | Five-stage telemetry pipeline to agent-ready significant events |
+| OpenTelemetry | `obs-otel` | EDOT — the #1 OTel contributor — collects everything, from everywhere |
+| Kubernetes | `obs-kubernetes` | OOTB Kubernetes dashboards plus autonomous root-cause analysis |
+| MCP App for Kubernetes | `obs-mcp-app` | Claude drives Elastic via MCP: health → anomalies → explainer → blast radius |
+| Agentic Observability | `obs-agentic` | Four-quadrant strategy: infer, discover, remediate, meet teams anywhere |
+| Knowledge & Discovery | `obs-discovery` | Knowledge Indicators → Significant Events → the agent's live system model |
+| Meet Where They Are | `obs-surfaces` | One Skills layer across every surface; plain-English investigation via MCP |
+| Nightshift: AI SRE | `nightshift-sre` | The autonomous AI SRE — detect, investigate, remediate, audit |
+| Inside Nightshift | `nightshift-arch` | Architecture, the Elastic Brain, and the token-efficiency funnel |
 
-Team members with the role **Account Executive**, **Solutions Architect**, or **Customer Architect** are automatically surfaced in the **Next Steps** scene contact panel.
+### Reference architecture & tools (disabled by default; used by the Technical preset)
 
-### Per-Scene Content
-
-The **Customizations** tab exposes content fields for each scene. Select a scene from the dropdown to edit its fields. Here's what each scene supports:
-
-| Scene | Customizable Content |
-|---|---|
-| **Hero** | Typing animation text, banner title, accent word, subtitle |
-| **About Elastic** | Subtitle, stats (value, label, description), features |
-| **Problem Patterns** | Problem items per category (Observability, Security, Search) |
-| **Data Explosion** | Eyebrow, headline, animated stat counters with labels and sources |
-| **Cross-Cluster** | Eyebrow, title, benefits list, hub/site names, cluster config |
-| **Unified Strategy** | Eyebrow, title parts, subtitle |
-| **Consolidation** | Full before/after content: pain points, stats, tools, labels |
-| **Schema** | Eyebrow, title, subtitles, data source names |
-| **Access Control** | Domain, department names, role labels, actions, sensitive field values |
-| **Services** | Header eyebrow/title/subtitle, hidden costs, data source names |
-| **Next Steps** | Header, CTA name/email/phone/scheduling link |
-| **Panel** | Eyebrow, title, accent phrase, date, time; per-speaker: name, role, org, note, avatar, Moderator/Elastic tags |
-
----
-
-## Navigation
-
-- **Previous / Next** buttons move between scenes globally
-- **Dot indicators** along the bottom show your position; hover for scene names
-- **Progress bar** at the very bottom fills as you advance through the deck
-- Some scenes have **internal stages** advanced with their own controls (e.g. Data Mesh, Security, Services Zero Downtime Demo)
-- The **Services** scene includes a **Reset** button in the nav bar when the Zero Downtime Demo is active
-
-URL routing uses the hash: `/#/<scene-id>` — you can deep-link directly to any scene.
+| Scene | ID | What it shows |
+|---|---|---|
+| Core Components | `core-components` | The Elastic stack, layer by layer |
+| Node Types | `node-types` | Elasticsearch node roles — master, data, ingest, coordinating, ML |
+| Elastic Overview | `elastic-overview` | The visualization, data, and ETL planes with optional management plane |
+| Enterprise Deployment | `enterprise-deployment` | Full reference architecture — sources, ingest, tiered cluster, consumers, monitoring |
+| Architecture Whiteboard | `whiteboard` | Live drag-and-drop canvas for whiteboarding Elastic architectures ([full docs](src/components/whiteboard/README.md)) |
 
 ---
 
@@ -245,11 +186,9 @@ presenter icon in the nav bar (or navigate to `/#/presenter`) — it launches in
 own tab and drives the audience tab via `BroadcastChannel`, so both stay in sync
 with zero server involvement.
 
-What you get:
-
 - **Live previews** — a large, interactive preview of the current scene (buttons
-  inside it are clickable and forward to the audience tab) plus a preview of
-  what's coming next.
+  inside it are clickable and forward real clicks to the audience tab via DOM-path
+  resolution) plus a preview of what's coming next.
 - **Step-aware navigation** — "Next" advances the current scene's internal beats
   or stages first, then moves to the next scene. Explicit *Prev scene* /
   *Next scene* buttons, beat pills for jumping to a specific step, and a Replay
@@ -260,6 +199,17 @@ What you get:
   to the same scene metadata used by Scene Settings.
 - **Scene jump menu** — a searchable scene selector mirroring the nav bar's.
 
+Implementation lives in `src/presenter/`:
+
+| File | Role |
+|---|---|
+| `PresenterView.jsx` | The presenter UI: previews, controls, notes, footer navigation |
+| `usePresenterSync.js` | Audience-side command handling and state broadcasting |
+| `presenterChannel.js` | `BroadcastChannel` wrapper shared by both tabs |
+| `presenterBridge.js` | Registers scene beat/stage controls for remote driving |
+| `ScenePreview.jsx` | Scaled live rendering of scene components in the presenter |
+| `domClick.js` | Serializes/resolves DOM paths so preview clicks replay in the audience tab |
+
 ---
 
 ## Architecture Whiteboard
@@ -267,34 +217,150 @@ What you get:
 The deck ships with a full interactive whiteboard scene (`/#/whiteboard`) for
 sketching Elastic deployment architectures live: typed components with sizing
 totals, configurable pattern blocks (cluster tiers, ingestion, user space),
-zones, styled connections (color, solid/dashed/dotted/long-dash/dash-dot,
-width), architecture presets, an AI build assistant, and JSON/SVG/PNG export.
+zones, styled connections (per-edge color; solid/dashed/dotted/long-dash/dash-dot
+line styles; thin/normal/thick widths), architecture presets, an AI build
+assistant, and JSON/SVG/PNG export. The board autosaves to `localStorage`.
 
 See the [whiteboard README](src/components/whiteboard/README.md) for the full
 feature tour, interaction cheat sheet, and code map.
 
 ---
 
+## Customization (Settings Panel)
+
+Open with the gear icon in the nav bar. Everything saves automatically to
+`localStorage` and persists across sessions.
+
+### Scenes tab
+
+- **Deck presets** — one-click flows (see [above](#out-of-the-box-flows-deck-presets)).
+  Any manual change flips the active preset to *Custom*.
+- **Enable / disable** individual scenes; disabled scenes are hidden from the
+  presentation and the agenda.
+- **Reorder** scenes by dragging.
+- **Set custom durations** shown on the Agenda slide.
+- **Assign a group** to cluster scenes under a single agenda entry.
+
+### Team tab
+
+Configure the presenting team. Each member has name, role, email, phone,
+photo, and an accent color. Members with the role **Account Executive**,
+**Solutions Architect**, or **Customer Architect** are automatically surfaced in
+the **Next Steps** contact panel.
+
+### Customizations tab
+
+Per-scene content editors (in `src/components/sceneEditors/`) expose the text,
+stats, images, line items, and layout options of individual scenes — e.g. Hero
+typing text, About stats, Pricing/ROM line items and discounts, Metrics
+Dashboard cards, Visual Gallery images, Licensing tiers, Panel speakers, and
+more. Select a scene from the dropdown to edit its fields; edits are stored as
+scene metadata and survive preset switches.
+
+---
+
+## Navigation
+
+- **Previous / Next** buttons move through the deck; Next advances a scene's
+  internal beats/stages before moving to the next scene.
+- **Dot indicators** along the bottom show position; hover for scene names.
+- **Progress bar** at the very bottom fills as you advance.
+- **Searchable scene selector** in the nav bar jumps to any enabled scene.
+- Some scenes have **internal controls** (e.g. the Services Zero Downtime demo
+  exposes a Reset button in the nav bar when active).
+- Deep-link to any scene with `/#/<scene-id>`.
+
+---
+
+## Scene Motion System
+
+Scenes with multi-step animations use one of two patterns, both of which the
+global navigation and presenter view understand:
+
+1. **`useSceneMotion` beats** (`src/hooks/useSceneMotion.js`) — a scene declares
+   its number of beats and gets `beat`, `goTo`, `next`, `prev`, and `replay`.
+   The hook registers with the presenter bridge automatically, so beats are
+   remotely driveable and mirrored into presenter previews
+   (`SceneMotionFollowContext`).
+2. **Lifted stages** — a few scenes' step state lives in `App.jsx`
+   (`liftedStageControls`) so the nav bar can render scene-specific controls.
+
+Supporting hooks: `useAnimationTimeline` (anime.js timelines),
+`useReducedMotion` (respects OS reduced-motion), `useSceneTransition`,
+`useThemeStyles`.
+
+---
+
 ## Theming
 
-The app supports **dark mode** (default) and **light mode**, toggled via the moon/sun icon in the nav bar.
+Dark mode (default) and light mode, toggled via the moon/sun icon in the nav bar.
 
-- Dark mode uses the full Elastic dark palette — deep blue backgrounds, teal and white accents
-- Light mode uses white surfaces with Elastic blue and ink tones
-- All scenes and components respond to the active theme
-- The selected theme is persisted to `localStorage` under the key `presentation-theme`
+- Dark mode uses the Elastic dark palette — deep blue backgrounds, teal/white accents.
+- Light mode uses white surfaces with Elastic blue and ink tones.
+- All scenes, the whiteboard, and the presenter view respond to the active theme.
+- Persisted to `localStorage` as `presentation-theme`.
 
 ---
 
 ## Persistence
 
-All user configuration is saved automatically to `localStorage`:
+Everything is client-side in `localStorage`:
 
 | Key | What it stores |
 |---|---|
-| `presentation-scene-config` | Enabled scenes, order, custom durations, per-scene metadata (including speaker notes) |
+| `presentation-scene-config` | Active preset, enabled scenes, order, durations, per-scene metadata (content edits, speaker notes, per-beat notes) |
 | `presentation-team-config` | Team title, subtitle, and all member records |
 | `presentation-theme` | `'dark'` or `'light'` |
-| `ew-*` | Whiteboard autosave, custom presets, and AI config — see the [whiteboard README](src/components/whiteboard/README.md#persistence) |
+| `ew-*` | Whiteboard autosave, custom architecture presets, AI config — see the [whiteboard README](src/components/whiteboard/README.md#persistence) |
 
-To reset everything to defaults, use the **Reset** option available in the Settings panel, or clear `localStorage` in your browser's developer tools.
+A versioned migration (`ORDER_VERSION` in `SceneSettings.jsx`) re-applies the
+canonical default flow when the shipped defaults change, while preserving your
+durations and content edits. Use **Reset** in the Settings panel (or clear
+`localStorage`) to return to defaults.
+
+---
+
+## Project Structure
+
+```
+elastic-presentation-3.0/
+├── public/                        # Static assets (fonts, logos, images, screenshots)
+├── src/
+│   ├── main.jsx                   # App entry — HashRouter setup
+│   ├── App.jsx                    # Scene orchestration, nav bar, lifted stages, presenter integration
+│   ├── index.css                  # Tailwind base, fonts, custom keyframes
+│   ├── data/
+│   │   ├── sceneRegistry.jsx      # All 52 scene definitions (id, component, title, description)
+│   │   ├── deckPresets.js         # Out-of-the-box flows (New Prospect, Technical, Obs, Security, …)
+│   │   ├── agendaDefaults.js      # Agenda slide defaults
+│   │   ├── iconOptions.js         # Icon picker catalog for scene editors
+│   │   └── whiteboardTypes.js / whiteboardTemplates.js  # Whiteboard component catalog & patterns
+│   ├── scenes/                    # All 52 scene components (+ _backup/ archive)
+│   ├── presenter/                 # Presenter view: cross-tab sync, previews, notes, click forwarding
+│   ├── components/
+│   │   ├── SceneSettings.jsx      # Settings panel + useSceneConfiguration hook + preset logic
+│   │   ├── sceneEditors/          # Per-scene content editors (Customizations tab)
+│   │   ├── ElasticWhiteboard.jsx  # Interactive architecture canvas
+│   │   ├── whiteboard/            # Whiteboard gestures, undo/redo history, docs
+│   │   ├── PricingRomBuilder.jsx  # Pricing/ROM quote builder
+│   │   ├── ProgressBar.jsx · SceneHeader.jsx · SceneStepper.jsx · CountUp.jsx
+│   │   ├── FlowConnectors.jsx · ClusterMark.jsx · ErrorBoundary.jsx
+│   ├── context/                   # Theme, Team, SceneMotion, SceneMotionFollow contexts
+│   ├── hooks/                     # useSceneMotion, useAnimationTimeline, useReducedMotion, …
+│   ├── animations/                # Reusable animation utilities
+│   └── utils/                     # Whiteboard geometry/AI, pricing, layout helpers
+├── tailwind.config.js
+└── vite.config.js
+```
+
+---
+
+## Testing
+
+```bash
+npm test
+```
+
+Vitest unit tests cover the presenter sync command handling
+(`src/presenter/presenterSync.test.js`) and the whiteboard template
+instantiation (`src/utils/whiteboardTemplates.test.js`).
