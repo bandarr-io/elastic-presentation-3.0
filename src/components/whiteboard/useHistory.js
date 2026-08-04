@@ -42,11 +42,20 @@ export function useHistory(docRef, restore) {
     bump((t) => t + 1);
   };
 
+  /* Drop all history — used when swapping in a different document (board), so
+     undo can't reach back into the previous one. */
+  const resetHistory = () => {
+    histRef.current = { undo: [], redo: [] };
+    snapKeyRef.current = { k: null, t: 0 };
+    bump((t) => t + 1);
+  };
+
   return {
     snapshot,
     snapGuard,
     undo,
     redo,
+    resetHistory,
     canUndo: histRef.current.undo.length > 0,
     canRedo: histRef.current.redo.length > 0,
   };

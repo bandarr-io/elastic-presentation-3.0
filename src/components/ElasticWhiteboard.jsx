@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../context/ThemeContext";
 import { buildCatalog, describeDoc, describeSections, buildTool, systemPrompt, runLLM } from "../utils/whiteboardAI";
 import { buildFromSections, instantiateTemplate, sectionEndpoint, TEMPLATE_MENU, TEMPLATE_CONFIG, defaultFill } from "../data/whiteboardTemplates";
-import { STAGE_PALETTES, SURFACES, CATS, TYPES, tagOf, SEEDS, isAnnotation } from "../data/whiteboardTypes";
+import { STAGE_PALETTES, SURFACES, CATS, CAT_COLORS, TYPES, tagOf, SEEDS, isAnnotation } from "../data/whiteboardTypes";
+import { encodeBoard, decodeBoard, boardParamFromHash, shareUrl } from "../utils/whiteboardShare";
+import { tidyLayout, validateBoard, capacityTotals, formatTB } from "../utils/whiteboardAnalysis";
 import { anchor, elbowPath, roundedPath, plMid, snap } from "../utils/whiteboardGeometry";
 import { useHistory } from "./whiteboard/useHistory";
 import { useDragController } from "./whiteboard/useDragController";
@@ -187,11 +189,47 @@ const AlignControls = ({ onAlign, onDistribute, canDistribute }) => (
   </>
 );
 
-/* ---- persistence (autosave board + user-saved seed presets) ---- */
-const BOARD_KEY = "ew-board";
+/* ---- persistence (named boards + user-saved seed presets) ---- */
+const BOARD_KEY = "ew-board";                       // pre-multi-board autosave
+const BOARDS_KEY = "ew-boards";                     // { boards: [{id,name}], activeId }
+const boardKey = (id) => `ew-board-${id}`;
 const seedKey = (k) => `ew-seed-${k}`;
 const readJSON = (key) => { try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : null; } catch { return null; } };
 const writeJSON = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* quota / disabled */ } };
+const dropKey = (key) => { try { localStorage.removeItem(key); } catch { /* disabled */ } };
+
+const DEFAULT_VIEW = { x: 30, y: 20, k: 0.85 };
+const uniqueId = (p) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+/* Seed edges are stored as compact tuples or objects; materialize either. */
+const hydrateEdge = (ed, i) => (Array.isArray(ed)
+  ? { id: `e${i}`, s: ed[0], e: ed[1], lbl: ed[2] }
+  : { id: `e${i}`, s: ed.s, e: ed.e, lbl: ed.lbl, ...(ed.pts ? { pts: ed.pts } : {}),
+      ...(ed.bi ? { bi: true } : {}), ...(ed.color ? { color: ed.color } : {}) });
+const emptyBoard = () => ({ nodes: [], edges: [], zones: [], view: { ...DEFAULT_VIEW }, sections: {} });
+const referenceBoard = () => ({
+  nodes: JSON.parse(JSON.stringify(SEEDS.reference.nodes)),
+  edges: SEEDS.reference.edges.map(hydrateEdge),
+  zones: JSON.parse(JSON.stringify(SEEDS.reference.zones || [])),
+  view: { ...DEFAULT_VIEW }, sections: {},
+});
+
+/* Resolve the board index, migrating a single legacy autosave into the first
+   named board. Always yields an index with at least one board plus its data. */
+const bootBoards = () => {
+  const idx = readJSON(BOARDS_KEY);
+  if (idx && Array.isArray(idx.boards) && idx.boards.length) {
+    const activeId = idx.boards.some((b) => b.id === idx.activeId) ? idx.activeId : idx.boards[0].id;
+    return { index: { ...idx, activeId }, board: readJSON(boardKey(activeId)) || emptyBoard() };
+  }
+  const legacy = readJSON(BOARD_KEY);
+  const board = legacy && Array.isArray(legacy.nodes) ? legacy : referenceBoard();
+  const id = uniqueId("b");
+  writeJSON(boardKey(id), board);
+  const index = { boards: [{ id, name: "My board" }], activeId: id };
+  writeJSON(BOARDS_KEY, index);
+  dropKey(BOARD_KEY);
+  return { index, board };
+};
 
 /* Serialize the current board into a SEEDS-shaped JS literal, ready to paste as
    a `SEEDS.<key>` entry in whiteboardTypes.js (version-controlled defaults).
@@ -233,15 +271,19 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const stages = isDark ? STAGE_PALETTES.dark : STAGE_PALETTES.light;
   const surface = isDark ? SURFACES.dark : SURFACES.light;
 
-  // hydrate once from the last autosaved board, falling back to the reference seed
+  // hydrate the active named board (migrating any pre-multi-board autosave)
   const bootRef = useRef();
-  if (bootRef.current === undefined) bootRef.current = readJSON(BOARD_KEY) || null;
-  const boot = bootRef.current;
+  if (bootRef.current === undefined) bootRef.current = bootBoards();
+  const boot = bootRef.current.board;
 
-  const [nodes, setNodes] = useState(() => boot?.nodes || clone(SEEDS.reference.nodes));
-  const [edges, setEdges] = useState(() => boot?.edges || SEEDS.reference.edges.map(([s, e], i) => ({ id: `e${i}`, s, e })));
-  const [zones, setZones] = useState(() => boot?.zones || []);
-  const [view, setView]   = useState(() => boot?.view || { x: 30, y: 20, k: 0.85 });
+  const [boardIndex, setBoardIndex] = useState(bootRef.current.index);
+  const [boardMenu, setBoardMenu] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+
+  const [nodes, setNodes] = useState(() => boot.nodes || []);
+  const [edges, setEdges] = useState(() => boot.edges || []);
+  const [zones, setZones] = useState(() => boot.zones || []);
+  const [view, setView]   = useState(() => boot.view || { ...DEFAULT_VIEW });
   const [sel, setSel]     = useState(null);      // {kind:'nodes',ids} | {kind:'edge'|'zone',id}
   const [hover, setHover] = useState(null);
   const [connect, setConnect] = useState(null);  // {from,cx,cy} world coords
@@ -254,6 +296,8 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const [patternCfg, setPatternCfg] = useState(null); // { id, fill } while configuring a Patterns block
   const [seedMenu, setSeedMenu] = useState(false);    // preset save/reset dropdown open
   const [fileMenu, setFileMenu] = useState(false);    // export/import dropdown open
+  const [exportChrome, setExportChrome] = useState(true); // title block + legend on exports
+  const [reviewOpen, setReviewOpen] = useState(false);    // capacity + validation panel
   const [seedNote, setSeedNote] = useState("");       // transient "saved" confirmation
   const [routeTick, setRouteTick] = useState(0);     // forces a full re-route after a drag ends
 
@@ -295,13 +339,92 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
   /* ---------- history ---------- */
   const restore = (doc) => { setNodes(doc.nodes); setEdges(doc.edges); setZones(doc.zones); setSel(null); };
-  const { snapshot, snapGuard, undo, redo, canUndo, canRedo } = useHistory(docRef, restore);
+  const { snapshot, snapGuard, undo, redo, resetHistory, canUndo, canRedo } = useHistory(docRef, restore);
 
-  /* ---------- autosave (survives page refresh) ---------- */
+  /* ---------- boards ---------- */
+  const activeBoardId = boardIndex.activeId;
+  const activeBoard = boardIndex.boards.find((b) => b.id === activeBoardId) || boardIndex.boards[0];
+
+  /* Autosave the active board (debounced; survives refresh). Keyed on the
+     active id so a board switch can't flush stale content into the new slot. */
   useEffect(() => {
-    const t = setTimeout(() => writeJSON(BOARD_KEY, { nodes, edges, zones, view, sections: sectionsRef.current }), 300);
+    const t = setTimeout(
+      () => writeJSON(boardKey(activeBoardId), { nodes, edges, zones, view, sections: sectionsRef.current }),
+      300);
     return () => clearTimeout(t);
-  }, [nodes, edges, zones, view]);
+  }, [nodes, edges, zones, view, activeBoardId]);
+
+  const saveIndex = (next) => { setBoardIndex(next); writeJSON(BOARDS_KEY, next); };
+  /* Write the in-memory board straight to storage — used before switching away,
+     where the debounced autosave would otherwise lose the last edits. */
+  const flushActiveBoard = () =>
+    writeJSON(boardKey(activeBoardId), { nodes, edges, zones, view, sections: sectionsRef.current });
+
+  const openBoard = (id) => {
+    setBoardMenu(false);
+    if (id === activeBoardId) return;
+    flushActiveBoard();
+    const data = readJSON(boardKey(id)) || emptyBoard();
+    setNodes(data.nodes || []);
+    setEdges(data.edges || []);
+    setZones(data.zones || []);
+    setView(data.view || { ...DEFAULT_VIEW });
+    sectionsRef.current = data.sections || {};
+    setSel(null);
+    resetHistory();
+    saveIndex({ ...boardIndex, activeId: id });
+  };
+
+  const createBoard = (name, data) => {
+    flushActiveBoard();
+    const id = uniqueId("b");
+    const board = data || emptyBoard();
+    writeJSON(boardKey(id), board);
+    setNodes(board.nodes || []);
+    setEdges(board.edges || []);
+    setZones(board.zones || []);
+    setView(board.view || { ...DEFAULT_VIEW });
+    sectionsRef.current = board.sections || {};
+    setSel(null);
+    resetHistory();
+    saveIndex({ boards: [...boardIndex.boards, { id, name }], activeId: id });
+    setBoardMenu(false);
+    flashSeedNote(`Created "${name}"`);
+  };
+
+  const nextBoardName = (base) => {
+    const taken = new Set(boardIndex.boards.map((b) => b.name));
+    if (!taken.has(base)) return base;
+    let i = 2;
+    while (taken.has(`${base} ${i}`)) i++;
+    return `${base} ${i}`;
+  };
+
+  const renameBoard = (name) => {
+    const clean = name.trim();
+    if (!clean) return;
+    saveIndex({ ...boardIndex, boards: boardIndex.boards.map((b) => (b.id === activeBoardId ? { ...b, name: clean } : b)) });
+  };
+
+  const deleteBoard = (id) => {
+    if (boardIndex.boards.length < 2) return;   // always keep one board
+    const rest = boardIndex.boards.filter((b) => b.id !== id);
+    dropKey(boardKey(id));
+    if (id === activeBoardId) {
+      const next = readJSON(boardKey(rest[0].id)) || emptyBoard();
+      setNodes(next.nodes || []);
+      setEdges(next.edges || []);
+      setZones(next.zones || []);
+      setView(next.view || { ...DEFAULT_VIEW });
+      sectionsRef.current = next.sections || {};
+      setSel(null);
+      resetHistory();
+      saveIndex({ boards: rest, activeId: rest[0].id });
+    } else {
+      saveIndex({ ...boardIndex, boards: rest });
+    }
+    setBoardMenu(false);
+  };
 
   /* ---------- coords ---------- */
   const toWorld = (clientX, clientY) => {
@@ -889,6 +1012,11 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     setSel({ kind: "zone", id });
   };
 
+  /* Export filenames follow the board name. */
+  const fileSlug = () =>
+    (activeBoard.name || "elastic-whiteboard").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+    || "elastic-whiteboard";
+
   const dl = (blob, name) => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -905,8 +1033,49 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         ? { s, e, ...(lbl ? { lbl } : {}), ...(pts ? { pts } : {}) }
         : (lbl ? [s, e, lbl] : [s, e]);
     dl(new Blob([JSON.stringify({ nodes, edges: edges.map(serEdge), zones }, null, 2)],
-       { type: "application/json" }), "elastic-whiteboard.json");
+       { type: "application/json" }), `${fileSlug()}.json`);
   };
+
+  /* Encode the document into a link that rebuilds it as a new board on open. */
+  const copyShareLink = async () => {
+    setFileMenu(false);
+    if (!nodes.length && !zones.length) return flashSeedNote("Nothing to share yet");
+    try {
+      const payload = await encodeBoard({ name: activeBoard.name, nodes, edges, zones });
+      const url = shareUrl(window.location.origin, window.location.pathname, window.location.hash, payload);
+      if (url.length > 32000) return flashSeedNote("Board too large to share as a link — export JSON instead");
+      await navigator.clipboard.writeText(url);
+      flashSeedNote("Share link copied to clipboard");
+    } catch {
+      flashSeedNote("Couldn't copy the share link");
+    }
+  };
+
+  /* A board arriving via ?board=… is imported once, as a new named board, and
+     the payload is stripped from the URL so a refresh doesn't re-import it. */
+  const sharedRef = useRef(false);
+  useEffect(() => {
+    if (sharedRef.current) return;
+    sharedRef.current = true;
+    const payload = boardParamFromHash(window.location.hash);
+    if (!payload) return;
+    let cancelled = false;
+    decodeBoard(payload).then((doc) => {
+      if (cancelled || !doc) return;
+      const incoming = {
+        nodes: doc.nodes.filter((n) => TYPES[n.type]),
+        edges: doc.edges.map(hydrateEdge),
+        zones: doc.zones,
+        view: { ...DEFAULT_VIEW }, sections: {},
+      };
+      createBoard(nextBoardName(doc.name || "Shared board"), incoming);
+      fitTo(boxOf(incoming.nodes, incoming.zones));
+      const hash = window.location.hash;
+      const q = hash.indexOf("?");
+      if (q >= 0) window.history.replaceState(null, "", window.location.pathname + hash.slice(0, q));
+    });
+    return () => { cancelled = true; };
+  }, []);
   const importJSON = (e) => {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
@@ -963,10 +1132,32 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     const bb = bbox();
     if (!bb) return null;
     const pad = 48;
-    const x0 = bb.x0 - pad, y0 = bb.y0 - pad, W = bb.x1 - bb.x0 + pad * 2, H = bb.y1 - bb.y0 + pad * 2;
     const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    /* Optional chrome: a title block above the diagram and a colour legend
+       below it, both sized here so the viewBox can make room. */
+    const legendCats = exportChrome
+      ? CATS.filter((c) => nodes.some((n) => !TYPES[n.type].annotation && TYPES[n.type].cat === c))
+      : [];
+    const titleH = exportChrome ? 62 : 0;
+    const legendH = legendCats.length ? 40 : 0;
+    const x0 = bb.x0 - pad, y0 = bb.y0 - pad - titleH;
+    const W = bb.x1 - bb.x0 + pad * 2, H = bb.y1 - bb.y0 + pad * 2 + titleH + legendH;
     let out = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x0} ${y0} ${W} ${H}" width="${W}" height="${H}" font-family="'Inter',system-ui,sans-serif">`;
     out += `<rect x="${x0}" y="${y0}" width="${W}" height="${H}" fill="${surface.bg}"/>`;
+    if (exportChrome) {
+      out += `<text x="${x0 + pad}" y="${y0 + 34}" font-family="'Mier B','Inter',sans-serif" font-size="22" fill="${surface.ink}">${esc(activeBoard.name)}</text>`;
+      out += `<text x="${x0 + pad}" y="${y0 + 52}" font-family="'Space Mono',monospace" font-size="11" fill="${surface.muted}">Elastic architecture · ${new Date().toLocaleDateString()}</text>`;
+      out += `<line x1="${x0 + pad}" y1="${y0 + titleH}" x2="${x0 + W - pad}" y2="${y0 + titleH}" stroke="${surface.line}"/>`;
+    }
+    if (legendCats.length) {
+      let lx = x0 + pad;
+      const ly = y0 + H - 18;
+      for (const cat of legendCats) {
+        out += `<rect x="${lx}" y="${ly - 8}" width="9" height="9" rx="2" fill="${CAT_COLORS[cat]}"/>`;
+        out += `<text x="${lx + 15}" y="${ly}" font-size="11" fill="${surface.muted}">${esc(cat)}</text>`;
+        lx += 15 + cat.length * 6.2 + 22;
+      }
+    }
     out += `<defs><marker id="xarr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke"/></marker></defs>`;
     for (const z of zones) {
       out += `<rect x="${z.x}" y="${z.y}" width="${z.w}" height="${z.h}" rx="14" fill="${z.color}" fill-opacity="0.045" stroke="${z.color}" stroke-opacity=".6" stroke-dasharray="7 5"/>`;
@@ -1016,31 +1207,43 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   };
   const exportSVG = () => {
     const svg = buildSVG();
-    if (svg) dl(new Blob([svg], { type: "image/svg+xml" }), "elastic-whiteboard.svg");
+    if (svg) dl(new Blob([svg], { type: "image/svg+xml" }), `${fileSlug()}.svg`);
   };
-  const exportPNG = () => {
+
+  /* Rasterize the export SVG at `scale`, handing the PNG blob to `done`.
+     Falls back to the SVG itself if the canvas can't be read (tainted by a
+     cross-origin logo, for instance). */
+  const renderPNG = (scale, done) => {
     const svg = buildSVG();
     if (!svg) return;
     const blob = new Blob([svg], { type: "image/svg+xml" });
     const url = URL.createObjectURL(blob);
+    const bail = () => { dl(blob, `${fileSlug()}.svg`); URL.revokeObjectURL(url); };
     const img = new Image();
     img.onload = () => {
       try {
         const c = document.createElement("canvas");
-        const scale = 2;
         c.width = img.width * scale; c.height = img.height * scale;
         const g = c.getContext("2d");
         g.scale(scale, scale);
         g.drawImage(img, 0, 0);
-        c.toBlob((b) => {
-          if (b) dl(b, "elastic-whiteboard.png");
-          else dl(blob, "elastic-whiteboard.svg");   /* tainted canvas fallback */
-          URL.revokeObjectURL(url);
-        }, "image/png");
-      } catch { dl(blob, "elastic-whiteboard.svg"); URL.revokeObjectURL(url); }
+        c.toBlob((b) => { b ? done(b) : bail(); URL.revokeObjectURL(url); }, "image/png");
+      } catch { bail(); }
     };
-    img.onerror = () => { dl(blob, "elastic-whiteboard.svg"); URL.revokeObjectURL(url); };
+    img.onerror = bail;
     img.src = url;
+  };
+  const exportPNG = (scale = 2) => renderPNG(scale, (b) => dl(b, `${fileSlug()}.png`));
+  const copyPNG = () => {
+    setFileMenu(false);
+    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined")
+      return flashSeedNote("This browser can't copy images — use Export PNG");
+    renderPNG(2, async (b) => {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": b })]);
+        flashSeedNote("Diagram copied to clipboard");
+      } catch { flashSeedNote("Couldn't copy the image"); }
+    });
   };
 
   /* ---------- derived ---------- */
@@ -1081,17 +1284,45 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     return { x: x0 - pad, y: y0 - pad, w: (x1 - x0) + pad * 2, h: (y1 - y0) + pad * 2 };
   }, [nodes, zones]);
 
-  const totals = useMemo(() => {
-    const t = { count: 0, cpu: 0, mem: 0 };
-    for (const n of nodes) {
-      const p = n.props || {};
-      const mult = p.nodes || 1;
-      if (p.nodes) t.count += p.nodes;
-      if (p.cpu) t.cpu += p.cpu * mult;
-      if (p.mem) t.mem += p.mem * mult;
+  const totals = useMemo(() => capacityTotals(nodes), [nodes]);
+  const warnings = useMemo(() => validateBoard(nodes, edges), [nodes, edges]);
+  const warnCount = warnings.filter((w) => w.level === "warn").length;
+  const hasTotals = totals.count > 0 || totals.cpu > 0 || totals.mem > 0 || warnings.length > 0;
+
+  /* A one-line sizing summary of the board, shaped for the Pricing / ROM
+     scene's description column. */
+  const sizingSummary = () => {
+    const parts = [];
+    if (totals.storageTB) parts.push(`${formatTB(totals.storageTB)} total storage`);
+    for (const t of totals.tiers) {
+      parts.push(`${t.label}: ${t.count} node${t.count === 1 ? "" : "s"}${t.storageTB ? ` / ${formatTB(t.storageTB)}` : ""}`);
     }
-    return t;
-  }, [nodes]);
+    if (totals.count) parts.push(`${totals.count} nodes total`);
+    if (totals.cpu) parts.push(`${totals.cpu} vCPU`);
+    if (totals.mem) parts.push(`${totals.mem} GB RAM`);
+    return parts.join(" · ");
+  };
+  const copySizing = () => {
+    const text = sizingSummary();
+    if (!text) return flashSeedNote("Set node counts and capacities first");
+    navigator.clipboard?.writeText(text).then(
+      () => flashSeedNote("Sizing copied — paste into Pricing / ROM"),
+      () => flashSeedNote("Couldn't copy the sizing summary"));
+  };
+
+  /* Lay every component out in left-to-right data-flow lanes. Zones are left
+     alone: they'd need re-fitting around content that has moved, and the user
+     usually wants to redraw them anyway. */
+  const tidyBoard = () => {
+    const pos = tidyLayout(nodes, rectOf);
+    if (!Object.keys(pos).length) return;
+    snapshot();
+    const next = nodes.map((n) => (pos[n.id] ? { ...n, ...pos[n.id] } : n));
+    setNodes(next);
+    setSel(null);
+    setRouteTick((t) => t + 1);
+    fitTo(boxOf(next, []));
+  };
 
   const tempLine = connect && endpointRect(connect.from) ? (() => {
     const A = anchor(endpointRect(connect.from), "r");
@@ -1128,6 +1359,43 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       <div className="ew-toolbar">
         <span className="ew-title">Elastic Whiteboard</span>
         <span className="ew-menuwrap">
+          {renaming ? (
+            <input className="ew-boardname" autoFocus defaultValue={activeBoard.name}
+                   onBlur={(e) => { renameBoard(e.target.value); setRenaming(false); }}
+                   onKeyDown={(e) => {
+                     if (e.key === "Enter") e.target.blur();
+                     if (e.key === "Escape") { e.target.value = activeBoard.name; e.target.blur(); }
+                   }} />
+          ) : (
+            <button className="ew-boardbtn" onClick={() => setBoardMenu((v) => !v)}
+                    title="Switch, rename, or create a board">{activeBoard.name} ▾</button>
+          )}
+          {boardMenu && (
+            <>
+              <div className="ew-menu-backdrop" onClick={() => setBoardMenu(false)} />
+              <div className="ew-menu">
+                <div className="ew-menu-h">Boards</div>
+                {boardIndex.boards.map((b) => (
+                  <button key={b.id} className={b.id === activeBoardId ? "act" : ""}
+                          onClick={() => openBoard(b.id)}>
+                    {b.id === activeBoardId ? "• " : "\u00A0\u00A0"}{b.name}
+                  </button>
+                ))}
+                <div className="ew-menu-sep" />
+                <button onClick={() => createBoard(nextBoardName("New board"))}>+ New blank board</button>
+                <button onClick={() => createBoard(nextBoardName(`${activeBoard.name} copy`),
+                                                  { nodes: clone(nodes), edges: clone(edges), zones: clone(zones),
+                                                    view, sections: clone(sectionsRef.current) })}>
+                  Duplicate this board
+                </button>
+                <button onClick={() => { setBoardMenu(false); setRenaming(true); }}>Rename this board…</button>
+                <button disabled={boardIndex.boards.length < 2}
+                        onClick={() => deleteBoard(activeBoardId)}>Delete this board</button>
+              </div>
+            </>
+          )}
+        </span>
+        <span className="ew-menuwrap">
           <button onClick={() => setFileMenu((v) => !v)} title="Import or export the board">File ▾</button>
           {fileMenu && (
             <>
@@ -1136,7 +1404,17 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 <div className="ew-menu-h">Export</div>
                 <button onClick={() => { exportJSON(); setFileMenu(false); }}>JSON</button>
                 <button onClick={() => { exportSVG(); setFileMenu(false); }}>SVG</button>
-                <button onClick={() => { exportPNG(); setFileMenu(false); }}>PNG</button>
+                <button onClick={() => { exportPNG(2); setFileMenu(false); }}>PNG</button>
+                <button onClick={() => { exportPNG(4); setFileMenu(false); }}>PNG @ 4x</button>
+                <label className="ew-menu-check">
+                  <input type="checkbox" checked={exportChrome}
+                         onChange={(e) => setExportChrome(e.target.checked)} />
+                  Title &amp; legend
+                </label>
+                <div className="ew-menu-sep" />
+                <div className="ew-menu-h">Share</div>
+                <button onClick={copyPNG}>Copy image to clipboard</button>
+                <button onClick={copyShareLink}>Copy share link</button>
                 <div className="ew-menu-sep" />
                 <div className="ew-menu-h">Import</div>
                 <button onClick={() => { fileRef.current.click(); setFileMenu(false); }}>Import JSON…</button>
@@ -1183,13 +1461,18 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         <span className="ew-zoom">{Math.round(view.k * 100)}%</span>
         <button onClick={() => zoomBy(1.2)}>+</button>
         <button onClick={fit}>Fit</button>
+        <button onClick={tidyBoard} title="Lay components out in data-flow lanes">Tidy</button>
         <span className="ew-gap" />
         <button className={"ew-ai-toggle" + (chatOpen ? " on" : "")}
                 onClick={() => setChatOpen((o) => !o)} title="Build with AI">✦ AI</button>
-        {(totals.cpu > 0 || totals.mem > 0 || totals.count > 0) && (
-          <span className="ew-totals" title="Sums per-node CPU/RAM × node counts">
-            Σ{totals.count > 0 && ` ${totals.count} nodes`}{totals.cpu > 0 && ` · ${totals.cpu} vCPU`}{totals.mem > 0 && ` · ${totals.mem} GB RAM`}
-          </span>
+        {hasTotals && (
+          <button className={"ew-totals" + (reviewOpen ? " on" : "")}
+                  onClick={() => setReviewOpen((v) => !v)}
+                  title="Capacity rollup and architecture review">
+            Σ{totals.count > 0 && ` ${totals.count} nodes`}
+            {totals.storageTB > 0 && ` · ${formatTB(totals.storageTB)}`}
+            {warnCount > 0 && <b className="ew-warncount">{warnCount}</b>}
+          </button>
         )}
         <span className="ew-hint">shift-drag select · ⌘C/⌘V copy · ⌘D duplicate · arrows nudge · ⌘Z undo · drag ring to connect</span>
       </div>
@@ -1420,6 +1703,53 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 width: Math.abs(marquee.x1 - marquee.x0), height: Math.abs(marquee.y1 - marquee.y0) }} />
             )}
           </div>
+
+          {reviewOpen && (
+            <div className="ew-review" onPointerDown={(e) => e.stopPropagation()}>
+              <div className="ew-review-h">
+                <b>Capacity &amp; review</b>
+                <button className="ew-x" onClick={() => setReviewOpen(false)}>×</button>
+              </div>
+              <div className="ew-review-body">
+                <div className="ew-review-stats">
+                  <span><i>{totals.count || "—"}</i>nodes</span>
+                  <span><i>{totals.cpu || "—"}</i>vCPU</span>
+                  <span><i>{totals.mem || "—"}</i>GB RAM</span>
+                  <span><i>{totals.storageTB ? formatTB(totals.storageTB) : "—"}</i>storage</span>
+                </div>
+                {totals.tiers.length > 0 && (
+                  <table className="ew-review-tiers">
+                    <tbody>
+                      {totals.tiers.map((t) => (
+                        <tr key={t.type}>
+                          <td><span className="ew-swatch" style={{ background: TYPES[t.type].color }} />{t.label}</td>
+                          <td>{t.count} node{t.count === 1 ? "" : "s"}</td>
+                          <td>{t.storageTB ? formatTB(t.storageTB) : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                <p className="ew-ihint">Capacity is per node — set Nodes and Capacity on each tier.</p>
+                <div className="ew-btnrow">
+                  <button className="ew-btn" onClick={copySizing}
+                          title="Copy a sizing summary to paste into the Pricing / ROM scene">
+                    Copy sizing for Pricing/ROM
+                  </button>
+                </div>
+                <div className="ew-review-checks">
+                  {warnings.length === 0
+                    ? <p className="ew-review-ok">✓ No issues found</p>
+                    : warnings.map((w) => (
+                        <div key={w.id} className={"ew-check " + w.level}>
+                          <b>{w.title}</b>
+                          <span>{w.detail}</span>
+                        </div>
+                      ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* docked inspector */}
@@ -1941,7 +2271,37 @@ const CSS = `
 .ew-toolbar button:disabled{ opacity:.35; cursor:default; }
 .ew-gap{ width:10px; }
 .ew-zoom{ font-family:var(--mono); font-size:12px; color:var(--muted); min-width:44px; text-align:center; }
-.ew-totals{ font-family:var(--mono); font-size:11.5px; color:var(--accent); margin-left:6px; }
+.ew-totals{ font-family:var(--mono); font-size:11.5px; color:var(--accent) !important; margin-left:6px;
+  display:inline-flex; align-items:center; gap:7px; }
+.ew-totals.on{ border-color:var(--accent) !important; }
+.ew-warncount{ background:#E7664C; color:#fff; border-radius:99px; min-width:16px; height:16px;
+  display:inline-flex; align-items:center; justify-content:center; font-size:10px; padding:0 4px; }
+/* capacity + architecture review, floating over the canvas */
+.ew-review{ position:absolute; left:14px; bottom:14px; z-index:20; width:330px;
+  max-height:min(62%, 560px); display:flex; flex-direction:column;
+  background:var(--panel); border:1px solid var(--line); border-radius:11px;
+  box-shadow:0 18px 40px rgba(0,0,0,.45); }
+.ew-review-h{ display:flex; align-items:center; gap:8px; padding:10px 8px 10px 13px;
+  border-bottom:1px solid var(--line); }
+.ew-review-h b{ flex:1; font-family:var(--display); font-weight:500; font-size:13.5px; }
+.ew-review-body{ padding:11px 13px 13px; overflow:auto; display:grid; gap:11px; }
+.ew-review-stats{ display:grid; grid-template-columns:repeat(4, 1fr); gap:7px; }
+.ew-review-stats span{ display:grid; gap:1px; font-size:9.5px; font-family:var(--mono);
+  letter-spacing:.06em; text-transform:uppercase; color:var(--faint); }
+.ew-review-stats i{ font-style:normal; font-family:var(--display); font-size:15px; color:var(--ink);
+  letter-spacing:0; text-transform:none; }
+.ew-review-tiers{ width:100%; border-collapse:collapse; font-size:11.5px; }
+.ew-review-tiers td{ padding:3px 0; color:var(--muted); }
+.ew-review-tiers td:first-child{ color:var(--ink); }
+.ew-review-tiers td:last-child{ text-align:right; font-family:var(--mono); font-size:11px; }
+.ew-review-checks{ display:grid; gap:7px; }
+.ew-review-ok{ margin:0; font-size:12px; color:var(--accent); }
+.ew-check{ display:grid; gap:2px; padding:8px 10px; border-radius:7px; background:var(--panel2);
+  border-left:3px solid var(--faint); }
+.ew-check.warn{ border-left-color:#E7664C; }
+.ew-check.info{ border-left-color:#4C8DFF; }
+.ew-check b{ font-family:var(--display); font-weight:500; font-size:12.5px; }
+.ew-check span{ font-size:11px; color:var(--muted); line-height:1.45; }
 .ew-hint{ font-family:var(--mono); font-size:10.5px; color:var(--faint); }
 .ew-menuwrap{ position:relative; display:inline-flex; }
 .ew-menu-backdrop{ position:fixed; inset:0; z-index:40; }
@@ -1956,7 +2316,14 @@ const CSS = `
   border-radius:6px; padding:6px 8px; color:var(--ink); font-family:var(--mono); font-size:12px; cursor:pointer; }
 .ew-menu button:hover:not(:disabled){ background:var(--panel2); border-color:var(--accent); }
 .ew-menu button:disabled{ opacity:.35; cursor:default; }
+.ew-menu button.act{ color:var(--accent); }
 .ew-menu-sep{ height:1px; background:var(--line); margin:4px 2px; }
+.ew-menu-check{ display:flex; align-items:center; gap:7px; padding:6px 8px; cursor:pointer;
+  font-family:var(--mono); font-size:12px; color:var(--muted); }
+.ew-menu-check input{ accent-color:var(--accent); width:14px; height:14px; }
+.ew-boardbtn{ max-width:220px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ew-boardname{ background:var(--panel); color:var(--ink); border:1px solid var(--accent);
+  border-radius:7px; padding:5px 10px; font-family:var(--mono); font-size:12px; width:190px; }
 .ew-seednote{ font-family:var(--mono); font-size:11px; color:var(--accent); }
 .ew-body{ display:flex; flex:1; min-height:0; }
 /* Themed scrollbars for the dock panels (palette + inspector). */
