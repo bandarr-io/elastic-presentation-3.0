@@ -263,13 +263,14 @@ export const TEMPLATE_CONFIG = {
   cluster: {
     label: "Elastic Cluster",
     controls: [
-      { kind: "checkset", key: "tiers", label: "Data tiers", def: ["hot", "warm", "cold", "frozen"],
+      { kind: "checkset", key: "tiers", label: "Data tiers", def: ["hot", "cold", "frozen"],
         options: [["hot", "Hot"], ["warm", "Warm"], ["cold", "Cold"], ["frozen", "Frozen"]] },
-      { kind: "toggle", key: "ingest", label: "Ingest node", def: true },
-      { kind: "toggle", key: "coord", label: "Coordinating node", def: true },
-      { kind: "toggle", key: "master", label: "Master node", def: true },
+      { kind: "toggle", key: "ingest", label: "Ingest node", def: false },
+      { kind: "toggle", key: "coord", label: "Coordinating node", def: false },
+      { kind: "toggle", key: "master", label: "Master node", def: false },
       { kind: "toggle", key: "ml", label: "ML node", def: false },
-      { kind: "toggle", key: "objectStorage", label: "Object storage", def: false },
+      // Frozen is in the default tier set, and frozen implies object storage.
+      { kind: "toggle", key: "objectStorage", label: "Object storage", def: true },
     ],
   },
   userSpace: {

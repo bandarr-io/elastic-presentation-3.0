@@ -16,6 +16,8 @@ A React-based interactive presentation tool for Elastic field teams. Walk prospe
   - [Team Settings](#team-settings)
   - [Per-Scene Content](#per-scene-content)
 - [Navigation](#navigation)
+- [Presenter View](#presenter-view)
+- [Architecture Whiteboard](#architecture-whiteboard)
 - [Theming](#theming)
 - [Persistence](#persistence)
 
@@ -120,14 +122,19 @@ presentation-2.0/
 │   │   ├── SceneSettings.jsx   # Settings panel + useSceneConfiguration hook
 │   │   ├── Navigation.jsx      # Global prev/next nav buttons
 │   │   ├── ProgressBar.jsx     # Bottom progress indicator
-│   │   └── ErrorBoundary.jsx
+│   │   ├── ErrorBoundary.jsx
+│   │   ├── ElasticWhiteboard.jsx  # Interactive architecture canvas
+│   │   └── whiteboard/         # Whiteboard gestures, history + docs
+│   ├── presenter/              # Presenter view: cross-tab sync, previews, notes
 │   ├── context/
 │   │   ├── ThemeContext.jsx     # Dark/light mode
 │   │   └── TeamContext.jsx      # Team member data
 │   ├── scenes/                 # All active scene components
 │   │   └── _backup/            # Archived older versions
+│   ├── data/                   # Scene registry, deck presets, whiteboard catalog
 │   ├── animations/             # Reusable animation utilities
-│   └── hooks/                  # Custom React hooks
+│   ├── utils/                  # Whiteboard geometry/AI and other helpers
+│   └── hooks/                  # Custom React hooks (useSceneMotion, …)
 ├── tailwind.config.js
 └── vite.config.js
 ```
@@ -162,6 +169,7 @@ The presentation is made up of **scenes** — individual full-screen slides. Sce
 | **Services** | `services` | Professional services journey with Zero Downtime Migration demo |
 | **Next Steps** | `next-steps` | Call to action, de-risking options, and team contact panel |
 | **Panel** | `panel` | Featured panel discussion layout with speaker cards |
+| **Architecture Whiteboard** | `whiteboard` | Live drag-and-drop canvas for whiteboarding Elastic architectures — typed components, zones, styled connections, presets, AI assist, and SVG/PNG export ([full docs](src/components/whiteboard/README.md)) |
 
 ### Scene Groups
 
@@ -230,6 +238,43 @@ URL routing uses the hash: `/#/<scene-id>` — you can deep-link directly to any
 
 ---
 
+## Presenter View
+
+A dedicated control surface for presenting from a second screen. Open it with the
+presenter icon in the nav bar (or navigate to `/#/presenter`) — it launches in its
+own tab and drives the audience tab via `BroadcastChannel`, so both stay in sync
+with zero server involvement.
+
+What you get:
+
+- **Live previews** — a large, interactive preview of the current scene (buttons
+  inside it are clickable and forward to the audience tab) plus a preview of
+  what's coming next.
+- **Step-aware navigation** — "Next" advances the current scene's internal beats
+  or stages first, then moves to the next scene. Explicit *Prev scene* /
+  *Next scene* buttons, beat pills for jumping to a specific step, and a Replay
+  button for scenes that support it.
+- **Triggers** — in-scene animations (e.g. demo phases) exposed as one-click
+  buttons in the presenter.
+- **Speaker notes** — per-scene and per-beat notes, editable in place and synced
+  to the same scene metadata used by Scene Settings.
+- **Scene jump menu** — a searchable scene selector mirroring the nav bar's.
+
+---
+
+## Architecture Whiteboard
+
+The deck ships with a full interactive whiteboard scene (`/#/whiteboard`) for
+sketching Elastic deployment architectures live: typed components with sizing
+totals, configurable pattern blocks (cluster tiers, ingestion, user space),
+zones, styled connections (color, solid/dashed/dotted/long-dash/dash-dot,
+width), architecture presets, an AI build assistant, and JSON/SVG/PNG export.
+
+See the [whiteboard README](src/components/whiteboard/README.md) for the full
+feature tour, interaction cheat sheet, and code map.
+
+---
+
 ## Theming
 
 The app supports **dark mode** (default) and **light mode**, toggled via the moon/sun icon in the nav bar.
@@ -247,8 +292,9 @@ All user configuration is saved automatically to `localStorage`:
 
 | Key | What it stores |
 |---|---|
-| `presentation-scene-config` | Enabled scenes, order, custom durations, per-scene metadata |
+| `presentation-scene-config` | Enabled scenes, order, custom durations, per-scene metadata (including speaker notes) |
 | `presentation-team-config` | Team title, subtitle, and all member records |
 | `presentation-theme` | `'dark'` or `'light'` |
+| `ew-*` | Whiteboard autosave, custom presets, and AI config — see the [whiteboard README](src/components/whiteboard/README.md#persistence) |
 
 To reset everything to defaults, use the **Reset** option available in the Settings panel, or clear `localStorage` in your browser's developer tools.

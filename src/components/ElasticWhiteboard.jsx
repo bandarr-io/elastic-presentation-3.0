@@ -32,6 +32,23 @@ const WB_CATALOG = buildCatalog(TYPES);
 const WB_TOOL = buildTool();
 const TEMPLATES_OK = new Set([...TEMPLATE_MENU.map((t) => t.id), "single"]);
 
+/* Connector line styles — shared by canvas rendering, the inspector and the
+   SVG export so all three stay in sync. `dash` is an SVG stroke-dasharray
+   (null = solid); dots rely on the round line caps. */
+const EDGE_STYLES = {
+  solid:    { label: "Solid",     dash: null },
+  dashed:   { label: "Dashed",    dash: "5 6" },
+  dotted:   { label: "Dotted",    dash: "0.1 8" },
+  longdash: { label: "Long dash", dash: "12 7" },
+  dashdot:  { label: "Dash-dot",  dash: "9 6 0.1 6" },
+};
+const EDGE_DEFAULT_WIDTH = 1.8;
+const EDGE_WIDTHS = [
+  { label: "Thin",   value: 1.2 },
+  { label: "Normal", value: EDGE_DEFAULT_WIDTH },
+  { label: "Thick",  value: 3 },
+];
+
 /* ---------------- pure geometry ---------------- */
 
 const rectOf = (n) => ({
@@ -318,15 +335,25 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const deleteSel = () => {
     if (!sel) return;
     snapshot();
+    // Connectors may terminate on zones too, so zone deletion also removes
+    // edges attached to the deleted zones.
+    const dropEdges = (gone) =>
+      setEdges((es) => es.filter((ed) => !gone.includes(ed.s) && !gone.includes(ed.e)));
     if (sel.kind === "nodes") {
       setNodes((ns) => ns.filter((n) => !sel.ids.includes(n.id)));
-      setEdges((es) => es.filter((ed) => !sel.ids.includes(ed.s) && !sel.ids.includes(ed.e)));
+      dropEdges(sel.ids);
     } else if (sel.kind === "edge") {
       setEdges((es) => es.filter((ed) => ed.id !== sel.id));
     } else if (sel.kind === "zone") {
       setZones((zs) => zs.filter((z) => z.id !== sel.id));
+      dropEdges([sel.id]);
     } else if (sel.kind === "zones") {
       setZones((zs) => zs.filter((z) => !sel.ids.includes(z.id)));
+      dropEdges(sel.ids);
+    } else if (sel.kind === "mixed") {
+      setNodes((ns) => ns.filter((n) => !sel.ids.includes(n.id)));
+      setZones((zs) => zs.filter((z) => !sel.zoneIds.includes(z.id)));
+      dropEdges([...sel.ids, ...sel.zoneIds]);
     }
     setSel(null);
   };
@@ -435,7 +462,9 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     setEdges(board.edges);
     setZones(board.zones);
     setSel(null);
-    setTimeout(() => fit(), 40);
+    // Fit from the new board directly — state hasn't flushed, so fit()/bbox()
+    // would frame the previous board.
+    fitTo(boxOf(board.nodes, board.zones));
   };
 
   const ownsId = (id, sid) => id === `${sid}__zone` || id.startsWith(`${sid}__`);
@@ -554,22 +583,40 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     return board;
   };
 
-  /* Insert a deterministic template block at a free spot on the canvas and track
-     it as a section so the AI can later reference/modify it. */
+  /* Insert a deterministic template block at the bottom-left of the existing
+     diagram (or viewport center on an empty board) and track it as a section
+     so the AI can later reference/modify it. */
   const insertTemplate = (templateId, fill) => {
     const sid = uid("sec");
     const inst = instantiateTemplate(templateId, fill || {}, { x: 0, y: 0 }, sid);
     if (!inst || !inst.nodes.length) return;
     snapshot();
     const b = bbox();
-    const p = shiftInst(inst, b ? b.x1 + 140 : 80, b ? b.y0 : 80);
+    let px, py;
+    if (b) {
+      px = b.x0;
+      py = b.y1 + 140;
+    } else {
+      const el = viewportRef.current;
+      px = (el.clientWidth / 2 - view.x) / view.k - inst.bbox.w / 2;
+      py = (el.clientHeight / 2 - view.y) / view.k - inst.bbox.h / 2;
+    }
+    const p = shiftInst(inst, px, py);
     setNodes((ns) => [...ns, ...p.nodes]);
     setEdges((es) => [...es, ...p.edges]);
     if (p.zone) setZones((zs) => [...zs, p.zone]);
     sectionsRef.current = { ...sectionsRef.current,
       [sid]: { template: templateId, fill: fill || {}, keys: p.keys, zoneId: p.zone ? p.zone.id : null } };
     setSel(null);
-    setTimeout(() => fit(), 40);
+    /* Re-frame the view around old content + the new block. Computed from the
+       placed instance directly (state hasn't flushed yet, so fit() would frame
+       the pre-insert board and leave the block off-screen). */
+    fitTo({
+      x0: Math.min(b ? b.x0 : Infinity, p.bbox.x),
+      y0: Math.min(b ? b.y0 : Infinity, p.bbox.y),
+      x1: Math.max(b ? b.x1 : -Infinity, p.bbox.x + p.bbox.w),
+      y1: Math.max(b ? b.y1 : -Infinity, p.bbox.y + p.bbox.h),
+    });
   };
 
   const sendChat = async () => {
@@ -615,22 +662,28 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const loadSeed = (key) => {
     snapshot();
     const custom = readJSON(seedKey(key));
+    let nextNodes, nextZones;
     if (custom && Array.isArray(custom.nodes)) {
-      setNodes(clone(custom.nodes));
+      nextNodes = clone(custom.nodes);
+      nextZones = clone(custom.zones || []);
+      setNodes(nextNodes);
       setEdges(clone(custom.edges || []));
-      setZones(clone(custom.zones || []));
+      setZones(nextZones);
       sectionsRef.current = custom.sections ? clone(custom.sections) : {};
     } else {
       const s = SEEDS[key];
-      setNodes(clone(s.nodes));
+      nextNodes = clone(s.nodes);
+      nextZones = clone(s.zones);
+      setNodes(nextNodes);
       setEdges(s.edges.map((ed, i) => Array.isArray(ed)
         ? { id: `e${i}`, s: ed[0], e: ed[1], lbl: ed[2] }
         : { id: `e${i}`, s: ed.s, e: ed.e, lbl: ed.lbl, ...(ed.pts ? { pts: ed.pts } : {}), ...(ed.bi ? { bi: true } : {}), ...(ed.color ? { color: ed.color } : {}) }));
-      setZones(clone(s.zones));
+      setZones(nextZones);
       sectionsRef.current = {};
     }
     setSel(null);
-    setTimeout(() => fit(), 40);
+    // Fit from the loaded data directly (fit() would see the pre-load board).
+    fitTo(boxOf(nextNodes, nextZones));
   };
 
   /* Copy the current board as pasteable SEEDS code (falls back to a download if
@@ -737,8 +790,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     }
     return { x0, y0, x1, y1 };
   };
-  const fit = () => {
-    const bb = bbox();
+  const fitTo = (bb) => {
     if (!bb) return;
     const el = viewportRef.current;
     const pad = 60, bw = bb.x1 - bb.x0 + pad * 2, bh = bb.y1 - bb.y0 + pad * 2;
@@ -746,6 +798,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     setView({ k, x: (el.clientWidth - (bb.x1 - bb.x0) * k) / 2 - bb.x0 * k,
                  y: (el.clientHeight - (bb.y1 - bb.y0) * k) / 2 - bb.y0 * k });
   };
+  const fit = () => fitTo(bbox());
 
   /* ---------- image export ---------- */
 
@@ -763,7 +816,9 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       out += `<text x="${z.x + 16}" y="${z.y - 8}" font-family="'Space Mono',monospace" font-size="11" letter-spacing="2" fill="${z.color}">${esc(z.label.toUpperCase())}</text>`;
     }
     for (const ed of edgeGeo) {
-      out += `<path d="${ed.d}" fill="none" stroke="${ed.color}" stroke-width="1.8" stroke-linecap="round" ${ed.dashed ? 'stroke-dasharray="5 6"' : ""} marker-end="url(#xarr)"${ed.bi ? ` marker-start="url(#xarr)"` : ""}/>`;
+      const dashPattern = EDGE_STYLES[ed.style]?.dash;
+      const dash = dashPattern ? `stroke-dasharray="${dashPattern}" ` : "";
+      out += `<path d="${ed.d}" fill="none" stroke="${ed.color}" stroke-width="${ed.width || EDGE_DEFAULT_WIDTH}" stroke-linecap="round" ${dash}marker-end="url(#xarr)"${ed.bi ? ` marker-start="url(#xarr)"` : ""}/>`;
       if (ed.lbl) out += `<text x="${ed.mid.x}" y="${ed.mid.y - 7}" text-anchor="middle" font-family="'Space Mono',monospace" font-size="11" fill="${surface.muted}" stroke="${surface.bg}" stroke-width="4" paint-order="stroke">${esc(ed.lbl)}</text>`;
     }
     for (const n of nodes) {
@@ -837,10 +892,12 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       const pl = elbowPath(endpointRect(ed.s), endpointRect(ed.e), ed.pts);
       const mid = plMid(pl);
       const src = a || b;                          // colour from whichever end is a node
-      const dashed = (a && TYPES[a.type].ops) || (b && TYPES[b.type].ops) || false;
-      // Per-edge override wins; otherwise inherit the source node's category accent.
+      const autoDashed = (a && TYPES[a.type].ops) || (b && TYPES[b.type].ops) || false;
+      // Per-edge overrides win; otherwise colour inherits the source node's
+      // category accent and ops-related links default to dashed.
       const color = ed.color || (src ? nodeTag(src, stages) : stages.ops);
-      return { ...ed, d: roundedPath(pl), mid, len: mid.total, color, dashed };
+      const style = ed.style || (autoDashed ? "dashed" : "solid");
+      return { ...ed, d: roundedPath(pl), mid, len: mid.total, color, style };
     }), [edges, nodeById, zoneById, stages]);
 
   // wire canvas sized to content (+margin) so nothing clips on wide diagrams
@@ -890,7 +947,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     setRouteTick((t) => t + 1);
   };
 
-  const selNodeIds = sel && sel.kind === "nodes" ? sel.ids : [];
+  const selNodeIds = sel && (sel.kind === "nodes" || sel.kind === "mixed") ? sel.ids : [];
 
   /* ---------- render ---------- */
   return (
@@ -1028,7 +1085,8 @@ export default function ElasticWhiteboard({ height = "100%" }) {
             {/* zones (behind everything) */}
             {zones.map((z) => {
               const isSingle = sel && sel.kind === "zone" && sel.id === z.id;
-              const isMulti = sel && sel.kind === "zones" && sel.ids.includes(z.id);
+              const isMulti = sel && ((sel.kind === "zones" && sel.ids.includes(z.id))
+                || (sel.kind === "mixed" && sel.zoneIds.includes(z.id)));
               return (
                 <div key={z.id} className={"ew-zone" + (isSingle || isMulti ? " sel" : "")}
                      style={{ left: z.x, top: z.y, width: z.w, height: z.h, "--zc": z.color }}>
@@ -1059,8 +1117,12 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                     <path d={ed.d} className="ew-hit"
                           onPointerDown={(e) => { e.stopPropagation(); setSel({ kind: "edge", id: ed.id }); }} />
                     <path id={`ew-${ed.id}`} d={ed.d}
-                          className={"ew-edge" + (ed.dashed ? " ew-dash" : "") + (dim ? " dim" : "") + (on || isSel ? " on" : "")}
+                          className={"ew-edge" + (dim ? " dim" : "") + (on || isSel ? " on" : "")}
                           stroke={ed.color}
+                          strokeDasharray={EDGE_STYLES[ed.style]?.dash || undefined}
+                          /* inline style so a custom width wins over the CSS
+                             default and still gets the hover/selection boost */
+                          style={ed.width ? { strokeWidth: on || isSel ? ed.width + 0.8 : ed.width } : undefined}
                           markerEnd="url(#ew-arr)"
                           markerStart={ed.bi ? "url(#ew-arr)" : undefined} />
                     {ed.lbl && (
@@ -1178,6 +1240,8 @@ export default function ElasticWhiteboard({ height = "100%" }) {
             const a = nodeById[ed.s], b = nodeById[ed.e];
             const hasShape = Array.isArray(ed.pts) && ed.pts.length > 0;
             const autoColor = a ? nodeTag(a, stages) : (b ? nodeTag(b, stages) : stages.ops);
+            const autoStyle = ((a && TYPES[a.type].ops) || (b && TYPES[b.type].ops)) ? "dashed" : "solid";
+            const lineStyle = ed.style || autoStyle;
             const setEd = (patch, guardKey) => {
               if (guardKey) snapGuard(guardKey); else snapshot();
               setEdges((es) => es.map((x) => (x.id === ed.id ? { ...x, ...patch } : x)));
@@ -1205,6 +1269,25 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                         <input type="color" value={ed.color || autoColor}
                                onChange={(e) => setEd({ color: e.target.value }, "ecol:" + ed.id)} />
                         {ed.color && <button className="ew-btn" onClick={() => setEd({ color: undefined })}>Auto</button>}
+                      </div></div>
+                    <div className="ew-frow"><span className="ew-flabel">Line</span>
+                      <div className="ew-btnrow">
+                        {Object.entries(EDGE_STYLES).map(([key, s]) => (
+                          <button key={key} className={"ew-btn" + (lineStyle === key ? " act" : "")}
+                                  onClick={() => setEd({ style: key === autoStyle ? undefined : key })}>
+                            {s.label}
+                          </button>
+                        ))}
+                      </div></div>
+                    <div className="ew-frow"><span className="ew-flabel">Width</span>
+                      <div className="ew-btnrow">
+                        {EDGE_WIDTHS.map((w) => (
+                          <button key={w.label}
+                                  className={"ew-btn" + ((ed.width || EDGE_DEFAULT_WIDTH) === w.value ? " act" : "")}
+                                  onClick={() => setEd({ width: w.value === EDGE_DEFAULT_WIDTH ? undefined : w.value })}>
+                            {w.label}
+                          </button>
+                        ))}
                       </div></div>
                     <p className="ew-ihint">Drag the hollow dots on the line to bend it; drag a solid dot to move a bend, double-click it to remove.</p>
                     <div className="ew-btnrow">
@@ -1275,6 +1358,26 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                   </section>
                   <section>
                     <button className="ew-btn danger" onClick={deleteSel}>Delete all zones</button>
+                  </section>
+                </div>
+              </div>
+            );
+          }
+          /* --- mixed nodes + zones (marquee sweep) --- */
+          if (sel.kind === "mixed") {
+            return (
+              <div className="ew-inspector" onPointerDown={(e) => e.stopPropagation()}>
+                <div className="ew-ihead">
+                  <span className="ew-idot" style={{ background: "#8A9BB4" }} />
+                  <div className="ew-ititle">
+                    <b>{sel.ids.length + sel.zoneIds.length} items selected</b>
+                    <small>{sel.ids.length} node{sel.ids.length > 1 ? "s" : ""} · {sel.zoneIds.length} zone{sel.zoneIds.length > 1 ? "s" : ""}</small>
+                  </div>
+                  <button className="ew-x" onClick={() => setSel(null)}>×</button>
+                </div>
+                <div className="ew-iscroll">
+                  <section>
+                    <button className="ew-btn danger" onClick={deleteSel}>Delete all</button>
                   </section>
                 </div>
               </div>
@@ -1531,7 +1634,16 @@ function PatternConfig({ cfg, setCfg, onInsert }) {
   const toggleIn = (key, opt, order) => {
     const cur = cfg.fill[key] || [];
     const next = cur.includes(opt) ? cur.filter((k) => k !== opt) : [...cur, opt];
-    set(key, order.filter((k) => next.includes(k))); // keep option order for determinism
+    const ordered = order.filter((k) => next.includes(k)); // keep option order for determinism
+    setCfg((c) => {
+      const fill = { ...c.fill, [key]: ordered };
+      // The frozen tier is backed by searchable snapshots, so picking it
+      // auto-enables object storage (still manually toggleable afterwards).
+      if (cfg.id === "cluster" && key === "tiers" && !cur.includes("frozen") && ordered.includes("frozen")) {
+        fill.objectStorage = true;
+      }
+      return { ...c, fill };
+    });
   };
   const disabled = conf.controls.some((c) => c.kind === "checkset" && !c.optional && !(cfg.fill[c.key] || []).length);
   return (
@@ -1580,7 +1692,11 @@ const CSS = `
   display:flex; flex-direction:column; min-height:560px; max-height:100vh;
   background:var(--bg); color:var(--ink); font-family:var(--body);
   overflow:hidden;
+  /* canvas drags (pan/marquee/move) must not start a native text selection
+     that spills into the inspector flyout */
+  user-select:none; -webkit-user-select:none;
 }
+.ew-root input, .ew-root textarea{ user-select:text; -webkit-user-select:text; }
 .ew-toolbar{ display:flex; align-items:center; gap:8px; padding:10px 14px;
   border-bottom:1px solid var(--line); background:var(--panel2); flex:none; flex-wrap:wrap; }
 .ew-title{ font-family:var(--display); font-weight:700; font-size:20px; margin-right:8px; }
@@ -1671,7 +1787,6 @@ const CSS = `
 .ew-wires{ position:absolute; left:0; top:0; overflow:visible; pointer-events:none; }
 .ew-edge{ fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round;
   opacity:.9; transition:opacity .2s, stroke-width .2s; pointer-events:none; }
-.ew-dash{ stroke-dasharray:5 6; }
 .ew-edge.dim{ opacity:.15; } .ew-edge.on{ opacity:1; stroke-width:2.6; }
 .ew-hit{ fill:none; stroke:transparent; stroke-width:14; pointer-events:stroke; cursor:pointer; }
 .ew-particle{ pointer-events:none; transition:opacity .2s; }
@@ -1761,6 +1876,7 @@ const CSS = `
 .ew-btn{ background:var(--panel); color:var(--muted); border:1px solid var(--line); border-radius:6px;
   padding:5px 10px; font-family:var(--mono); font-size:11px; cursor:pointer; display:inline-block; }
 .ew-btn:hover:not(:disabled){ border-color:var(--accent); color:var(--ink); }
+.ew-btn.act{ border-color:var(--accent); color:var(--ink); }
 .ew-btn.danger:hover:not(:disabled){ border-color:#F04E98; color:#F04E98; }
 .ew-btn:disabled{ opacity:.4; cursor:default; }
 .ew-btn input[type=file]{ display:none; }

@@ -15,8 +15,20 @@ export function useDragController(deps) {
     toWorld, snapshot, uid, rectOf,
   } = deps;
 
+  /* Canceling pointerdown suppresses the browser's default mousedown actions,
+     notably native text selection — Chrome can otherwise anchor a selection at
+     the nearest selectable text (e.g. inspector inputs) even when the drag
+     starts on a user-select:none canvas. Since that also suppresses the focus
+     change, blur any focused text field so e.g. the rename input still commits. */
+  const beginGesture = (e) => {
+    e.preventDefault();
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) ae.blur();
+  };
+
   const startPan = (e) => {
     if (e.button !== 0) return;
+    beginGesture(e);
     if (e.shiftKey) {                                  /* marquee select */
       const w = toWorld(e.clientX, e.clientY);
       dragRef.current = { mode: "marquee", x0: w.x, y0: w.y };
@@ -30,6 +42,7 @@ export function useDragController(deps) {
 
   const startMove = (e, id) => {
     if (e.button !== 0) return;
+    beginGesture(e);
     e.stopPropagation();
     if (e.shiftKey) {                                  /* toggle multi-selection */
       setSel((prev) => {
@@ -43,7 +56,6 @@ export function useDragController(deps) {
     /* manual double-click detection (pointer capture retargets clicks) */
     const now = Date.now();
     if (lastClickRef.current.id === id && now - lastClickRef.current.t < 350) {
-      e.preventDefault();                              /* keep focus on the rename input */
       lastClickRef.current = { id: null, t: 0 };
       setEditing(id);
       return;
@@ -61,6 +73,7 @@ export function useDragController(deps) {
   };
 
   const startResize = (e, id) => {
+    beginGesture(e);
     e.stopPropagation();
     const r = rectOf(nodeById[id]);
     const w0 = toWorld(e.clientX, e.clientY);
@@ -69,6 +82,7 @@ export function useDragController(deps) {
   };
 
   const startConnect = (e, id) => {
+    beginGesture(e);
     e.stopPropagation();
     const w = toWorld(e.clientX, e.clientY);
     dragRef.current = { mode: "connect", from: id };
@@ -79,6 +93,7 @@ export function useDragController(deps) {
   /* Start dragging a connector waypoint. When `insertAt` is given a new
      waypoint is inserted at `index` first (used by the "add bend" handles). */
   const startEdgePoint = (e, edgeId, index, insertAt) => {
+    beginGesture(e);
     e.stopPropagation();
     snapshot();
     if (insertAt) {
@@ -96,6 +111,7 @@ export function useDragController(deps) {
 
   const startZoneMove = (e, id) => {
     if (e.button !== 0) return;
+    beginGesture(e);
     e.stopPropagation();
     if (e.shiftKey) {                                  /* toggle multi-zone selection */
       setSel((prev) => {
@@ -111,19 +127,23 @@ export function useDragController(deps) {
     setSel({ kind: "zone", id });
     const z = zones.find((x) => x.id === id);
     const w = toWorld(e.clientX, e.clientY);
-    /* zone drags its contents: capture nodes whose centers are inside */
+    /* zone drags its contents: capture nodes whose centers are inside.
+       Alt+drag moves the zone frame alone, leaving its contents in place. */
     const nstarts = {};
-    for (const n of nodes) {
-      const r = rectOf(n);
-      const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
-      if (cx >= z.x && cx <= z.x + z.w && cy >= z.y && cy <= z.y + z.h)
-        nstarts[n.id] = { x: n.x, y: n.y };
+    if (!e.altKey) {
+      for (const n of nodes) {
+        const r = rectOf(n);
+        const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+        if (cx >= z.x && cx <= z.x + z.w && cy >= z.y && cy <= z.y + z.h)
+          nstarts[n.id] = { x: n.x, y: n.y };
+      }
     }
     dragRef.current = { mode: "zmove", id, zx: z.x, zy: z.y, nstarts, px: w.x, py: w.y, snapped: false };
     viewportRef.current.setPointerCapture(e.pointerId);
   };
 
   const startZoneResize = (e, id) => {
+    beginGesture(e);
     e.stopPropagation();
     const z = zones.find((x) => x.id === id);
     const w = toWorld(e.clientX, e.clientY);
@@ -233,7 +253,18 @@ export function useDragController(deps) {
         const r = rectOf(n);
         return r.x < x1 && r.x + r.w > x0 && r.y < y1 && r.y + r.h > y0;
       }).map((n) => n.id);
-      setSel(ids.length ? { kind: "nodes", ids } : null);
+      /* zones join the selection only when fully enclosed, so sweeping a few
+         nodes inside a large zone doesn't accidentally grab the zone frame */
+      const zoneIds = zones.filter((z) =>
+        z.x >= x0 && z.y >= y0 && z.x + z.w <= x1 && z.y + z.h <= y1
+      ).map((z) => z.id);
+      setSel(
+        ids.length && zoneIds.length ? { kind: "mixed", ids, zoneIds }
+        : ids.length ? { kind: "nodes", ids }
+        : zoneIds.length > 1 ? { kind: "zones", ids: zoneIds }
+        : zoneIds.length === 1 ? { kind: "zone", id: zoneIds[0] }
+        : null
+      );
       setMarquee(null);
     }
   };
