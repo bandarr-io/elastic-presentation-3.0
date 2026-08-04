@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../context/ThemeContext";
 import { buildCatalog, describeDoc, describeSections, buildTool, systemPrompt, runLLM } from "../utils/whiteboardAI";
 import { buildFromSections, instantiateTemplate, sectionEndpoint, TEMPLATE_MENU, TEMPLATE_CONFIG, defaultFill } from "../data/whiteboardTemplates";
-import { STAGE_PALETTES, SURFACES, CATS, CAT_COLORS, TYPES, tagOf, SEEDS, isAnnotation } from "../data/whiteboardTypes";
+import { STAGE_PALETTES, SURFACES, CATS, CAT_COLORS, TYPES, tagOf, SEEDS,
+         NODE_W, NODE_H } from "../data/whiteboardTypes";
 import { encodeBoard, decodeBoard, boardParamFromHash, shareUrl } from "../utils/whiteboardShare";
 import { tidyLayout, validateBoard, capacityTotals, formatTB } from "../utils/whiteboardAnalysis";
+import { parseClusterInput, summarizeCluster, clusterToBoard } from "../utils/whiteboardImport";
 import { anchor, elbowPath, roundedPath, plMid, snap } from "../utils/whiteboardGeometry";
 import { useHistory } from "./whiteboard/useHistory";
 import { useDragController } from "./whiteboard/useDragController";
@@ -298,6 +300,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const [fileMenu, setFileMenu] = useState(false);    // export/import dropdown open
   const [exportChrome, setExportChrome] = useState(true); // title block + legend on exports
   const [reviewOpen, setReviewOpen] = useState(false);    // capacity + validation panel
+  const [importOpen, setImportOpen] = useState(false);    // paste-a-real-cluster dialog
   const [seedNote, setSeedNote] = useState("");       // transient "saved" confirmation
   const [routeTick, setRouteTick] = useState(0);     // forces a full re-route after a drag ends
 
@@ -1289,6 +1292,18 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const warnCount = warnings.filter((w) => w.level === "warn").length;
   const hasTotals = totals.count > 0 || totals.cpu > 0 || totals.mem > 0 || warnings.length > 0;
 
+  /* Turn a parsed cluster into a fresh named board. Importing never overwrites
+     what's on screen — a discovery paste shouldn't cost you your sketch. */
+  const importCluster = (parsed) => {
+    const built = clusterToBoard(parsed, { nodeW: NODE_W, nodeH: NODE_H });
+    if (!built) return;
+    setImportOpen(false);
+    createBoard(nextBoardName(built.summary.clusterName || "Imported cluster"),
+                { ...built.board, view: { ...DEFAULT_VIEW }, sections: {} });
+    fitTo(boxOf(built.board.nodes, built.board.zones));
+    flashSeedNote(`Imported ${built.summary.total} nodes from ${built.summary.source}`);
+  };
+
   /* A one-line sizing summary of the board, shaped for the Pricing / ROM
      scene's description column. */
   const sizingSummary = () => {
@@ -1418,6 +1433,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 <div className="ew-menu-sep" />
                 <div className="ew-menu-h">Import</div>
                 <button onClick={() => { fileRef.current.click(); setFileMenu(false); }}>Import JSON…</button>
+                <button onClick={() => { setImportOpen(true); setFileMenu(false); }}>Import a real cluster…</button>
               </div>
             </>
           )}
@@ -1476,6 +1492,8 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         )}
         <span className="ew-hint">shift-drag select · ⌘C/⌘V copy · ⌘D duplicate · arrows nudge · ⌘Z undo · drag ring to connect</span>
       </div>
+
+      {importOpen && <ClusterImport onClose={() => setImportOpen(false)} onImport={importCluster} />}
 
       <div className="ew-body">
         {/* palette */}
@@ -2190,6 +2208,60 @@ function PaletteItem({ k, t, start, stages }) {
   );
 }
 
+/* Paste real Elasticsearch output and preview what it would draw before
+   committing it to a new board. */
+function ClusterImport({ onClose, onImport }) {
+  const [text, setText] = useState("");
+  const parsed = useMemo(() => parseClusterInput(text), [text]);
+  const summary = useMemo(() => (parsed ? summarizeCluster(parsed) : null), [parsed]);
+
+  return (
+    <>
+      <div className="ew-modal-backdrop" onClick={onClose} />
+      <div className="ew-modal">
+        <div className="ew-modal-h">
+          <b>Import a real cluster</b>
+          <button className="ew-x" onClick={onClose}>×</button>
+        </div>
+        <div className="ew-modal-body">
+          <p className="ew-modal-hint">
+            Paste the output of <code>GET _cat/nodes?v</code>, <code>GET _nodes</code>, or{" "}
+            <code>GET _cluster/stats</code> from Kibana Dev Tools. Nothing leaves the browser.
+          </p>
+          <textarea className="ew-itext ew-modal-input" autoFocus value={text} rows={11}
+                    spellCheck={false}
+                    placeholder={"name        node.role ram.max disk.total\nes-hot-1    himr      62.9gb  2tb\nes-master-1 mr        15.7gb  100gb"}
+                    onChange={(e) => setText(e.target.value)} />
+          {text.trim() && !summary && (
+            <p className="ew-modal-bad">Couldn't read that. For <code>_cat/nodes</code>, include the header row (the <code>?v</code> flag).</p>
+          )}
+          {summary && (
+            <div className="ew-modal-preview">
+              <b>{summary.total} nodes</b> from <code>{summary.source}</code>
+              {summary.clusterName && <> · {summary.clusterName}</>}
+              <ul>
+                {summary.groups.map((g) => (
+                  <li key={g.type}>
+                    <span>{TYPES[g.type].label}</span>
+                    <em>{g.count} × {g.cpu ? `${g.cpu} vCPU, ` : ""}{g.ramGB ? `${g.ramGB} GB` : "—"}{g.diskTB ? `, ${g.diskTB} TB` : ""}</em>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+        <div className="ew-modal-foot">
+          <span className="ew-ihint">Imports into a new board — your current one is untouched.</span>
+          <button className="ew-btn" onClick={onClose}>Cancel</button>
+          <button className="ew-btn primary" disabled={!summary} onClick={() => onImport(parsed)}>
+            Create board
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 /* Inline config form for a Patterns block: renders checkbox sets / toggles from
    the template's control schema, then inserts a fully deterministic block. */
 function PatternConfig({ cfg, setCfg, onInsert }) {
@@ -2276,6 +2348,33 @@ const CSS = `
 .ew-totals.on{ border-color:var(--accent) !important; }
 .ew-warncount{ background:#E7664C; color:#fff; border-radius:99px; min-width:16px; height:16px;
   display:inline-flex; align-items:center; justify-content:center; font-size:10px; padding:0 4px; }
+/* modal dialogs (cluster import) */
+.ew-modal-backdrop{ position:fixed; inset:0; z-index:60; background:rgba(6,10,22,.62); }
+.ew-modal{ position:fixed; z-index:61; top:50%; left:50%; transform:translate(-50%,-50%);
+  width:min(620px, calc(100vw - 48px)); max-height:calc(100vh - 96px); display:flex; flex-direction:column;
+  background:var(--panel); border:1px solid var(--line); border-radius:13px;
+  box-shadow:0 30px 70px rgba(0,0,0,.55); }
+.ew-modal-h{ display:flex; align-items:center; gap:8px; padding:13px 10px 13px 17px;
+  border-bottom:1px solid var(--line); }
+.ew-modal-h b{ flex:1; font-family:var(--display); font-weight:500; font-size:15px; }
+.ew-modal-body{ padding:15px 17px; overflow:auto; display:grid; gap:11px; }
+.ew-modal-hint{ margin:0; font-size:12px; color:var(--muted); line-height:1.5; }
+.ew-modal-hint code, .ew-modal-bad code, .ew-modal-preview code{ font-family:var(--mono); font-size:11px;
+  background:var(--panel2); border:1px solid var(--line); border-radius:4px; padding:1px 5px; }
+.ew-modal-input{ font-family:var(--mono); font-size:11.5px; line-height:1.5; white-space:pre; }
+.ew-modal-bad{ margin:0; font-size:12px; color:#E7664C; line-height:1.5; }
+.ew-modal-preview{ font-size:12.5px; color:var(--muted); background:var(--panel2);
+  border:1px solid var(--line); border-radius:8px; padding:11px 13px; }
+.ew-modal-preview b{ color:var(--ink); font-family:var(--display); font-weight:500; }
+.ew-modal-preview ul{ margin:8px 0 0; padding:0; list-style:none; display:grid; gap:4px; }
+.ew-modal-preview li{ display:flex; justify-content:space-between; gap:12px; }
+.ew-modal-preview li span{ color:var(--ink); }
+.ew-modal-preview li em{ font-style:normal; font-family:var(--mono); font-size:11px; }
+.ew-modal-foot{ display:flex; align-items:center; gap:9px; padding:12px 17px;
+  border-top:1px solid var(--line); }
+.ew-modal-foot .ew-ihint{ flex:1; margin:0; }
+.ew-btn.primary{ background:var(--accent); border-color:var(--accent); color:#0C1530; }
+.ew-btn.primary:disabled{ opacity:.35; }
 /* capacity + architecture review, floating over the canvas */
 .ew-review{ position:absolute; left:14px; bottom:14px; z-index:20; width:330px;
   max-height:min(62%, 560px); display:flex; flex-direction:column;
