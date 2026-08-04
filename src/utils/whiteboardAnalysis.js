@@ -190,13 +190,14 @@ export function capacityTotals(nodes = []) {
   for (const { type, label } of TIERS) {
     const tierNodes = real.filter((n) => n.type === type);
     if (!tierNodes.length) continue;
-    let count = 0, storageTB = 0;
+    let count = 0, storageTB = 0, mem = 0;
     for (const n of tierNodes) {
       const nodeCount = num(prop(n, "nodes")) || 1;
       count += nodeCount;
       storageTB += parseCapacityTB(prop(n, "capacity")) * nodeCount;
+      mem += num(prop(n, "mem")) * nodeCount;
     }
-    totals.tiers.push({ type, label, count, storageTB });
+    totals.tiers.push({ type, label, count, storageTB, mem });
     totals.storageTB += storageTB;
   }
 

@@ -7,6 +7,7 @@ import { STAGE_PALETTES, SURFACES, CATS, CAT_COLORS, TYPES, tagOf, SEEDS,
 import { encodeBoard, decodeBoard, boardParamFromHash, shareUrl } from "../utils/whiteboardShare";
 import { tidyLayout, validateBoard, capacityTotals, formatTB } from "../utils/whiteboardAnalysis";
 import { parseClusterInput, summarizeCluster, clusterToBoard } from "../utils/whiteboardImport";
+import { sizeCluster, romRows, romTSV, RU_GB, SIZING_TIERS, SIZING_DEFAULTS } from "../utils/whiteboardSizing";
 import { INK_COLORS, INK_WIDTH, INK_MIN_STEP, inkPath, stepCountOf,
          visibleAtStep, wrapText } from "../utils/whiteboardPresenting";
 import { useSceneMotion } from "../hooks/useSceneMotion";
@@ -312,6 +313,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const [exportChrome, setExportChrome] = useState(true); // title block + legend on exports
   const [reviewOpen, setReviewOpen] = useState(false);    // capacity + validation panel
   const [importOpen, setImportOpen] = useState(false);    // paste-a-real-cluster dialog
+  const [sizeOpen, setSizeOpen] = useState(false);        // ingest -> node count calculator
   const [seedNote, setSeedNote] = useState("");       // transient "saved" confirmation
   const [routeTick, setRouteTick] = useState(0);     // forces a full re-route after a drag ends
 
@@ -888,6 +890,14 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     return board;
   };
 
+  /* World coordinates at the middle of the visible canvas. */
+  const centerOfViewport = () => {
+    const el = viewportRef.current;
+    if (!el) return { x: 0, y: 0 };
+    return { x: (el.clientWidth / 2 - view.x) / view.k,
+             y: (el.clientHeight / 2 - view.y) / view.k };
+  };
+
   /* Insert a deterministic template block at the bottom-left of the existing
      diagram (or viewport center on an empty board) and track it as a section
      so the AI can later reference/modify it. */
@@ -902,9 +912,9 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       px = b.x0;
       py = b.y1 + 140;
     } else {
-      const el = viewportRef.current;
-      px = (el.clientWidth / 2 - view.x) / view.k - inst.bbox.w / 2;
-      py = (el.clientHeight / 2 - view.y) / view.k - inst.bbox.h / 2;
+      const c = centerOfViewport();
+      px = c.x - inst.bbox.w / 2;
+      py = c.y - inst.bbox.h / 2;
     }
     const p = shiftInst(inst, px, py);
     setNodes((ns) => [...ns, ...p.nodes]);
@@ -1080,9 +1090,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
   const addZone = () => {
     snapshot();
-    const el = viewportRef.current;
-    const cx = (el.clientWidth / 2 - view.x) / view.k;
-    const cy = (el.clientHeight / 2 - view.y) / view.k;
+    const { x: cx, y: cy } = centerOfViewport();
     const id = uid("z");
     setZones((zs) => [...zs, { id, x: snap(cx - 220), y: snap(cy - 150), w: 440, h: 300, label: "Zone", color: "#FEC514" }]);
     setSel({ kind: "zone", id });
@@ -1443,6 +1451,53 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     flashSeedNote(`Imported ${built.summary.total} nodes from ${built.summary.source}`);
   };
 
+  /* Draw the output of the sizing calculator: one box per tier, stacked in
+     ILM order inside a zone labelled with the inputs that produced it. The
+     numbers land on the nodes themselves, so the capacity rollup and the
+     quote lines pick them up straight away. */
+  const drawSizing = (result) => {
+    if (!result.tiers.length) return;
+    const gap = 24;
+    const built = result.tiers.map((t, i) => ({
+      id: uid("n"),
+      type: t.type,
+      x: 0,
+      y: i * (NODE_H + gap),
+      props: {
+        nodes: t.nodes,
+        capacity: formatTB(t.perNodeTB),
+        mem: result.input.nodeRAM,
+      },
+    }));
+    const edges = built.slice(1).map((n, i) => ({ id: uid("e"), s: built[i].id, e: n.id, lbl: "ILM" }));
+    const pad = 28;
+    const inner = { w: NODE_W, h: built.length * NODE_H + (built.length - 1) * gap };
+    const zone = {
+      id: uid("z"),
+      x: -pad, y: -pad - 18,
+      w: inner.w + pad * 2, h: inner.h + pad * 2 + 18,
+      label: `${result.input.dailyGB} GB/day · ${result.retentionDays} day retention`,
+      color: "#00BFB3",
+    };
+
+    snapshot();
+    const b = bbox();
+    const dx = snap(b ? b.x0 : centerOfViewport().x - inner.w / 2);
+    const dy = snap(b ? b.y1 + 140 : centerOfViewport().y - inner.h / 2);
+    setNodes((ns) => [...ns, ...built.map((n) => ({ ...n, x: n.x + dx, y: n.y + dy }))]);
+    setEdges((es) => [...es, ...edges]);
+    setZones((zs) => [...zs, { ...zone, x: zone.x + dx, y: zone.y + dy }]);
+    setSel(null);
+    setSizeOpen(false);
+    fitTo({
+      x0: Math.min(b ? b.x0 : Infinity, zone.x + dx),
+      y0: Math.min(b ? b.y0 : Infinity, zone.y + dy),
+      x1: Math.max(b ? b.x1 : -Infinity, zone.x + dx + zone.w),
+      y1: Math.max(b ? b.y1 : -Infinity, zone.y + dy + zone.h),
+    });
+    flashSeedNote(`Sized ${result.nodes} nodes for ${formatTB(result.dataTB)} of data`);
+  };
+
   /* A one-line sizing summary of the board, shaped for the Pricing / ROM
      scene's description column. */
   const sizingSummary = () => {
@@ -1456,13 +1511,21 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     if (totals.mem) parts.push(`${totals.mem} GB RAM`);
     return parts.join(" · ");
   };
-  const copySizing = () => {
-    const text = sizingSummary();
-    if (!text) return flashSeedNote("Set node counts and capacities first");
+  const copyToClipboard = (text, ok, empty) => {
+    if (!text) return flashSeedNote(empty);
     navigator.clipboard?.writeText(text).then(
-      () => flashSeedNote("Sizing copied — paste into Pricing / ROM"),
-      () => flashSeedNote("Couldn't copy the sizing summary"));
+      () => flashSeedNote(ok),
+      () => flashSeedNote("Couldn't reach the clipboard"));
   };
+  const copySizing = () =>
+    copyToClipboard(sizingSummary(), "Sizing summary copied",
+                    "Set node counts and capacities first");
+  /* Quote lines the ROM builder's paste importer understands, so a drawn
+     architecture lands in the pricing scene as real rows. */
+  const copyRom = () =>
+    copyToClipboard(romTSV(romRows(totals)),
+                    "Quote lines copied — paste into Pricing / ROM",
+                    "Set Memory on the nodes first — resource units are priced per 64 GB");
 
   /* Lay every component out in left-to-right data-flow lanes. Zones are left
      alone: they'd need re-fitting around content that has moved, and the user
@@ -1640,6 +1703,8 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         <button onClick={() => zoomBy(1.2)}>+</button>
         <button onClick={fit}>Fit</button>
         <button onClick={tidyBoard} title="Lay components out in data-flow lanes">Tidy</button>
+        <button onClick={() => setSizeOpen(true)}
+                title="Work out node counts from ingest volume and retention">Size…</button>
         <span className="ew-gap" />
         <InkTools tool={tool} setTool={setTool} color={inkColor} setColor={setInkColor}
                   onClear={clearInk} hasInk={ink.length > 0} />
@@ -1661,6 +1726,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       )}
 
       {importOpen && <ClusterImport onClose={() => setImportOpen(false)} onImport={importCluster} />}
+      {sizeOpen && <SizingCalculator onClose={() => setSizeOpen(false)} onDraw={drawSizing} />}
 
       <div className="ew-body">
         {/* palette */}
@@ -1952,9 +2018,13 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 )}
                 <p className="ew-ihint">Capacity is per node — set Nodes and Capacity on each tier.</p>
                 <div className="ew-btnrow">
+                  <button className="ew-btn" onClick={copyRom}
+                          title={`Copy ${RU_GB} GB resource-unit line items to paste into the Pricing / ROM builder`}>
+                    Copy quote lines
+                  </button>
                   <button className="ew-btn" onClick={copySizing}
-                          title="Copy a sizing summary to paste into the Pricing / ROM scene">
-                    Copy sizing for Pricing/ROM
+                          title="Copy a one-line sizing summary">
+                    Copy summary
                   </button>
                 </div>
                 <div className="ew-review-checks">
@@ -2509,6 +2579,84 @@ function ClusterImport({ onClose, onImport }) {
   );
 }
 
+/* Sizing calculator: the arithmetic an SA does on a napkin before drawing.
+   Ingest rate and retention per tier in, node counts out, then draw it. */
+function SizingCalculator({ onClose, onDraw }) {
+  const [input, setInput] = useState(SIZING_DEFAULTS);
+  const result = useMemo(() => sizeCluster(input), [input]);
+  const set = (key, value) => setInput((prev) => ({ ...prev, [key]: value }));
+  const setDays = (key, value) =>
+    setInput((prev) => ({ ...prev, days: { ...prev.days, [key]: value } }));
+
+  const num = (label, key, props) => (
+    <label className="ew-size-f">
+      <span>{label}</span>
+      <input className="ew-itext" type="number" min="0" value={input[key]}
+             onChange={(e) => set(key, e.target.value)} {...props} />
+    </label>
+  );
+
+  return (
+    <>
+      <div className="ew-modal-backdrop" onClick={onClose} />
+      <div className="ew-modal ew-modal-wide">
+        <div className="ew-modal-h">
+          <b>Size a cluster</b>
+          <button className="ew-x" onClick={onClose}>×</button>
+        </div>
+        <div className="ew-modal-body">
+          <div className="ew-size-grid">
+            {num("Ingest", "dailyGB", { step: 10 })}
+            {num("Replicas", "replicas", { max: 3, step: 1 })}
+            {num("Index overhead", "overhead", { step: 0.1 })}
+            {num("RAM per node", "nodeRAM", { step: 8 })}
+          </div>
+          <p className="ew-ihint">
+            Ingest in GB/day of raw data. Overhead is index size against raw — about 1:1 for
+            logs with default mappings, less with synthetic <code>_source</code>.
+          </p>
+
+          <div className="ew-size-grid">
+            {SIZING_TIERS.map((t) => (
+              <label className="ew-size-f" key={t.key}>
+                <span><span className="ew-swatch" style={{ background: TYPES[t.type].color }} />{t.label}</span>
+                <input className="ew-itext" type="number" min="0" step="5" value={input.days[t.key]}
+                       onChange={(e) => setDays(t.key, e.target.value)} />
+              </label>
+            ))}
+          </div>
+          <p className="ew-ihint">Days held in each tier. Cold and frozen mount searchable snapshots, so replicas don't multiply their storage.</p>
+
+          {result.tiers.length > 0 ? (
+            <div className="ew-modal-preview">
+              <b>{result.nodes} nodes</b> · {formatTB(result.dataTB)} on disk · {result.ramGB} GB RAM
+              {result.objectStoreTB > 0 && <> · {formatTB(result.objectStoreTB)} in object storage</>}
+              <ul>
+                {result.tiers.map((t) => (
+                  <li key={t.key}>
+                    <span>{t.label} · {t.days} days</span>
+                    <em>{t.nodes} × {formatTB(t.perNodeTB)} = {formatTB(t.dataTB)}</em>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="ew-modal-bad">Set an ingest rate and at least one tier's retention.</p>
+          )}
+        </div>
+        <div className="ew-modal-foot">
+          <span className="ew-ihint">Adds a tier column to the current board.</span>
+          <button className="ew-btn" onClick={onClose}>Cancel</button>
+          <button className="ew-btn primary" disabled={!result.tiers.length}
+                  onClick={() => onDraw(result)}>
+            Draw it
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 /* Inline config form for a Patterns block: renders checkbox sets / toggles from
    the template's control schema, then inserts a fully deterministic block. */
 function PatternConfig({ cfg, setCfg, onInsert }) {
@@ -2619,6 +2767,7 @@ const CSS = `
   width:min(620px, calc(100vw - 48px)); max-height:calc(100vh - 96px); display:flex; flex-direction:column;
   background:var(--panel); border:1px solid var(--line); border-radius:13px;
   box-shadow:0 30px 70px rgba(0,0,0,.55); }
+.ew-modal-wide{ width:min(700px, calc(100vw - 48px)); }
 .ew-modal-h{ display:flex; align-items:center; gap:8px; padding:13px 10px 13px 17px;
   border-bottom:1px solid var(--line); }
 .ew-modal-h b{ flex:1; font-family:var(--display); font-weight:500; font-size:15px; }
@@ -2666,6 +2815,11 @@ const CSS = `
 .ew-check.info{ border-left-color:#4C8DFF; }
 .ew-check b{ font-family:var(--display); font-weight:500; font-size:12.5px; }
 .ew-check span{ font-size:11px; color:var(--muted); line-height:1.45; }
+.ew-size-grid{ display:grid; grid-template-columns:repeat(4, 1fr); gap:9px; }
+.ew-size-f{ display:grid; gap:4px; }
+.ew-size-f > span{ display:flex; align-items:center; gap:5px; font-size:9.5px; font-family:var(--mono);
+  letter-spacing:.06em; text-transform:uppercase; color:var(--faint); }
+.ew-size-f input{ width:100%; }
 .ew-hint{ font-family:var(--mono); font-size:10.5px; color:var(--faint); }
 .ew-menuwrap{ position:relative; display:inline-flex; }
 .ew-menu-backdrop{ position:fixed; inset:0; z-index:40; }

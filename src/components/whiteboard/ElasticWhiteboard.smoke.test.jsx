@@ -132,6 +132,47 @@ describe('ElasticWhiteboard', () => {
     expect(root.querySelectorAll('.ew-node').length).toBe(revealed)
   })
 
+  it('draws the sizing calculator output onto the board', () => {
+    mount()
+    fireEvent.click(btn(/My board/))
+    fireEvent.click(btn('+ New blank board'))
+    fireEvent.click(btn('Size…'))
+    expect(root.querySelector('.ew-modal-preview').textContent).toContain('nodes')
+
+    fireEvent.click(btn('Draw it'))
+    expect(root.querySelector('.ew-modal')).toBeNull()
+
+    const tiers = [...root.querySelectorAll('.ew-node')]
+    // the default policy is hot / cold / frozen, wired together by ILM
+    expect(tiers).toHaveLength(3)
+    expect(text('.ew-elbl')).toEqual(['ILM', 'ILM'])
+    expect(root.querySelector('.ew-zlabel').textContent).toContain('GB/day')
+  })
+
+  it('copies quote lines the pricing builder can parse', async () => {
+    const writeText = vi.fn().mockResolvedValue()
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+
+    mount()
+    fireEvent.click(btn(/My board/))
+    fireEvent.click(btn('+ New blank board'))
+    fireEvent.click(btn('Size…'))
+    fireEvent.click(btn('Draw it'))
+
+    fireEvent.click(root.querySelector('.ew-totals'))
+    fireEvent.click(btn('Copy quote lines'))
+    expect(writeText).toHaveBeenCalledOnce()
+
+    const rows = writeText.mock.calls[0][0].split('\n')
+    expect(rows).toHaveLength(3)
+    for (const row of rows) {
+      const cols = row.split('\t')
+      expect(cols).toHaveLength(5)
+      expect(cols[0]).toContain('Resource Unit')
+      expect(Number(cols[2])).toBeGreaterThan(0)
+    }
+  })
+
   it('imports a pasted cluster into its own board', () => {
     mount()
     fireEvent.click(btn(/^File/))
