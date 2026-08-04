@@ -8,6 +8,7 @@ import { encodeBoard, decodeBoard, boardParamFromHash, shareUrl } from "../utils
 import { tidyLayout, flowHops, validateBoard, capacityTotals, formatTB } from "../utils/whiteboardAnalysis";
 import { parseClusterInput, summarizeCluster, clusterToBoard } from "../utils/whiteboardImport";
 import { sizeCluster, romRows, romTSV, RU_GB, SIZING_TIERS, SIZING_DEFAULTS } from "../utils/whiteboardSizing";
+import { diffBoards, diffMarks } from "../utils/whiteboardDiff";
 import { INK_COLORS, INK_WIDTH, INK_MIN_STEP, inkPath, stepCountOf,
          visibleAtStep, wrapText } from "../utils/whiteboardPresenting";
 import { useSceneMotion } from "../hooks/useSceneMotion";
@@ -1470,6 +1471,25 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   /* A trace only makes sense over the board being presented. */
   useEffect(() => { if (!present) setHop(null); }, [present]);
 
+  /* ---------- comparison ----------
+     Hold this board against another one — the current-state sketch, or the
+     cluster imported from a customer's diagnostics — and show the delta. */
+  const [compareId, setCompareId] = useState(null);
+  const comparison = useMemo(() => {
+    const against = boardIndex.boards.find((b) => b.id === compareId);
+    if (!against) return null;
+    const baseline = readJSON(boardKey(compareId));
+    if (!baseline) return null;
+    return { name: against.name, diff: diffBoards({ nodes }, baseline) };
+  }, [compareId, nodes, boardIndex]);
+  const marks = useMemo(() => (comparison ? diffMarks(comparison.diff) : null), [comparison]);
+
+  const startCompare = (id) => { flushActiveBoard(); setCompareId(id); setBoardMenu(false); };
+  const stopCompare = () => { setCompareId(null); setBoardMenu(false); };
+  /* Comparing against a board you've just switched to or deleted makes no
+     sense, so the pairing drops when either side moves. */
+  useEffect(() => { setCompareId(null); }, [activeBoardId]);
+
   const totals = useMemo(() => capacityTotals(nodes), [nodes]);
   const warnings = useMemo(() => validateBoard(nodes, edges), [nodes, edges]);
   const warnCount = warnings.filter((w) => w.level === "warn").length;
@@ -1678,6 +1698,20 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 <button onClick={() => { setBoardMenu(false); setRenaming(true); }}>Rename this board…</button>
                 <button disabled={boardIndex.boards.length < 2}
                         onClick={() => deleteBoard(activeBoardId)}>Delete this board</button>
+                {boardIndex.boards.length > 1 && (
+                  <>
+                    <div className="ew-menu-sep" />
+                    <div className="ew-menu-h">Compare this board with</div>
+                    {boardIndex.boards.filter((b) => b.id !== activeBoardId).map((b) => (
+                      <button key={b.id} className={"ew-cmp" + (b.id === compareId ? " act" : "")}
+                              onClick={() => startCompare(b.id)}>
+                        {b.name}
+                      </button>
+                    ))}
+                    {compareId && <button onClick={stopCompare}>Stop comparing</button>}
+                    <div className="ew-menu-note">Shows what this board adds, drops, and resizes</div>
+                  </>
+                )}
               </div>
             </>
           )}
@@ -1957,7 +1991,8 @@ export default function ElasticWhiteboard({ height = "100%" }) {
               return (
                 <div key={n.id}
                      className={(ann ? `ew-ann ew-ann-${ann}` : "ew-node")
-                       + (isSel ? " sel" : "") + (dim ? " dim" : "") + (ghosted(n) ? " ghost" : "")}
+                       + (isSel ? " sel" : "") + (dim ? " dim" : "") + (ghosted(n) ? " ghost" : "")
+                       + (marks && marks[n.id] ? ` diff-${marks[n.id]}` : "")}
                      style={{ left: n.x, top: n.y, width: r.w, height: r.h,
                               "--tag": nodeTag(n, stages),
                               ...(ann === "text" ? { color: n.color || surface.ink } : null) }}
@@ -2043,6 +2078,51 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 width: Math.abs(marquee.x1 - marquee.x0), height: Math.abs(marquee.y1 - marquee.y0) }} />
             )}
           </div>
+
+          {comparison && !present && (
+            <div className="ew-review ew-diff" onPointerDown={(e) => e.stopPropagation()}>
+              <div className="ew-review-h">
+                <b>vs {comparison.name}</b>
+                <button className="ew-x" onClick={stopCompare}>×</button>
+              </div>
+              <div className="ew-review-body">
+                {comparison.diff.capacity.length > 0 && (
+                  <table className="ew-review-tiers">
+                    <tbody>
+                      {comparison.diff.capacity.map((l) => (
+                        <tr key={l.label}>
+                          <td>{l.label}</td>
+                          <td className={l.delta > 0 ? "up" : l.delta < 0 ? "down" : ""}>{l.text}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {[
+                  { kind: "added", title: "Added", entries: comparison.diff.added },
+                  { kind: "changed", title: "Resized", entries: comparison.diff.changed },
+                  { kind: "removed", title: "Dropped", entries: comparison.diff.removed },
+                ].filter((g) => g.entries.length).map((g) => (
+                  <div className="ew-diff-group" key={g.kind}>
+                    <div className={"ew-diff-h " + g.kind}>{g.title} · {g.entries.length}</div>
+                    {g.entries.map((entry, i) => (
+                      <div className="ew-diff-row" key={`${entry.key}-${i}`}>
+                        <b>{entry.label}</b>
+                        {entry.fields && (
+                          <span>{entry.fields.map((f) =>
+                            `${f.label} ${f.from ?? "—"} → ${f.to ?? "—"}`).join(" · ")}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                <p className="ew-ihint">
+                  {comparison.diff.unchanged} component{comparison.diff.unchanged === 1 ? "" : "s"} unchanged.
+                  Dropped ones aren't on this board, so nothing is highlighted for them.
+                </p>
+              </div>
+            </div>
+          )}
 
           {reviewOpen && (
             <div className="ew-review" onPointerDown={(e) => e.stopPropagation()}>
@@ -2869,6 +2949,22 @@ const CSS = `
 .ew-check.info{ border-left-color:#4C8DFF; }
 .ew-check b{ font-family:var(--display); font-weight:500; font-size:12.5px; }
 .ew-check span{ font-size:11px; color:var(--muted); line-height:1.45; }
+.ew-diff{ left:auto; right:14px; }
+.ew-diff .ew-review-tiers td:last-child{ color:var(--muted); }
+.ew-diff .ew-review-tiers td.up{ color:var(--accent); }
+.ew-diff .ew-review-tiers td.down{ color:#E7664C; }
+.ew-diff-group{ display:grid; gap:3px; }
+.ew-diff-h{ font-family:var(--mono); font-size:9.5px; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--faint); padding-bottom:2px; }
+.ew-diff-h.added{ color:var(--accent); }
+.ew-diff-h.changed{ color:#FEC514; }
+.ew-diff-h.removed{ color:#E7664C; }
+.ew-diff-row{ display:grid; gap:1px; padding:5px 9px; border-radius:6px; background:var(--panel2); }
+.ew-diff-row b{ font-family:var(--display); font-weight:500; font-size:12px; }
+.ew-diff-row span{ font-family:var(--mono); font-size:10.5px; color:var(--muted); }
+/* diff tint on the canvas — an outline, so it reads over the category colour */
+.ew-node.diff-added, .ew-ann.diff-added{ box-shadow:0 0 0 2px var(--accent); }
+.ew-node.diff-changed, .ew-ann.diff-changed{ box-shadow:0 0 0 2px #FEC514; }
 .ew-size-grid{ display:grid; grid-template-columns:repeat(4, 1fr); gap:9px; }
 .ew-size-f{ display:grid; gap:4px; }
 .ew-size-f > span{ display:flex; align-items:center; gap:5px; font-size:9.5px; font-family:var(--mono);

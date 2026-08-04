@@ -25,6 +25,19 @@ const btn = (label) => {
   return match
 }
 const text = (selector) => [...root.querySelectorAll(selector)].map((el) => el.textContent.trim())
+const inspectorField = (label) => {
+  const row = [...root.querySelectorAll('.ew-inspector .ew-frow')]
+    .find((r) => r.querySelector('.ew-flabel').textContent.trim() === label)
+  if (!row) throw new Error(`no inspector field labelled ${label}`)
+  return row.querySelector('input, select')
+}
+/* the open-a-board and compare-with lists hold the same names, so compare
+   targets are picked out by their own class */
+const compareWith = (name) => {
+  const match = [...root.querySelectorAll('.ew-cmp')].find((b) => b.textContent.trim() === name)
+  if (!match) throw new Error(`no compare target named ${name}`)
+  return match
+}
 const boardIndex = () => JSON.parse(localStorage.getItem('ew-boards'))
 const storedBoard = (id) => JSON.parse(localStorage.getItem(`ew-board-${id}`))
 
@@ -130,6 +143,45 @@ describe('ElasticWhiteboard', () => {
     fireEvent.click(btn('›'))
     expect(root.querySelector('.ew-steps b').textContent).toBe('Step 1 / 1')
     expect(root.querySelectorAll('.ew-node').length).toBe(revealed)
+  })
+
+  it('compares the current board against another one', () => {
+    mount()
+    // a blank board next to the seeded reference: everything counts as dropped
+    fireEvent.click(btn(/My board/))
+    fireEvent.click(btn('+ New blank board'))
+    fireEvent.click(btn(/New board ▾/))
+    fireEvent.click(compareWith('My board'))
+
+    const panel = root.querySelector('.ew-diff')
+    expect(panel.querySelector('.ew-review-h b').textContent).toBe('vs My board')
+    expect(text('.ew-diff-h')).toEqual([expect.stringMatching(/^Dropped · \d+$/)])
+    expect(root.querySelectorAll('.ew-node.diff-added')).toHaveLength(0)
+
+    fireEvent.click(panel.querySelector('.ew-x'))
+    expect(root.querySelector('.ew-diff')).toBeNull()
+  })
+
+  it('marks resized components when comparing', () => {
+    mount()
+    fireEvent.click(btn(/My board/))
+    fireEvent.click(btn('+ New blank board'))
+    fireEvent.click(btn('Size…'))
+    fireEvent.click(btn('Draw it'))
+
+    fireEvent.click(btn(/New board ▾/))
+    fireEvent.click(btn('Duplicate this board'))
+
+    // bump the node count on one tier, then compare back to the original
+    const node = root.querySelector('.ew-node')
+    fireEvent.pointerDown(node, { clientX: 200, clientY: 200 })
+    fireEvent.pointerUp(node, { clientX: 200, clientY: 200 })
+    fireEvent.change(inspectorField('Nodes'), { target: { value: '9' } })
+
+    fireEvent.click(btn(/copy ▾/))
+    fireEvent.click(compareWith('New board'))
+    expect(text('.ew-diff-h')).toEqual(['Resized · 1'])
+    expect(root.querySelectorAll('.ew-node.diff-changed')).toHaveLength(1)
   })
 
   it('traces the flow hop by hop while presenting', () => {
