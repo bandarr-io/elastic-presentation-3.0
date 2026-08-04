@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { wrapText, inkPath, stepCountOf, visibleAtStep } from '../ElasticWhiteboard'
+import { wrapText, inkPath, stepCountOf, visibleAtStep } from './whiteboardPresenting'
 
 describe('wrapText', () => {
   it('wraps on word boundaries within the character budget', () => {
@@ -34,6 +34,7 @@ describe('inkPath', () => {
   it('returns nothing for a stroke with a single point', () => {
     expect(inkPath({ kind: 'pen', pts: [{ x: 1, y: 1 }] })).toBe('')
     expect(inkPath({ kind: 'pen' })).toBe('')
+    expect(inkPath(undefined)).toBe('')
   })
 })
 
