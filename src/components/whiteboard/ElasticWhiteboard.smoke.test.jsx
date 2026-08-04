@@ -132,6 +132,21 @@ describe('ElasticWhiteboard', () => {
     expect(root.querySelectorAll('.ew-node').length).toBe(revealed)
   })
 
+  it('traces the flow hop by hop while presenting', () => {
+    mount()
+    fireEvent.click(btn('Present'))
+    fireEvent.click(btn('Flow'))
+
+    const hopLabel = () => root.querySelector('.ew-steps b').textContent
+    expect(hopLabel()).toMatch(/^1 \/ \d+$/)
+    // only the active leg stays lit; everything else fades back
+    expect(root.querySelectorAll('.ew-edge.on').length).toBeGreaterThan(0)
+    expect(root.querySelectorAll('.ew-edge.dim').length).toBeGreaterThan(0)
+
+    fireEvent.click(btn('Flow'))
+    expect(root.querySelector('.ew-steps b')).toBeNull()
+  })
+
   it('draws the sizing calculator output onto the board', () => {
     mount()
     fireEvent.click(btn(/My board/))

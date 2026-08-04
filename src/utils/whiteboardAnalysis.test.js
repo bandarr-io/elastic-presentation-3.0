@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { tidyLayout, laneOf, validateBoard, capacityTotals, parseCapacityTB, formatTB } from './whiteboardAnalysis'
+import { tidyLayout, laneOf, flowHops, validateBoard, capacityTotals, parseCapacityTB, formatTB } from './whiteboardAnalysis'
 
 const node = (id, type, extra = {}) => ({ id, type, x: 0, y: 0, ...extra })
 const sizeOf = () => ({ w: 248, h: 96 })
@@ -42,6 +42,59 @@ describe('tidyLayout', () => {
   it('returns nothing for an empty or annotation-only board', () => {
     expect(tidyLayout([], sizeOf)).toEqual({})
     expect(tidyLayout([node('n', 'note')], sizeOf)).toEqual({})
+  })
+})
+
+describe('flowHops', () => {
+  const hopIds = (hops) => hops.map((hop) => hop.join('+'))
+
+  it('walks a chain one connection at a time', () => {
+    const hops = flowHops([
+      { id: 'b', s: 'mid', e: 'end' },
+      { id: 'a', s: 'start', e: 'mid' },
+    ])
+    expect(hopIds(hops)).toEqual(['a', 'b'])
+  })
+
+  it('fans parallel connections into the same hop', () => {
+    const hops = flowHops([
+      { id: 'a', s: 'src', e: 'one' },
+      { id: 'b', s: 'src', e: 'two' },
+      { id: 'c', s: 'one', e: 'sink' },
+    ])
+    expect(hopIds(hops)).toEqual(['a+b', 'c'])
+  })
+
+  it('starts every source at once so disconnected branches move together', () => {
+    const hops = flowHops([
+      { id: 'a', s: 'src1', e: 'sink1' },
+      { id: 'b', s: 'src2', e: 'sink2' },
+    ])
+    expect(hopIds(hops)).toEqual(['a+b'])
+  })
+
+  it('stops rather than spinning on a cycle', () => {
+    const hops = flowHops([
+      { id: 'a', s: 'one', e: 'two' },
+      { id: 'b', s: 'two', e: 'three' },
+      { id: 'c', s: 'three', e: 'one' },
+    ])
+    expect(hops.flat().sort()).toEqual(['a', 'b', 'c'])
+  })
+
+  it('sweeps up connections only reachable inside a cycle', () => {
+    const hops = flowHops([
+      { id: 'in', s: 'src', e: 'ring1' },
+      { id: 'x', s: 'ring1', e: 'ring2' },
+      { id: 'y', s: 'ring2', e: 'ring1' },
+    ])
+    expect(hops.flat().sort()).toEqual(['in', 'x', 'y'])
+  })
+
+  it('ignores half-built connections and empty boards', () => {
+    expect(flowHops()).toEqual([])
+    expect(flowHops([])).toEqual([])
+    expect(flowHops([{ id: 'a', s: 'src' }])).toEqual([])
   })
 })
 

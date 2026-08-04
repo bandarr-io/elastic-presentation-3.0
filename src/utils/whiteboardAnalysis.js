@@ -59,6 +59,49 @@ export function tidyLayout(nodes, sizeOf, origin = { x: 80, y: 80 }) {
   return out;
 }
 
+/* ---------------- flow trace ---------------- */
+
+/* Group connections into hops so a presenter can walk data through the
+   architecture one leg at a time: the first hop leaves the components nothing
+   flows into, the next leaves wherever those arrived, and so on.
+
+   Each node is expanded once, so a cycle stops rather than spinning. Anything
+   left over — connections reachable only inside a cycle — becomes a final hop
+   so no part of the diagram is silently skipped.
+
+   Returns an array of hops, each an array of edge ids. */
+export function flowHops(edges = []) {
+  const live = edges.filter((e) => e.s && e.e);
+  if (!live.length) return [];
+
+  const targets = new Set(live.map((e) => e.e));
+  const sources = [...new Set(live.map((e) => e.s))].filter((id) => !targets.has(id));
+  /* Every component is downstream of something: the graph is one big cycle, so
+     pick an arbitrary starting point rather than showing nothing. */
+  const start = sources.length ? sources : [live[0].s];
+
+  const hops = [];
+  const spent = new Set();
+  const expanded = new Set(start);
+  let frontier = start;
+
+  while (frontier.length) {
+    const at = new Set(frontier);
+    const hop = live.filter((e) => at.has(e.s) && !spent.has(e.id));
+    if (!hop.length) break;
+
+    hop.forEach((e) => spent.add(e.id));
+    hops.push(hop.map((e) => e.id));
+
+    frontier = [...new Set(hop.map((e) => e.e))].filter((id) => !expanded.has(id));
+    frontier.forEach((id) => expanded.add(id));
+  }
+
+  const stranded = live.filter((e) => !spent.has(e.id));
+  if (stranded.length) hops.push(stranded.map((e) => e.id));
+  return hops;
+}
+
 /* ---------------- validation ---------------- */
 
 const count = (nodes, type) => nodes.filter((n) => n.type === type).length;

@@ -5,12 +5,13 @@ import { buildFromSections, instantiateTemplate, sectionEndpoint, TEMPLATE_MENU,
 import { STAGE_PALETTES, SURFACES, CATS, CAT_COLORS, TYPES, tagOf, SEEDS,
          NODE_W, NODE_H } from "../data/whiteboardTypes";
 import { encodeBoard, decodeBoard, boardParamFromHash, shareUrl } from "../utils/whiteboardShare";
-import { tidyLayout, validateBoard, capacityTotals, formatTB } from "../utils/whiteboardAnalysis";
+import { tidyLayout, flowHops, validateBoard, capacityTotals, formatTB } from "../utils/whiteboardAnalysis";
 import { parseClusterInput, summarizeCluster, clusterToBoard } from "../utils/whiteboardImport";
 import { sizeCluster, romRows, romTSV, RU_GB, SIZING_TIERS, SIZING_DEFAULTS } from "../utils/whiteboardSizing";
 import { INK_COLORS, INK_WIDTH, INK_MIN_STEP, inkPath, stepCountOf,
          visibleAtStep, wrapText } from "../utils/whiteboardPresenting";
 import { useSceneMotion } from "../hooks/useSceneMotion";
+import { useReducedMotion } from "../hooks/useReducedMotion";
 import { useSceneMotionFollow } from "../context/SceneMotionFollowContext";
 import { anchor, elbowPath, roundedPath, plMid, snap } from "../utils/whiteboardGeometry";
 import { useHistory } from "./whiteboard/useHistory";
@@ -270,6 +271,7 @@ const toSeedCode = (nodes, edges, zones) => [
 
 export default function ElasticWhiteboard({ height = "100%" }) {
   const { theme } = useTheme();
+  const { prefersReducedMotion } = useReducedMotion();
   /* A follower is a read-only mirror (the presenter view's live preview). It
      shares the same stored board, so it must never write back over the tab the
      presenter is actually driving. */
@@ -977,6 +979,8 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     setSpotlight(null);
     setTool(null);
   };
+  /* `hop` is declared with the rest of the flow trace, below the presenting
+     controls; exiting also stops it, via the effect that watches `present`. */
 
   /* ---------- annotation layer (pen / arrow) ---------- */
 
@@ -1434,6 +1438,38 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     return (first && first.step) || 0;
   })();
 
+  /* ---------- flow trace ----------
+     Walks data through the architecture one leg at a time so a presenter can
+     narrate the path instead of pointing at a static picture. Only the
+     currently revealed connections take part. */
+  const hops = useMemo(
+    () => flowHops(edges.filter((e) => visibleNodeIds.has(e.s) && visibleNodeIds.has(e.e))),
+    [edges, visibleNodeIds]);
+  const [hop, setHop] = useState(null);   // index into hops, or null when not tracing
+  const trace = useMemo(() => {
+    if (hop === null || !hops.length) return null;
+    const lit = new Set(hops[hop % hops.length]);
+    const ends = new Set();
+    for (const e of edges) if (lit.has(e.id)) { ends.add(e.s); ends.add(e.e); }
+    return { edges: lit, nodes: ends };
+  }, [hop, hops, edges]);
+  const tracing = !!trace;
+
+  const stopTrace = () => setHop(null);
+  const startTrace = () => { setSpotlight(null); setHop(0); };
+  const stepTrace = () => setHop((h) => (h === null ? 0 : (h + 1) % hops.length));
+
+  /* Auto-advance, unless the viewer would rather things held still — then the
+     button steps a hop per press. */
+  useEffect(() => {
+    if (!tracing || prefersReducedMotion) return;
+    const t = setTimeout(() => setHop((h) => (h + 1) % hops.length), 1500);
+    return () => clearTimeout(t);
+  }, [tracing, hop, hops.length, prefersReducedMotion]);
+
+  /* A trace only makes sense over the board being presented. */
+  useEffect(() => { if (!present) setHop(null); }, [present]);
+
   const totals = useMemo(() => capacityTotals(nodes), [nodes]);
   const warnings = useMemo(() => validateBoard(nodes, edges), [nodes, edges]);
   const warnCount = warnings.filter((w) => w.level === "warn").length;
@@ -1589,6 +1625,17 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                     onClear={clearInk} hasInk={ink.length > 0} />
           <span className="ew-gap" />
           <button onClick={fit}>Fit</button>
+          {hops.length > 0 && (
+            <span className="ew-steps">
+              <button className={"ew-btn" + (tracing ? " act" : "")}
+                      onClick={tracing ? (prefersReducedMotion ? stepTrace : stopTrace) : startTrace}
+                      title="Walk data through the architecture one hop at a time">
+                Flow
+              </button>
+              {tracing && <b>{(hop % hops.length) + 1} / {hops.length}</b>}
+              {tracing && prefersReducedMotion && <button onClick={stopTrace}>■</button>}
+            </span>
+          )}
           <button disabled={!spotlight} onClick={() => setSpotlight(null)}
                   title="Clear the pinned highlight">Unfocus</button>
           <span className="ew-hint">
@@ -1825,8 +1872,11 @@ export default function ElasticWhiteboard({ height = "100%" }) {
               {edgeGeo.map((ed) => {
                 // a connection shows once both of its endpoints have been revealed
                 if (!visibleNodeIds.has(ed.s) || !visibleNodeIds.has(ed.e)) return null;
-                const on = connected && (ed.s === focus || ed.e === focus);
-                const dim = connected && !on;
+                /* A running trace decides the highlight; otherwise it's the
+                   spotlight/hover neighbourhood. */
+                const lit = trace ? trace.edges.has(ed.id) : null;
+                const on = trace ? lit : connected && (ed.s === focus || ed.e === focus);
+                const dim = trace ? !lit : connected && !on;
                 const isSel = sel && sel.kind === "edge" && sel.id === ed.id;
                 return (
                   <g key={ed.id}>
@@ -1847,9 +1897,12 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                         {ed.lbl}
                       </text>
                     )}
-                    <circle r="3" fill={ed.color} className={"ew-particle" + (dim ? " dim" : "")}
-                            style={{ filter: `drop-shadow(0 0 4px ${ed.color})` }}>
-                      <animateMotion dur={`${Math.max(3, ed.len / 95).toFixed(2)}s`} repeatCount="indefinite">
+                    {/* the ambient dot runs everywhere; on the active leg of a
+                        trace it's bigger and quicker, so the eye follows it */}
+                    <circle r={lit ? 5 : 3} fill={ed.color} className={"ew-particle" + (dim ? " dim" : "")}
+                            style={{ filter: `drop-shadow(0 0 ${lit ? 7 : 4}px ${ed.color})` }}>
+                      <animateMotion dur={`${Math.max(lit ? 1 : 3, ed.len / (lit ? 300 : 95)).toFixed(2)}s`}
+                                     repeatCount="indefinite">
                         <mpath href={`#ew-${ed.id}`} />
                       </animateMotion>
                     </circle>
@@ -1893,7 +1946,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
               const r = rectOf(n);
               if (hiddenNow(n)) return null;
               const isSel = selNodeIds.includes(n.id);
-              const dim = connected && !connected.has(n.id);
+              const dim = trace ? !trace.nodes.has(n.id) : connected && !connected.has(n.id);
               const ann = t.annotation;                 // "note" | "text" | undefined
               const commitText = (v) => {
                 snapGuard("rename:" + n.id);
@@ -1909,7 +1962,8 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                               "--tag": nodeTag(n, stages),
                               ...(ann === "text" ? { color: n.color || surface.ink } : null) }}
                      onPointerDown={(e) => (present
-                       ? (e.stopPropagation(), setSpotlight((s) => (s === n.id ? null : n.id)))
+                       ? (e.stopPropagation(), stopTrace(),
+                          setSpotlight((s) => (s === n.id ? null : n.id)))
                        : startMove(e, n.id))}
                      onPointerEnter={() => setHover(n.id)}
                      onPointerLeave={() => setHover(null)}>
