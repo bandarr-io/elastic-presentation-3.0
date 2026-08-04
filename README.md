@@ -215,14 +215,42 @@ Implementation lives in `src/presenter/`:
 ## Architecture Whiteboard
 
 The deck ships with a full interactive whiteboard scene (`/#/whiteboard`) for
-sketching Elastic deployment architectures live: typed components with sizing
-totals, configurable pattern blocks (cluster tiers, ingestion, user space),
-zones, styled connections (per-edge color; solid/dashed/dotted/long-dash/dash-dot
-line styles; thin/normal/thick widths), architecture presets, an AI build
-assistant, and JSON/SVG/PNG export. The board autosaves to `localStorage`.
+sketching Elastic deployment architectures live — and for presenting them.
+
+**Drawing.** Typed Elastic components with per-node specs, configurable pattern
+blocks (cluster tiers, ingestion, user space), zones, styled connections
+(per-edge color; solid/dashed/dotted/long-dash/dash-dot; thin/normal/thick),
+sticky notes and text labels, clipboard copy/paste of whole subsystems,
+arrow-key nudging, and a **Tidy** button that lays everything out in
+left-to-right data-flow lanes.
+
+**Boards.** Named boards with independent autosave and undo history, so you can
+keep one per customer. Built-in architecture presets remain available in the
+Architectures menu.
+
+**Analysis.** A `Σ` panel rolls up nodes, vCPU, RAM, and per-tier storage, and
+runs advisory best-practice checks (master quorum, frozen tier without object
+storage, single data node, orphans). Sizing copies out in one line for the
+Pricing / ROM scene.
+
+**Real data.** Paste `GET _cat/nodes?v`, `_nodes`, or `_cluster/stats` output
+and the board draws the customer's actual topology into a new board. Parsing is
+entirely local.
+
+**Presenting.** *Present* hides the editing chrome; click a component to
+spotlight it and its connections. Tag components with **build steps** to reveal
+the architecture piece by piece — those steps are published through
+`useSceneMotion`, so the [presenter view](#presenter-view) drives them like any
+other multi-step scene, complete with beat pills and per-beat speaker notes. A
+pen and arrow tool annotate over the top, with strokes tied to the step they
+were drawn on.
+
+**Sharing.** Export JSON, SVG, or PNG (2x/4x) with an optional title block and
+category legend, copy the image straight to the clipboard, or copy a share link
+that packs the whole board into a compressed URL.
 
 See the [whiteboard README](src/components/whiteboard/README.md) for the full
-feature tour, interaction cheat sheet, and code map.
+feature tour, interaction cheat sheet, document schema, and code map.
 
 ---
 
@@ -311,7 +339,7 @@ Everything is client-side in `localStorage`:
 | `presentation-scene-config` | Active preset, enabled scenes, order, durations, per-scene metadata (content edits, speaker notes, per-beat notes) |
 | `presentation-team-config` | Team title, subtitle, and all member records |
 | `presentation-theme` | `'dark'` or `'light'` |
-| `ew-*` | Whiteboard autosave, custom architecture presets, AI config — see the [whiteboard README](src/components/whiteboard/README.md#persistence) |
+| `ew-*` | Whiteboard board index and named boards, custom architecture presets, AI config — see the [whiteboard README](src/components/whiteboard/README.md#persistence) |
 
 A versioned migration (`ORDER_VERSION` in `SceneSettings.jsx`) re-applies the
 canonical default flow when the shipped defaults change, while preserving your
@@ -348,7 +376,7 @@ elastic-presentation-3.0/
 │   ├── context/                   # Theme, Team, SceneMotion, SceneMotionFollow contexts
 │   ├── hooks/                     # useSceneMotion, useAnimationTimeline, useReducedMotion, …
 │   ├── animations/                # Reusable animation utilities
-│   └── utils/                     # Whiteboard geometry/AI, pricing, layout helpers
+│   └── utils/                     # Whiteboard geometry/AI/analysis/import/share, pricing, layout helpers
 ├── tailwind.config.js
 └── vite.config.js
 ```
@@ -361,6 +389,14 @@ elastic-presentation-3.0/
 npm test
 ```
 
-Vitest unit tests cover the presenter sync command handling
-(`src/presenter/presenterSync.test.js`) and the whiteboard template
-instantiation (`src/utils/whiteboardTemplates.test.js`).
+Vitest covers the parts where a regression would be silent:
+
+| Suite | What it covers |
+|---|---|
+| `src/presenter/presenterSync.test.js` | Presenter command handling (next/prev, beats, scene actions) |
+| `src/utils/whiteboardTemplates.test.js` | Pattern block instantiation and layout |
+| `src/utils/whiteboardAnalysis.test.js` | Tidy lane layout, architecture validation rules, capacity math |
+| `src/utils/whiteboardImport.test.js` | Parsing `_cat/nodes` / `_nodes` / `_cluster/stats` into a board |
+| `src/utils/whiteboardShare.test.js` | Share-link round-tripping and hash param handling |
+| `src/components/whiteboard/reveal.test.js` | Text wrapping, ink paths, build-step visibility |
+| `src/components/whiteboard/ElasticWhiteboard.smoke.test.jsx` | Mounts the whiteboard in jsdom: boards, presenting, ink, steps, cluster import |

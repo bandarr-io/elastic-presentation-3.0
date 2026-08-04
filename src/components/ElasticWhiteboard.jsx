@@ -7,6 +7,8 @@ import { STAGE_PALETTES, SURFACES, CATS, CAT_COLORS, TYPES, tagOf, SEEDS,
 import { encodeBoard, decodeBoard, boardParamFromHash, shareUrl } from "../utils/whiteboardShare";
 import { tidyLayout, validateBoard, capacityTotals, formatTB } from "../utils/whiteboardAnalysis";
 import { parseClusterInput, summarizeCluster, clusterToBoard } from "../utils/whiteboardImport";
+import { useSceneMotion } from "../hooks/useSceneMotion";
+import { useSceneMotionFollow } from "../context/SceneMotionFollowContext";
 import { anchor, elbowPath, roundedPath, plMid, snap } from "../utils/whiteboardGeometry";
 import { useHistory } from "./whiteboard/useHistory";
 import { useDragController } from "./whiteboard/useDragController";
@@ -60,6 +62,37 @@ const NUDGE_KEYS = {
 };
 /* Marker identifying our own clipboard payloads (vs. arbitrary copied text). */
 const CLIP_MARK = "__elasticWhiteboard";
+
+/* Pen colours for the annotation layer, on brand and readable on both themes. */
+const INK_COLORS = [
+  { label: "Yellow", value: "#FEC514" },
+  { label: "Pink",   value: "#F04E98" },
+  { label: "Teal",   value: "#00BFB3" },
+  { label: "Blue",   value: "#4C8DFF" },
+];
+const INK_WIDTH = 3;
+
+/* Freehand strokes are simplified as they're drawn: skip points closer than
+   this (in world units) so the path stays light without looking angular. */
+const INK_MIN_STEP = 4;
+
+/* An SVG path for one stroke. Arrows are a straight line from first to last
+   point; the arrowhead is a marker applied at render time. */
+export const inkPath = (stroke) => {
+  const pts = stroke.pts || [];
+  if (pts.length < 2) return "";
+  if (stroke.kind === "arrow") {
+    const a = pts[0], b = pts[pts.length - 1];
+    return `M ${a.x} ${a.y} L ${b.x} ${b.y}`;
+  }
+  return pts.map((p, i) => `${i ? "L" : "M"} ${p.x} ${p.y}`).join(" ");
+};
+
+/* Build steps: elements carry an optional 1-based `step`; anything without one
+   is base content, visible from the start. */
+export const stepCountOf = (...lists) =>
+  lists.flat().reduce((max, el) => Math.max(max, el && el.step ? el.step : 0), 0);
+export const visibleAtStep = (el, step) => !el.step || el.step <= step;
 
 /* ---------------- pure geometry ---------------- */
 
@@ -217,7 +250,7 @@ const referenceBoard = () => ({
 
 /* Resolve the board index, migrating a single legacy autosave into the first
    named board. Always yields an index with at least one board plus its data. */
-const bootBoards = () => {
+const bootBoards = (persist = true) => {
   const idx = readJSON(BOARDS_KEY);
   if (idx && Array.isArray(idx.boards) && idx.boards.length) {
     const activeId = idx.boards.some((b) => b.id === idx.activeId) ? idx.activeId : idx.boards[0].id;
@@ -226,10 +259,12 @@ const bootBoards = () => {
   const legacy = readJSON(BOARD_KEY);
   const board = legacy && Array.isArray(legacy.nodes) ? legacy : referenceBoard();
   const id = uniqueId("b");
-  writeJSON(boardKey(id), board);
   const index = { boards: [{ id, name: "My board" }], activeId: id };
-  writeJSON(BOARDS_KEY, index);
-  dropKey(BOARD_KEY);
+  if (persist) {
+    writeJSON(boardKey(id), board);
+    writeJSON(BOARDS_KEY, index);
+    dropKey(BOARD_KEY);
+  }
   return { index, board };
 };
 
@@ -269,13 +304,17 @@ const toSeedCode = (nodes, edges, zones) => [
 
 export default function ElasticWhiteboard({ height = "100%" }) {
   const { theme } = useTheme();
+  /* A follower is a read-only mirror (the presenter view's live preview). It
+     shares the same stored board, so it must never write back over the tab the
+     presenter is actually driving. */
+  const following = useSceneMotionFollow() != null;
   const isDark = theme !== "light";
   const stages = isDark ? STAGE_PALETTES.dark : STAGE_PALETTES.light;
   const surface = isDark ? SURFACES.dark : SURFACES.light;
 
   // hydrate the active named board (migrating any pre-multi-board autosave)
   const bootRef = useRef();
-  if (bootRef.current === undefined) bootRef.current = bootBoards();
+  if (bootRef.current === undefined) bootRef.current = bootBoards(!following);
   const boot = bootRef.current.board;
 
   const [boardIndex, setBoardIndex] = useState(bootRef.current.index);
@@ -285,7 +324,14 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const [nodes, setNodes] = useState(() => boot.nodes || []);
   const [edges, setEdges] = useState(() => boot.edges || []);
   const [zones, setZones] = useState(() => boot.zones || []);
+  const [ink, setInk]     = useState(() => boot.ink || []);
   const [view, setView]   = useState(() => boot.view || { ...DEFAULT_VIEW });
+
+  /* presenting */
+  const [present, setPresent] = useState(false);    // chrome hidden, steps drive visibility
+  const [spotlight, setSpotlight] = useState(null); // pinned node id, dims everything else
+  const [tool, setTool] = useState(null);           // null | "pen" | "arrow"
+  const [inkColor, setInkColor] = useState(INK_COLORS[0].value);
   const [sel, setSel]     = useState(null);      // {kind:'nodes',ids} | {kind:'edge'|'zone',id}
   const [hover, setHover] = useState(null);
   const [connect, setConnect] = useState(null);  // {from,cx,cy} world coords
@@ -337,11 +383,13 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     return z ? z.label : "?";
   };
   const docRef = useRef(null);
-  docRef.current = { nodes, edges, zones };
+  docRef.current = { nodes, edges, zones, ink };
   const sectionsRef = useRef(boot?.sections || {}); // sectionId -> { template, fill, keys, zoneId } for incremental AI edits
 
   /* ---------- history ---------- */
-  const restore = (doc) => { setNodes(doc.nodes); setEdges(doc.edges); setZones(doc.zones); setSel(null); };
+  const restore = (doc) => {
+    setNodes(doc.nodes); setEdges(doc.edges); setZones(doc.zones); setInk(doc.ink || []); setSel(null);
+  };
   const { snapshot, snapGuard, undo, redo, resetHistory, canUndo, canRedo } = useHistory(docRef, restore);
 
   /* ---------- boards ---------- */
@@ -351,30 +399,39 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   /* Autosave the active board (debounced; survives refresh). Keyed on the
      active id so a board switch can't flush stale content into the new slot. */
   useEffect(() => {
+    if (following) return undefined;
     const t = setTimeout(
-      () => writeJSON(boardKey(activeBoardId), { nodes, edges, zones, view, sections: sectionsRef.current }),
+      () => writeJSON(boardKey(activeBoardId), { nodes, edges, zones, ink, view, sections: sectionsRef.current }),
       300);
     return () => clearTimeout(t);
-  }, [nodes, edges, zones, view, activeBoardId]);
+  }, [nodes, edges, zones, ink, view, activeBoardId, following]);
 
-  const saveIndex = (next) => { setBoardIndex(next); writeJSON(BOARDS_KEY, next); };
+  const saveIndex = (next) => { setBoardIndex(next); if (!following) writeJSON(BOARDS_KEY, next); };
   /* Write the in-memory board straight to storage — used before switching away,
      where the debounced autosave would otherwise lose the last edits. */
-  const flushActiveBoard = () =>
-    writeJSON(boardKey(activeBoardId), { nodes, edges, zones, view, sections: sectionsRef.current });
+  const flushActiveBoard = () => {
+    if (following) return;
+    writeJSON(boardKey(activeBoardId), { nodes, edges, zones, ink, view, sections: sectionsRef.current });
+  };
+
+  /* Swap the whole document in. Shared by open / create / delete. */
+  const loadBoardData = (data) => {
+    setNodes(data.nodes || []);
+    setEdges(data.edges || []);
+    setZones(data.zones || []);
+    setInk(data.ink || []);
+    setView(data.view || { ...DEFAULT_VIEW });
+    sectionsRef.current = data.sections || {};
+    setSel(null);
+    setSpotlight(null);
+    resetHistory();
+  };
 
   const openBoard = (id) => {
     setBoardMenu(false);
     if (id === activeBoardId) return;
     flushActiveBoard();
-    const data = readJSON(boardKey(id)) || emptyBoard();
-    setNodes(data.nodes || []);
-    setEdges(data.edges || []);
-    setZones(data.zones || []);
-    setView(data.view || { ...DEFAULT_VIEW });
-    sectionsRef.current = data.sections || {};
-    setSel(null);
-    resetHistory();
+    loadBoardData(readJSON(boardKey(id)) || emptyBoard());
     saveIndex({ ...boardIndex, activeId: id });
   };
 
@@ -383,13 +440,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     const id = uniqueId("b");
     const board = data || emptyBoard();
     writeJSON(boardKey(id), board);
-    setNodes(board.nodes || []);
-    setEdges(board.edges || []);
-    setZones(board.zones || []);
-    setView(board.view || { ...DEFAULT_VIEW });
-    sectionsRef.current = board.sections || {};
-    setSel(null);
-    resetHistory();
+    loadBoardData(board);
     saveIndex({ boards: [...boardIndex.boards, { id, name }], activeId: id });
     setBoardMenu(false);
     flashSeedNote(`Created "${name}"`);
@@ -414,14 +465,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     const rest = boardIndex.boards.filter((b) => b.id !== id);
     dropKey(boardKey(id));
     if (id === activeBoardId) {
-      const next = readJSON(boardKey(rest[0].id)) || emptyBoard();
-      setNodes(next.nodes || []);
-      setEdges(next.edges || []);
-      setZones(next.zones || []);
-      setView(next.view || { ...DEFAULT_VIEW });
-      sectionsRef.current = next.sections || {};
-      setSel(null);
-      resetHistory();
+      loadBoardData(readJSON(boardKey(rest[0].id)) || emptyBoard());
       saveIndex({ boards: rest, activeId: rest[0].id });
     } else {
       saveIndex({ ...boardIndex, boards: rest });
@@ -457,11 +501,24 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     const onKey = (e) => {
       const tag = document.activeElement && document.activeElement.tagName;
       if (e.key === "Escape") {
-        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") document.activeElement.blur();
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return document.activeElement.blur();
+        if (tool) return setTool(null);
+        if (present) return exitPresent();
         setSel(null); setConnect(null); setEditing(null); setMarquee(null); dragRef.current = null;
         return;
       }
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      /* While presenting there's nothing to nudge, so the arrow keys (and
+         space) walk the build steps instead. */
+      if (present) {
+        if (!revealing) return;
+        if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === " ") {
+          e.preventDefault(); goToStep(step + 1);
+        } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+          e.preventDefault(); goToStep(step - 1);
+        }
+        return;
+      }
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
       if (mod && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); return; }
@@ -929,6 +986,57 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     }
   };
 
+  /* ---------- presentation mode ---------- */
+
+  const enterPresent = () => {
+    setPresent(true);
+    setSel(null);
+    setTool(null);
+    setPatternCfg(null);
+    setChatOpen(false);
+    setReviewOpen(false);
+    if (stepCount > 0) goToStep(0);
+  };
+  const exitPresent = () => {
+    setPresent(false);
+    setSpotlight(null);
+    setTool(null);
+  };
+
+  /* ---------- annotation layer (pen / arrow) ---------- */
+
+  const [drawing, setDrawing] = useState(null);   // in-progress stroke
+  const drawingRef = useRef(null);
+  drawingRef.current = drawing;
+
+  const startInk = (e) => {
+    const p = toWorld(e.clientX, e.clientY);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    setDrawing({ id: uid("ink"), kind: tool, color: inkColor, width: INK_WIDTH,
+                 step: revealing ? step : 0, pts: [p] });
+  };
+  const moveInk = (e) => {
+    const cur = drawingRef.current;
+    if (!cur) return;
+    const p = toWorld(e.clientX, e.clientY);
+    if (cur.kind === "arrow") return setDrawing({ ...cur, pts: [cur.pts[0], p] });
+    const last = cur.pts[cur.pts.length - 1];
+    if (Math.hypot(p.x - last.x, p.y - last.y) < INK_MIN_STEP) return;
+    setDrawing({ ...cur, pts: [...cur.pts, p] });
+  };
+  const endInk = () => {
+    const cur = drawingRef.current;
+    setDrawing(null);
+    if (!cur || cur.pts.length < 2) return;
+    snapshot();
+    setInk((all) => [...all, cur]);
+  };
+  const clearInk = () => {
+    if (!ink.length) return;
+    snapshot();
+    setInk([]);
+  };
+
   /* ---------- gestures ---------- */
 
   const { startPan, startMove, startResize, startConnect, startZoneMove, startZoneResize,
@@ -1058,7 +1166,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
      the payload is stripped from the URL so a refresh doesn't re-import it. */
   const sharedRef = useRef(false);
   useEffect(() => {
-    if (sharedRef.current) return;
+    if (sharedRef.current || following) return;
     sharedRef.current = true;
     const payload = boardParamFromHash(window.location.hash);
     if (!payload) return;
@@ -1134,6 +1242,10 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const buildSVG = () => {
     const bb = bbox();
     if (!bb) return null;
+    for (const s of ink) for (const p of s.pts) {
+      bb.x0 = Math.min(bb.x0, p.x); bb.y0 = Math.min(bb.y0, p.y);
+      bb.x1 = Math.max(bb.x1, p.x); bb.y1 = Math.max(bb.y1, p.y);
+    }
     const pad = 48;
     const esc = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     /* Optional chrome: a title block above the diagram and a colour legend
@@ -1205,6 +1317,17 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         cx += w + 4;
       }
     }
+    /* ink last so annotations sit on top of the diagram, matching the canvas */
+    for (const s of ink) {
+      const d = inkPath(s);
+      if (!d) continue;
+      const head = s.kind === "arrow" ? ` marker-end="url(#xink)"` : "";
+      if (head && !out.includes('id="xink"')) {
+        out = out.replace("</defs>",
+          `<marker id="xink" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke"/></marker></defs>`);
+      }
+      out += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round"${head}/>`;
+    }
     out += "</svg>";
     return out;
   };
@@ -1251,12 +1374,15 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
   /* ---------- derived ---------- */
 
+  /* Neighbourhood highlight: a pinned spotlight wins over transient hover, so
+     a presenter can leave one subsystem lit while they talk about it. */
+  const focus = spotlight || hover;
   const connected = useMemo(() => {
-    if (!hover || dragRef.current) return null;
-    const keep = new Set([hover]);
-    for (const ed of edges) if (ed.s === hover || ed.e === hover) { keep.add(ed.s); keep.add(ed.e); }
+    if (!focus || (!spotlight && dragRef.current)) return null;
+    const keep = new Set([focus]);
+    for (const ed of edges) if (ed.s === focus || ed.e === focus) { keep.add(ed.s); keep.add(ed.e); }
     return keep;
-  }, [hover, edges]);
+  }, [focus, spotlight, edges]);
 
   const zoneIdSet = useMemo(() => new Set(zones.map((z) => z.id)), [zones]);
 
@@ -1283,9 +1409,57 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     if (!boxes.length) return { x: 0, y: 0, w: 4200, h: 2800 };
     let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
     for (const b of boxes) { x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.w); y1 = Math.max(y1, b.y + b.h); }
+    // ink shares this canvas, so it has to fit inside the same viewBox
+    for (const s of ink) for (const p of s.pts) {
+      x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
+    }
     const pad = 240;
     return { x: x0 - pad, y: y0 - pad, w: (x1 - x0) + pad * 2, h: (y1 - y0) + pad * 2 };
-  }, [nodes, zones]);
+  }, [nodes, zones, ink]);
+
+  /* ---------- build steps ----------
+     Elements tagged with a step appear as the presenter advances. Step 0 is
+     the base layer (everything untagged), so a board with a max step of 3 has
+     four beats. Beats are published through useSceneMotion, which is what puts
+     the whiteboard on the presenter view's step controls. */
+  const stepCount = useMemo(() => stepCountOf(nodes, zones), [nodes, zones]);
+  const beats = useMemo(
+    () => Array.from({ length: stepCount + 1 }, (_, i) => ({ step: i === 0 ? "Base" : String(i) })),
+    [stepCount]);
+  const { beat: step, goTo: goToStep } = useSceneMotion(beats);
+
+  /* Which elements the current step reveals. In edit mode nothing disappears —
+     not-yet-revealed elements are ghosted so they stay workable. */
+  const revealing = stepCount > 0;
+  const shown = (el) => !revealing || visibleAtStep(el, step);
+  const ghosted = (el) => revealing && !visibleAtStep(el, step);
+  const hiddenNow = (el) => present && ghosted(el);
+  const visibleNodeIds = useMemo(() => {
+    const ids = new Set();
+    for (const n of nodes) if (!hiddenNow(n)) ids.add(n.id);
+    for (const z of zones) if (!hiddenNow(z)) ids.add(z.id);
+    return ids;
+  }, [nodes, zones, present, step, revealing]);
+
+  /* Tag (or clear) the build step on the current selection. */
+  const setSelStep = (value) => {
+    if (!sel) return;
+    const nodeIds = new Set(sel.kind === "nodes" || sel.kind === "mixed" ? sel.ids : []);
+    const zoneIds = new Set(sel.kind === "zone" ? [sel.id]
+                          : sel.kind === "zones" ? sel.ids
+                          : sel.kind === "mixed" ? sel.zoneIds : []);
+    const apply = (el, ids) => (ids.has(el.id) ? { ...el, step: value || undefined } : el);
+    snapshot();
+    if (nodeIds.size) setNodes((ns) => ns.map((n) => apply(n, nodeIds)));
+    if (zoneIds.size) setZones((zs) => zs.map((z) => apply(z, zoneIds)));
+  };
+  const selStep = (() => {
+    if (!sel) return 0;
+    const first = sel.kind === "nodes" || sel.kind === "mixed" ? nodeById[sel.ids[0]]
+                : sel.kind === "zone" ? zoneById[sel.id]
+                : sel.kind === "zones" ? zoneById[sel.ids[0]] : null;
+    return (first && first.step) || 0;
+  })();
 
   const totals = useMemo(() => capacityTotals(nodes), [nodes]);
   const warnings = useMemo(() => validateBoard(nodes, edges), [nodes, edges]);
@@ -1371,6 +1545,29 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     <div className={"ew-root" + (isDark ? "" : " ew-light")} style={{ height }}>
       <style>{CSS}</style>
 
+      {present ? (
+        <div className="ew-toolbar ew-present-bar">
+          <button onClick={exitPresent} title="Back to editing (Esc)">← Edit</button>
+          <span className="ew-gap" />
+          {revealing && (
+            <span className="ew-steps">
+              <button disabled={step <= 0} onClick={() => goToStep(step - 1)}>‹</button>
+              <b>{step === 0 ? "Base" : `Step ${step}`} / {stepCount}</b>
+              <button disabled={step >= stepCount} onClick={() => goToStep(step + 1)}>›</button>
+            </span>
+          )}
+          <span className="ew-gap" />
+          <InkTools tool={tool} setTool={setTool} color={inkColor} setColor={setInkColor}
+                    onClear={clearInk} hasInk={ink.length > 0} />
+          <span className="ew-gap" />
+          <button onClick={fit}>Fit</button>
+          <button disabled={!spotlight} onClick={() => setSpotlight(null)}
+                  title="Clear the pinned highlight">Unfocus</button>
+          <span className="ew-hint">
+            {revealing ? "arrows or space to step · " : ""}click a component to spotlight it · Esc to exit
+          </span>
+        </div>
+      ) : (
       <div className="ew-toolbar">
         <span className="ew-title">Elastic Whiteboard</span>
         <span className="ew-menuwrap">
@@ -1479,6 +1676,10 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         <button onClick={fit}>Fit</button>
         <button onClick={tidyBoard} title="Lay components out in data-flow lanes">Tidy</button>
         <span className="ew-gap" />
+        <InkTools tool={tool} setTool={setTool} color={inkColor} setColor={setInkColor}
+                  onClear={clearInk} hasInk={ink.length > 0} />
+        <button onClick={enterPresent} title="Hide the editing chrome and present this board">Present</button>
+        <span className="ew-gap" />
         <button className={"ew-ai-toggle" + (chatOpen ? " on" : "")}
                 onClick={() => setChatOpen((o) => !o)} title="Build with AI">✦ AI</button>
         {hasTotals && (
@@ -1492,11 +1693,13 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         )}
         <span className="ew-hint">shift-drag select · ⌘C/⌘V copy · ⌘D duplicate · arrows nudge · ⌘Z undo · drag ring to connect</span>
       </div>
+      )}
 
       {importOpen && <ClusterImport onClose={() => setImportOpen(false)} onImport={importCluster} />}
 
       <div className="ew-body">
         {/* palette */}
+        {!present && (
         <div className="ew-palette">
           <div className="ew-patterns">
             <div className="ew-patterns-h">Patterns</div>
@@ -1547,20 +1750,28 @@ export default function ElasticWhiteboard({ height = "100%" }) {
             })
           )}
         </div>
+        )}
 
         {/* canvas */}
-        <div className="ew-viewport" ref={viewportRef}
-             onPointerDown={startPan} onPointerMove={onMove} onPointerUp={onUp}>
+        <div className={"ew-viewport" + (tool ? " inking" : "")} ref={viewportRef}
+             onPointerDown={(e) => {
+               if (tool) return startInk(e);
+               if (present) setSpotlight(null);
+               startPan(e);
+             }}
+             onPointerMove={(e) => (tool ? moveInk(e) : onMove(e))}
+             onPointerUp={(e) => (tool ? endInk(e) : onUp(e))}>
           <div className="ew-world"
                style={{ transform: `translate(${view.x}px,${view.y}px) scale(${view.k})` }}>
 
             {/* zones (behind everything) */}
             {zones.map((z) => {
+              if (hiddenNow(z)) return null;
               const isSingle = sel && sel.kind === "zone" && sel.id === z.id;
               const isMulti = sel && ((sel.kind === "zones" && sel.ids.includes(z.id))
                 || (sel.kind === "mixed" && sel.zoneIds.includes(z.id)));
               return (
-                <div key={z.id} className={"ew-zone" + (isSingle || isMulti ? " sel" : "")}
+                <div key={z.id} className={"ew-zone" + (isSingle || isMulti ? " sel" : "") + (ghosted(z) ? " ghost" : "")}
                      style={{ left: z.x, top: z.y, width: z.w, height: z.h, "--zc": z.color }}>
                   <span className="ew-zlabel" onPointerDown={(e) => startZoneMove(e, z.id)}>{z.label}</span>
                   {isSingle && <span className="ew-zport" title="Drag to connect from this zone"
@@ -1581,7 +1792,9 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 </marker>
               </defs>
               {edgeGeo.map((ed) => {
-                const on = connected && (ed.s === hover || ed.e === hover);
+                // a connection shows once both of its endpoints have been revealed
+                if (!visibleNodeIds.has(ed.s) || !visibleNodeIds.has(ed.e)) return null;
+                const on = connected && (ed.s === focus || ed.e === focus);
                 const dim = connected && !on;
                 const isSel = sel && sel.kind === "edge" && sel.id === ed.id;
                 return (
@@ -1647,6 +1860,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
             {nodes.map((n) => {
               const t = TYPES[n.type];
               const r = rectOf(n);
+              if (hiddenNow(n)) return null;
               const isSel = selNodeIds.includes(n.id);
               const dim = connected && !connected.has(n.id);
               const ann = t.annotation;                 // "note" | "text" | undefined
@@ -1659,11 +1873,13 @@ export default function ElasticWhiteboard({ height = "100%" }) {
               return (
                 <div key={n.id}
                      className={(ann ? `ew-ann ew-ann-${ann}` : "ew-node")
-                       + (isSel ? " sel" : "") + (dim ? " dim" : "")}
+                       + (isSel ? " sel" : "") + (dim ? " dim" : "") + (ghosted(n) ? " ghost" : "")}
                      style={{ left: n.x, top: n.y, width: r.w, height: r.h,
                               "--tag": nodeTag(n, stages),
                               ...(ann === "text" ? { color: n.color || surface.ink } : null) }}
-                     onPointerDown={(e) => startMove(e, n.id)}
+                     onPointerDown={(e) => (present
+                       ? (e.stopPropagation(), setSpotlight((s) => (s === n.id ? null : n.id)))
+                       : startMove(e, n.id))}
                      onPointerEnter={() => setHover(n.id)}
                      onPointerLeave={() => setHover(null)}>
                   {editing === n.id ? (
@@ -1701,7 +1917,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                       </div>
                     </div>
                   )}
-                  {(hover === n.id || isSel) && !editing && ["l", "r", "t", "b"].map((side) => {
+                  {(hover === n.id || isSel) && !editing && !present && ["l", "r", "t", "b"].map((side) => {
                     const a = anchor({ x: 0, y: 0, w: r.w, h: r.h }, side);
                     return (
                       <span key={side} className="ew-port" style={{ left: a.x, top: a.y }}
@@ -1714,6 +1930,27 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 </div>
               );
             })}
+
+            {/* annotation ink, above the diagram */}
+            {(ink.length > 0 || drawing) && (
+              <svg className="ew-ink" width={wireBox.w} height={wireBox.h}
+                   viewBox={`${wireBox.x} ${wireBox.y} ${wireBox.w} ${wireBox.h}`}
+                   style={{ left: wireBox.x, top: wireBox.y }}>
+                <defs>
+                  {INK_COLORS.map((c) => (
+                    <marker key={c.value} id={`ew-ink-${c.value.slice(1)}`} viewBox="0 0 10 10"
+                            refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                      <path d="M0,0 L10,5 L0,10 z" fill={c.value} />
+                    </marker>
+                  ))}
+                </defs>
+                {[...ink, ...(drawing ? [drawing] : [])].map((s) => (
+                  <path key={s.id} d={inkPath(s)} stroke={s.color} strokeWidth={s.width}
+                        className={"ew-inkpath" + (hiddenNow(s) ? " gone" : ghosted(s) ? " ghost" : "")}
+                        markerEnd={s.kind === "arrow" ? `url(#ew-ink-${s.color.slice(1)})` : undefined} />
+                ))}
+              </svg>
+            )}
 
             {marquee && (
               <div className="ew-marquee" style={{
@@ -1771,7 +2008,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         </div>
 
         {/* docked inspector */}
-        {sel && (() => {
+        {sel && !present && (() => {
           /* --- edge --- */
           if (sel.kind === "edge") {
             const ed = edges.find((x) => x.id === sel.id);
@@ -1873,6 +2110,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                                onChange={(e) => setZ({ h: Math.max(120, Math.min(1600, +e.target.value || z.h)) })} />
                       </div></div>
                   </section>
+                  <StepSection value={selStep} max={stepCount} onChange={setSelStep} />
                   <section>
                     <button className="ew-btn danger" onClick={deleteSel}>Delete zone</button>
                   </section>
@@ -1895,6 +2133,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                                    canDistribute={sel.ids.length >= 3} />
                     <p className="ew-ihint">Zones move their contents with them.</p>
                   </section>
+                  <StepSection value={selStep} max={stepCount} onChange={setSelStep} />
                   <section>
                     <button className="ew-btn danger" onClick={deleteSel}>Delete all zones</button>
                   </section>
@@ -1915,6 +2154,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                   <button className="ew-x" onClick={() => setSel(null)}>×</button>
                 </div>
                 <div className="ew-iscroll">
+                  <StepSection value={selStep} max={stepCount} onChange={setSelStep} />
                   <section>
                     <button className="ew-btn danger" onClick={deleteSel}>Delete all</button>
                   </section>
@@ -1949,6 +2189,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                       <button className="ew-btn danger" onClick={deleteSel}>Delete all</button>
                     </div>
                   </section>
+                  <StepSection value={selStep} max={stepCount} onChange={setSelStep} />
                 </div>
               </div>
             );
@@ -1997,6 +2238,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                                onChange={(e) => set({ h: Math.max(32, Math.min(420, +e.target.value || r.h)) })} />
                       </div></div>
                   </section>
+                  <StepSection value={selStep} max={stepCount} onChange={setSelStep} />
                   <section>
                     <div className="ew-btnrow">
                       <button className="ew-btn" onClick={duplicateSel}>Duplicate (⌘D)</button>
@@ -2097,6 +2339,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                     })}
                   </section>
                 )}
+                <StepSection value={selStep} max={stepCount} onChange={setSelStep} />
                 <section>
                   <div className="ew-btnrow">
                     <button className="ew-btn" onClick={duplicateSel}>Duplicate (⌘D)</button>
@@ -2205,6 +2448,45 @@ function PaletteItem({ k, t, start, stages }) {
          onPointerDown={(e) => start(e, k)}>
       <b>{t.label}</b>
     </div>
+  );
+}
+
+/* Assigns the selection to a build step. Step 0 is the base layer that's on
+   screen from the start; higher steps appear as the presenter advances. */
+function StepSection({ value, max, onChange }) {
+  const options = Array.from({ length: Math.max(max, value) + 1 }, (_, i) => i + 1);
+  return (
+    <section>
+      <h5>Build step</h5>
+      <div className="ew-btnrow ew-stepbtns">
+        <button className={"ew-btn" + (value ? "" : " act")} onClick={() => onChange(0)}
+                title="Always visible">Base</button>
+        {options.map((i) => (
+          <button key={i} className={"ew-btn" + (value === i ? " act" : "")}
+                  onClick={() => onChange(i)}>{i}</button>
+        ))}
+      </div>
+      <p className="ew-ihint">Reveals on step {value || 0} while presenting.</p>
+    </section>
+  );
+}
+
+/* Pen / arrow toggles plus the ink colour swatches. Shared by the editing
+   toolbar and the presentation bar. */
+function InkTools({ tool, setTool, color, setColor, onClear, hasInk }) {
+  const pick = (next) => setTool(tool === next ? null : next);
+  return (
+    <>
+      <button className={tool === "pen" ? "act" : ""} onClick={() => pick("pen")}
+              title="Draw freehand (Esc to stop)">✎ Pen</button>
+      <button className={tool === "arrow" ? "act" : ""} onClick={() => pick("arrow")}
+              title="Drag a straight arrow">↗ Arrow</button>
+      {tool && INK_COLORS.map((c) => (
+        <button key={c.value} className={"ew-inkswatch" + (color === c.value ? " act" : "")}
+                style={{ "--sw": c.value }} title={c.label} onClick={() => setColor(c.value)} />
+      ))}
+      {hasInk && <button onClick={onClear} title="Remove every stroke">Clear ink</button>}
+    </>
   );
 }
 
@@ -2348,6 +2630,24 @@ const CSS = `
 .ew-totals.on{ border-color:var(--accent) !important; }
 .ew-warncount{ background:#E7664C; color:#fff; border-radius:99px; min-width:16px; height:16px;
   display:inline-flex; align-items:center; justify-content:center; font-size:10px; padding:0 4px; }
+/* annotation ink + build steps + presentation mode */
+.ew-ink{ position:absolute; overflow:visible; pointer-events:none; }
+.ew-inkpath{ fill:none; stroke-linecap:round; stroke-linejoin:round;
+  transition:opacity .25s; }
+.ew-inkpath.ghost{ opacity:.16; }
+.ew-inkpath.gone{ display:none; }
+.ew-viewport.inking{ cursor:crosshair; }
+.ew-viewport.inking:active{ cursor:crosshair; }
+.ew-node.ghost, .ew-ann.ghost, .ew-zone.ghost{ opacity:.16; }
+.ew-inkswatch{ width:24px; height:24px; padding:0 !important; border-radius:6px;
+  background:var(--sw) !important; border:1px solid var(--line) !important; }
+.ew-inkswatch.act{ box-shadow:0 0 0 2px var(--panel), 0 0 0 3px var(--sw); }
+.ew-stepbtns{ flex-wrap:wrap; }
+.ew-stepbtns .ew-btn{ min-width:34px; text-align:center; }
+.ew-present-bar{ justify-content:flex-start; }
+.ew-steps{ display:inline-flex; align-items:center; gap:8px; }
+.ew-steps b{ font-family:var(--mono); font-size:12px; color:var(--accent); min-width:96px;
+  text-align:center; font-weight:400; }
 /* modal dialogs (cluster import) */
 .ew-modal-backdrop{ position:fixed; inset:0; z-index:60; background:rgba(6,10,22,.62); }
 .ew-modal{ position:fixed; z-index:61; top:50%; left:50%; transform:translate(-50%,-50%);

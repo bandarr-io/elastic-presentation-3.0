@@ -18,10 +18,16 @@ Everything is plain React + SVG. No canvas libraries, no external dependencies.
   Kibana, Elastic Agent, Logstash, …) with category colors, per-node specs
   (node count / vCPU / RAM), and a live **Σ totals** readout in the toolbar —
   useful for quick sizing conversations.
-- **Reusable presets.** Ship built-in reference architectures, save your own
-  variants, and round-trip boards as JSON.
-- **Takeaways.** Export the finished diagram as SVG or PNG and send it to the
-  customer after the call.
+- **Reusable presets and per-customer boards.** Ship built-in reference
+  architectures, keep a named board per account, and round-trip boards as JSON.
+- **Start from their reality.** Paste `_cat/nodes` or `_nodes` output from the
+  customer's cluster and the board draws their actual topology, node counts and
+  hardware included.
+- **Present it, don't just draw it.** Tag components with build steps and reveal
+  the architecture piece by piece, driven from the presenter view; annotate over
+  the top with a pen while you talk.
+- **Takeaways.** Export the finished diagram as SVG or PNG (with a title block
+  and legend), copy it to the clipboard, or send a share link.
 
 ---
 
@@ -83,6 +89,67 @@ Everything is plain React + SVG. No canvas libraries, no external dependencies.
 - Dragging a zone moves its contents with it; **Alt-drag** moves the frame alone.
 - Zones can be connection endpoints, resized, recolored, aligned, and distributed.
 
+### Boards
+- The toolbar button next to the title names the current board. Its menu
+  switches between boards and offers **New blank board**, **Duplicate**,
+  **Rename**, and **Delete**.
+- Each board autosaves independently, so you can keep one per customer. Undo
+  history is per board and resets on switch, so undo can never reach back into
+  a different diagram.
+- The board name drives the export filename and the title block on exports.
+
+### Tidy
+- **Tidy** lays every component out in left-to-right data-flow lanes
+  (collect → process → store → serve → ops), stacking each lane and centring
+  them against the tallest. Existing top-to-bottom order within a lane is kept,
+  so tidying feels like straightening rather than reshuffling. Annotations stay
+  where you put them; zones are left alone.
+
+### Capacity & review (the `Σ` button)
+- **Capacity rollup** — total nodes, vCPU, RAM, and storage, plus a per-tier
+  breakdown. Capacity is read per node (`2 TB`, `40tb`, `1.5PB`, or a bare
+  number meaning TB) and multiplied by the tier's node count.
+- **Architecture review** — advisory best-practice checks, never blocking:
+  master quorum below three or an even count, a frozen tier with no object
+  storage, warm/cold tiers with no hot tier, a replication flow with no remote
+  cluster, a single data node, no monitoring cluster, and unconnected
+  components. The button shows a count of hard warnings.
+- **Copy sizing for Pricing/ROM** puts a one-line summary on the clipboard,
+  ready to paste into the Pricing / ROM scene's description column.
+
+### Presenting
+- **Present** hides the palette, inspector, and editing chrome, leaving the
+  diagram, the step controls, and the pen. `Esc` returns to editing.
+- **Spotlight** — click a component while presenting to pin a highlight on it
+  and its immediate connections, dimming everything else. Click empty space (or
+  **Unfocus**) to clear it.
+- **Build steps** — tag any node or zone with a step in its inspector. Step 0
+  ("Base") is on screen from the start; higher steps appear as you advance.
+  Connections appear once both of their endpoints have been revealed. While
+  editing, not-yet-revealed elements are ghosted rather than hidden so they stay
+  workable.
+- Steps are published through `useSceneMotion`, so the **presenter view** drives
+  them like any other multi-step scene: the beat pills, Next step button, and
+  per-beat speaker notes all work, and the live preview mirrors the reveal.
+  Arrow keys and space step the board directly while presenting.
+
+### Annotation layer
+- **Pen** draws freehand; **Arrow** drags a straight arrow with a head. Pick one
+  of four ink colours. `Esc` puts the pointer back into select mode.
+- Strokes live in the document: they undo, autosave, export, and are tagged with
+  the build step they were drawn on, so ink added on step 2 reappears from step
+  2 onward. **Clear ink** removes them all.
+
+### Import a real cluster
+- **File → Import a real cluster…** accepts a paste of `GET _cat/nodes?v`
+  (header row required), `GET _nodes` / `_nodes/stats`, or `GET _cluster/stats`.
+- Nodes are grouped into one box per data tier and per dedicated role, carrying
+  node counts and averaged hardware, wired with an ILM flow, and wrapped in a
+  zone named after the cluster. A node that is both hot and master-eligible is
+  counted once, as a data node.
+- The result lands in a new board — your current sketch is never overwritten.
+  Nothing is sent anywhere; parsing is entirely local.
+
 ### Architectures menu
 - Load the built-in presets: **Reference**, **Air-gapped**, **Multi-tenant**.
 - Save the current board over any preset slot (stored in `localStorage`;
@@ -98,9 +165,14 @@ Everything is plain React + SVG. No canvas libraries, no external dependencies.
   only — don't use on a shared machine.
 
 ### File menu
-- **Export** JSON (round-trips), SVG, or PNG. Exports match the canvas exactly,
-  including per-connection colors, line styles, and widths.
-- **Import** a previously exported JSON board.
+- **Export** JSON (round-trips), SVG, PNG, or PNG at 4x. Exports match the
+  canvas exactly, including per-connection colors, line styles, widths,
+  annotations, and ink. The **Title & legend** toggle adds a header with the
+  board name and date plus a colour legend of the categories in use.
+- **Share** — *Copy image to clipboard* pastes the diagram straight into Slack
+  or a deck; *Copy share link* packs the whole document into a compressed URL
+  that opens as a new board on the other end (no server involved).
+- **Import** a previously exported JSON board, or a real cluster (above).
 
 ---
 
@@ -123,6 +195,10 @@ Everything is plain React + SVG. No canvas libraries, no external dependencies.
 | Delete | `Del` / `Backspace` (works on mixed node + zone selections) |
 | Undo / redo | `⌘/Ctrl+Z` / `⌘/Ctrl+Shift+Z` |
 | Copy / paste node style | `⌘/Ctrl+Shift+C` / `⌘/Ctrl+Shift+V` |
+| Edit a note | double-click · `⌘Enter` or `Esc` to commit |
+| Present / exit | **Present** button / `Esc` |
+| Step the reveal (presenting) | arrow keys or space |
+| Spotlight (presenting) | click a component; click empty space to clear |
 | Deselect / cancel | `Esc` |
 
 ---
@@ -139,16 +215,45 @@ Everything is plain React + SVG. No canvas libraries, no external dependencies.
 | `src/data/whiteboardTemplates.js` | Pattern blocks and their config forms |
 | `src/utils/whiteboardGeometry.js` | Snapping, elbow routing, path helpers |
 | `src/utils/whiteboardAI.js` | AI chat: catalog, tool schema, prompt, LLM call |
+| `src/utils/whiteboardAnalysis.js` | Tidy layout, architecture validation, capacity rollup |
+| `src/utils/whiteboardImport.js` | Parsing `_cat/nodes` / `_nodes` / `_cluster/stats` into a board |
+| `src/utils/whiteboardShare.js` | Packing a board into a share URL and back |
+
+Tests live beside their modules (`*.test.js`), plus
+`src/components/whiteboard/ElasticWhiteboard.smoke.test.jsx`, which mounts the
+whole component in jsdom and exercises boards, presenting, ink, build steps, and
+cluster import.
+
+## The document
+
+A board is `{ nodes, edges, zones, ink, view, sections }`:
+
+| Field | Shape |
+|---|---|
+| `nodes` | `{ id, type, x, y, title?, sub?, color?, w?, h?, logo?, props?, step? }` |
+| `edges` | `{ id, s, e, lbl?, bi?, color?, style?, width?, pts?, step? }` — `s`/`e` may be zone ids |
+| `zones` | `{ id, x, y, w, h, label, color, step? }` |
+| `ink` | `{ id, kind: "pen"\|"arrow", color, width, step, pts: [{x,y}] }` |
+| `sections` | AI bookkeeping: `sectionId → { template, fill, keys, zoneId }` |
+
+`step` is the build step an element is revealed on; absent or `0` means base
+content, visible from the start.
 
 ## Persistence
 
 | `localStorage` key | What it stores |
 |---|---|
-| `ew-board` | Autosave of the current board (debounced; survives page refresh) |
+| `ew-boards` | Board index: `{ boards: [{ id, name }], activeId }` |
+| `ew-board-<id>` | One named board (debounced autosave; survives page refresh) |
+| `ew-board` | Legacy single-board autosave, migrated into `ew-boards` on first load |
 | `ew-seed-*` | Custom saves of the architecture presets |
 | `ew-llm-provider`, `ew-anthropic-key`, `ew-anthropic-model` | AI chat provider config |
 | `ew-proxy-url`, `ew-proxy-token` | AI chat proxy config |
 
-The current board autosaves continuously, so a refresh picks up where you left
-off. Use **File → Export JSON** or a preset slot to keep boards long-term or
-share them.
+Every board autosaves continuously, so a refresh picks up where you left off.
+Use **File → Export JSON**, a share link, or a preset slot to keep boards
+long-term or hand them to someone else.
+
+When the whiteboard renders inside the presenter view's live preview it detects
+follow mode and never writes to storage, so the mirror can't overwrite the tab
+you're actually presenting from.
