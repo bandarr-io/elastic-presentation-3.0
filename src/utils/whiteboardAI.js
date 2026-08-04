@@ -19,6 +19,7 @@ const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 export function buildCatalog(TYPES) {
   const byCat = {};
   for (const [key, t] of Object.entries(TYPES)) {
+    if (t.annotation) continue;            // sticky notes aren't architecture
     const fields = t.fields && t.fields.length ? ` — fields: ${t.fields.map((f) => f.key).join(", ")}` : "";
     (byCat[t.cat] = byCat[t.cat] || []).push(`  ${key} = ${t.label}${fields}`);
   }

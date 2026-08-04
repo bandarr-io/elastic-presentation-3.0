@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../context/ThemeContext";
 import { buildCatalog, describeDoc, describeSections, buildTool, systemPrompt, runLLM } from "../utils/whiteboardAI";
 import { buildFromSections, instantiateTemplate, sectionEndpoint, TEMPLATE_MENU, TEMPLATE_CONFIG, defaultFill } from "../data/whiteboardTemplates";
-import { STAGE_PALETTES, SURFACES, CATS, TYPES, tagOf, SEEDS } from "../data/whiteboardTypes";
+import { STAGE_PALETTES, SURFACES, CATS, TYPES, tagOf, SEEDS, isAnnotation } from "../data/whiteboardTypes";
 import { anchor, elbowPath, roundedPath, plMid, snap } from "../utils/whiteboardGeometry";
 import { useHistory } from "./whiteboard/useHistory";
 import { useDragController } from "./whiteboard/useDragController";
@@ -49,6 +49,14 @@ const EDGE_WIDTHS = [
   { label: "Thick",  value: 3 },
 ];
 
+/* Arrow-key nudge: one grid step, or 1px with Shift held. */
+const GRID = 8;
+const NUDGE_KEYS = {
+  ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
+};
+/* Marker identifying our own clipboard payloads (vs. arbitrary copied text). */
+const CLIP_MARK = "__elasticWhiteboard";
+
 /* ---------------- pure geometry ---------------- */
 
 const rectOf = (n) => ({
@@ -58,6 +66,7 @@ const rectOf = (n) => ({
 });
 const nodeTag = (n, stages) => n.color || tagOf(TYPES[n.type], stages);
 const nodeSub = (n) => (n.sub !== undefined ? n.sub : TYPES[n.type].sub);
+const noteText = (n) => (n.title !== undefined ? n.title : "");
 const fieldChips = (n) => {
   const out = [];
   for (const f of TYPES[n.type].fields || []) {
@@ -69,6 +78,24 @@ const fieldChips = (n) => {
 };
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
+
+/* Greedy word wrap for SVG export, which has no automatic text flow.
+   Honours explicit newlines; `max` is an approximate character budget. */
+export const wrapText = (text, max) => {
+  const out = [];
+  for (const para of String(text || "").split("\n")) {
+    if (!para) { out.push(""); continue; }
+    let line = "";
+    for (const word of para.split(/\s+/)) {
+      const next = line ? `${line} ${word}` : word;
+      if (next.length <= max) { line = next; continue; }
+      if (line) out.push(line);
+      line = word;
+    }
+    out.push(line);
+  }
+  return out;
+};
 
 let UID = 1000;
 const uid = (p) => `${p}${UID++}`;
@@ -326,6 +353,13 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       if ((e.key === "Delete" || e.key === "Backspace") && sel) {
         e.preventDefault();
         deleteSel();
+        return;
+      }
+      if (sel && NUDGE_KEYS[e.key]) {
+        e.preventDefault();
+        const [dx, dy] = NUDGE_KEYS[e.key];
+        const step = e.shiftKey ? 1 : GRID;         // shift = fine, 1px
+        nudgeSel(dx * step, dy * step);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -357,6 +391,129 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     }
     setSel(null);
   };
+
+  /* Move the whole selection by a delta. Zones carry their contents, matching
+     zone-drag behaviour; a mixed selection moves its own nodes exactly once. */
+  const nudgeSel = (dx, dy) => {
+    if (!sel || !dx && !dy) return;
+    const nodeIds = new Set(sel.kind === "nodes" || sel.kind === "mixed" ? sel.ids : []);
+    const zoneIds = sel.kind === "zone" ? [sel.id]
+                  : sel.kind === "zones" ? sel.ids
+                  : sel.kind === "mixed" ? sel.zoneIds : [];
+    if (!nodeIds.size && !zoneIds.length) return;
+    for (const id of zoneIds) {
+      const z = zoneById[id];
+      if (z) for (const n of nodesInZone(z)) nodeIds.add(n.id);
+    }
+    snapGuard("nudge");
+    if (zoneIds.length) {
+      const zs = new Set(zoneIds);
+      setZones((all) => all.map((z) => (zs.has(z.id) ? { ...z, x: z.x + dx, y: z.y + dy } : z)));
+    }
+    if (nodeIds.size) setNodes((ns) => ns.map((n) => (nodeIds.has(n.id) ? { ...n, x: n.x + dx, y: n.y + dy } : n)));
+    setRouteTick((t) => t + 1);
+  };
+
+  /* ---------- clipboard ----------
+     Selections serialize to JSON on the system clipboard, so a subsystem can
+     be pasted into another board (or another tab). Internal connections are
+     carried along; edges to anything outside the selection are dropped. */
+  const clipPayload = () => {
+    if (!sel) return null;
+    const nodeIds = sel.kind === "nodes" || sel.kind === "mixed" ? sel.ids
+                  : sel.kind === "zone" || sel.kind === "zones" ? [] : [];
+    const zoneIds = sel.kind === "zone" ? [sel.id]
+                  : sel.kind === "zones" ? sel.ids
+                  : sel.kind === "mixed" ? sel.zoneIds : [];
+    const ids = new Set([...nodeIds, ...zoneIds]);
+    if (!ids.size) return null;
+    return {
+      [CLIP_MARK]: 1,
+      nodes: nodes.filter((n) => ids.has(n.id)).map(clone),
+      zones: zones.filter((z) => ids.has(z.id)).map(clone),
+      edges: edges.filter((ed) => ids.has(ed.s) && ids.has(ed.e)).map(clone),
+    };
+  };
+
+  /* Re-id a pasted payload and drop it in. Content lands 32px off its original
+     spot, or at the viewport center when that would be off-screen (which is
+     what happens when pasting into a different board). */
+  const pastePayload = (data) => {
+    if (!data || !data[CLIP_MARK]) return false;
+    const inNodes = (data.nodes || []).filter((n) => TYPES[n.type]);
+    const inZones = data.zones || [];
+    if (!inNodes.length && !inZones.length) return false;
+
+    const box = boxOf(inNodes, inZones);
+    const el = viewportRef.current;
+    const visible = {
+      x0: -view.x / view.k, y0: -view.y / view.k,
+      x1: (el.clientWidth - view.x) / view.k, y1: (el.clientHeight - view.y) / view.k,
+    };
+    const offset = box.x0 + 32 < visible.x1 && box.x1 + 32 > visible.x0
+                && box.y0 + 32 < visible.y1 && box.y1 + 32 > visible.y0;
+    const dx = offset ? 32 : snap((visible.x0 + visible.x1) / 2 - (box.x0 + box.x1) / 2);
+    const dy = offset ? 32 : snap((visible.y0 + visible.y1) / 2 - (box.y0 + box.y1) / 2);
+
+    const remap = {};
+    const newNodes = inNodes.map((n) => {
+      const c = { ...n, id: uid("n"), x: snap(n.x + dx), y: snap(n.y + dy) };
+      remap[n.id] = c.id;
+      return c;
+    });
+    const newZones = inZones.map((z) => {
+      const c = { ...z, id: uid("z"), x: snap(z.x + dx), y: snap(z.y + dy) };
+      remap[z.id] = c.id;
+      return c;
+    });
+    const newEdges = (data.edges || [])
+      .filter((ed) => remap[ed.s] && remap[ed.e])
+      .map((ed) => ({ ...ed, id: uid("e"), s: remap[ed.s], e: remap[ed.e],
+                      ...(ed.pts ? { pts: ed.pts.map((p) => ({ x: p.x + dx, y: p.y + dy })) } : {}) }));
+
+    snapshot();
+    if (newNodes.length) setNodes((ns) => [...ns, ...newNodes]);
+    if (newZones.length) setZones((zs) => [...zs, ...newZones]);
+    if (newEdges.length) setEdges((es) => [...es, ...newEdges]);
+    setSel(newNodes.length && newZones.length
+      ? { kind: "mixed", ids: newNodes.map((n) => n.id), zoneIds: newZones.map((z) => z.id) }
+      : newNodes.length ? { kind: "nodes", ids: newNodes.map((n) => n.id) }
+      : newZones.length > 1 ? { kind: "zones", ids: newZones.map((z) => z.id) }
+      : { kind: "zone", id: newZones[0].id });
+    return true;
+  };
+
+  /* System copy/cut/paste. Bound on window so the canvas doesn't need focus,
+     but ignored while a text field has it. */
+  useEffect(() => {
+    const inField = () => {
+      const tag = document.activeElement && document.activeElement.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    };
+    const onCopy = (e, cut) => {
+      if (inField()) return;
+      const payload = clipPayload();
+      if (!payload) return;
+      e.preventDefault();
+      e.clipboardData.setData("text/plain", JSON.stringify(payload));
+      if (cut) deleteSel();
+    };
+    const onCut = (e) => onCopy(e, true);
+    const onPaste = (e) => {
+      if (inField()) return;
+      let data = null;
+      try { data = JSON.parse(e.clipboardData.getData("text/plain")); } catch { return; }
+      if (pastePayload(data)) e.preventDefault();
+    };
+    window.addEventListener("copy", onCopy);
+    window.addEventListener("cut", onCut);
+    window.addEventListener("paste", onPaste);
+    return () => {
+      window.removeEventListener("copy", onCopy);
+      window.removeEventListener("cut", onCut);
+      window.removeEventListener("paste", onPaste);
+    };
+  });  // re-bound every render so handlers see fresh state
 
   /* copy a node's visual style (accent + effective size); apply it to any
      node selection. A null color means "inherit the type's stage color". */
@@ -823,6 +980,20 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     }
     for (const n of nodes) {
       const t = TYPES[n.type], r = rectOf(n), tag = nodeTag(n, stages);
+      if (t.annotation) {
+        const isNote = t.annotation === "note";
+        const size = isNote ? 13 : 19;
+        const lines = wrapText(noteText(n), Math.max(1, Math.floor((r.w - 24) / (size * 0.54))));
+        if (isNote) out += `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="3" fill="${tag}"/>`;
+        const fill = isNote ? "#1C1E23" : (n.color || surface.ink);
+        const font = isNote ? "'Inter',system-ui,sans-serif" : "'Mier B','Inter',sans-serif";
+        const lh = size * 1.35;
+        const top = isNote ? r.y + 13 + size : r.y + r.h / 2 + size * 0.35 - ((lines.length - 1) * lh) / 2;
+        lines.forEach((ln, i) => {
+          out += `<text x="${r.x + (isNote ? 13 : 4)}" y="${top + i * lh}" font-family="${font}" font-size="${size}" fill="${fill}">${esc(ln)}</text>`;
+        });
+        continue;
+      }
       out += `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="10" fill="${surface.panel}" stroke="${surface.line}"/>`;
       out += `<rect x="${r.x - 1}" y="${r.y + 10}" width="3" height="${Math.max(6, r.h - 20)}" rx="2" fill="${tag}"/>`;
       let tx = r.x + 14;
@@ -1020,7 +1191,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
             Σ{totals.count > 0 && ` ${totals.count} nodes`}{totals.cpu > 0 && ` · ${totals.cpu} vCPU`}{totals.mem > 0 && ` · ${totals.mem} GB RAM`}
           </span>
         )}
-        <span className="ew-hint">shift-click multi · shift-drag select · ⌘D duplicate · ⌘Z undo · drag ring to connect</span>
+        <span className="ew-hint">shift-drag select · ⌘C/⌘V copy · ⌘D duplicate · arrows nudge · ⌘Z undo · drag ring to connect</span>
       </div>
 
       <div className="ew-body">
@@ -1177,23 +1348,43 @@ export default function ElasticWhiteboard({ height = "100%" }) {
               const r = rectOf(n);
               const isSel = selNodeIds.includes(n.id);
               const dim = connected && !connected.has(n.id);
+              const ann = t.annotation;                 // "note" | "text" | undefined
+              const commitText = (v) => {
+                snapGuard("rename:" + n.id);
+                setNodes((ns) => ns.map((m) => (m.id === n.id
+                  ? { ...m, title: ann ? v : (v.trim() || t.label) } : m)));
+                setEditing(null);
+              };
               return (
                 <div key={n.id}
-                     className={"ew-node" + (isSel ? " sel" : "") + (dim ? " dim" : "")}
-                     style={{ left: n.x, top: n.y, width: r.w, height: r.h, "--tag": nodeTag(n, stages) }}
+                     className={(ann ? `ew-ann ew-ann-${ann}` : "ew-node")
+                       + (isSel ? " sel" : "") + (dim ? " dim" : "")}
+                     style={{ left: n.x, top: n.y, width: r.w, height: r.h,
+                              "--tag": nodeTag(n, stages),
+                              ...(ann === "text" ? { color: n.color || surface.ink } : null) }}
                      onPointerDown={(e) => startMove(e, n.id)}
                      onPointerEnter={() => setHover(n.id)}
                      onPointerLeave={() => setHover(null)}>
                   {editing === n.id ? (
-                    <input autoFocus defaultValue={n.title || t.label}
-                           onPointerDown={(e) => e.stopPropagation()}
-                           onBlur={(e) => {
-                             const v = e.target.value.trim();
-                             snapGuard("rename:" + n.id);
-                             setNodes((ns) => ns.map((m) => (m.id === n.id ? { ...m, title: v || t.label } : m)));
-                             setEditing(null);
-                           }}
-                           onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                    ann ? (
+                      <textarea autoFocus defaultValue={noteText(n)}
+                                placeholder={ann === "note" ? "Type a note…" : "Text…"}
+                                onPointerDown={(e) => e.stopPropagation()}
+                                onBlur={(e) => commitText(e.target.value)}
+                                /* Enter adds a line; Esc / Cmd+Enter commit */
+                                onKeyDown={(e) => {
+                                  if (e.key === "Escape" || (e.key === "Enter" && (e.metaKey || e.ctrlKey))) e.target.blur();
+                                }} />
+                    ) : (
+                      <input autoFocus defaultValue={n.title || t.label}
+                             onPointerDown={(e) => e.stopPropagation()}
+                             onBlur={(e) => commitText(e.target.value)}
+                             onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} />
+                    )
+                  ) : ann ? (
+                    <p className={noteText(n) ? "" : "ew-ann-empty"}>
+                      {noteText(n) || (ann === "note" ? "Double-click to write a note" : "Double-click to edit")}
+                    </p>
                   ) : (
                     <div className="ew-nbody">
                       {n.logo && <img src={n.logo} alt="" draggable={false}
@@ -1424,6 +1615,50 @@ export default function ElasticWhiteboard({ height = "100%" }) {
             setNodes((ns) => ns.map((m) => (m.id === n.id ? { ...m, ...patch } : m)));
           };
           const overridden = n.w != null || n.h != null || n.color || n.sub !== undefined;
+          /* --- annotation (sticky note / text) --- */
+          if (t.annotation) {
+            const isNote = t.annotation === "note";
+            return (
+              <div className="ew-inspector" onPointerDown={(e) => e.stopPropagation()}>
+                <div className="ew-ihead">
+                  <span className="ew-idot" style={{ background: nodeTag(n, stages) }} />
+                  <div className="ew-ititle"><b>{t.label}</b><small>Annotation</small></div>
+                  <button className="ew-x" onClick={() => setSel(null)}>×</button>
+                </div>
+                <div className="ew-iscroll">
+                  <section>
+                    <h5>Text</h5>
+                    <textarea className="ew-itext" rows={isNote ? 5 : 2} value={noteText(n)}
+                              placeholder={isNote ? "Type a note…" : "Text…"}
+                              onChange={(e) => set({ title: e.target.value })} />
+                  </section>
+                  <section>
+                    <h5>Layout</h5>
+                    <div className="ew-frow"><span className="ew-flabel">{isNote ? "Paper" : "Color"}</span>
+                      <div className="ew-btnrow">
+                        <input type="color" value={n.color || (isNote ? t.color : surface.ink)}
+                               onChange={(e) => set({ color: e.target.value })} />
+                        {n.color && <button className="ew-btn" onClick={() => set({ color: undefined })}>Auto</button>}
+                      </div></div>
+                    <div className="ew-frow"><span className="ew-flabel">Size</span>
+                      <div className="ew-size">
+                        <input type="number" min="96" max="640" step="8" value={r.w}
+                               onChange={(e) => set({ w: Math.max(96, Math.min(640, +e.target.value || r.w)) })} />
+                        <i>×</i>
+                        <input type="number" min="32" max="420" step="8" value={r.h}
+                               onChange={(e) => set({ h: Math.max(32, Math.min(420, +e.target.value || r.h)) })} />
+                      </div></div>
+                  </section>
+                  <section>
+                    <div className="ew-btnrow">
+                      <button className="ew-btn" onClick={duplicateSel}>Duplicate (⌘D)</button>
+                      <button className="ew-btn danger" onClick={deleteSel}>Delete</button>
+                    </div>
+                  </section>
+                </div>
+              </div>
+            );
+          }
           return (
             <div className="ew-inspector" onPointerDown={(e) => e.stopPropagation()}>
               <div className="ew-ihead">
@@ -1831,6 +2066,21 @@ const CSS = `
 .ew-nbody{ display:flex; align-items:center; gap:9px; min-width:0; }
 .ew-nbody img{ width:24px; height:24px; object-fit:contain; border-radius:5px; flex:none; }
 .ew-nbody > div{ min-width:0; }
+/* annotations: sticky notes and plain text labels */
+.ew-ann{ position:absolute; cursor:grab; user-select:none; overflow:hidden;
+  transition:opacity .2s, box-shadow .15s; }
+.ew-ann.dim{ opacity:.2; }
+.ew-ann p{ margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.ew-ann .ew-ann-empty{ opacity:.45; font-style:italic; }
+.ew-ann textarea{ width:100%; height:100%; resize:none; background:transparent; color:inherit;
+  border:0; outline:0; padding:0; font:inherit; }
+.ew-ann-note{ background:color-mix(in srgb, var(--tag) 88%, #fff); color:#1C1E23;
+  border-radius:3px; padding:11px 13px; font-size:13px; line-height:1.42;
+  box-shadow:0 6px 16px rgba(0,0,0,.38); }
+.ew-ann-note.sel{ box-shadow:0 0 0 2px var(--ink), 0 6px 16px rgba(0,0,0,.38); }
+.ew-ann-text{ background:transparent; padding:2px 4px;
+  font-family:var(--display); font-size:19px; line-height:1.25; display:flex; align-items:center; }
+.ew-ann-text.sel{ box-shadow:0 0 0 1.5px var(--tag); border-radius:4px; }
 .ew-fchips{ display:flex; flex-wrap:wrap; gap:4px; margin-top:5px; }
 .ew-fchips em{ font-style:normal; font-family:var(--mono); font-size:9.5px; color:var(--muted);
   border:1px solid var(--line); background:var(--panel2); border-radius:99px; padding:1px 7px;
@@ -1868,6 +2118,10 @@ const CSS = `
 .ew-frow input[type=checkbox]{ accent-color:var(--accent); width:15px; height:15px; justify-self:start; }
 .ew-frow input[type=color]{ width:42px; height:26px; padding:1px; background:var(--panel);
   border:1px solid var(--line); border-radius:6px; cursor:pointer; }
+.ew-itext{ background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:6px;
+  padding:7px 9px; font-size:12.5px; font-family:var(--body); line-height:1.45; width:100%;
+  box-sizing:border-box; resize:vertical; }
+.ew-itext:focus{ outline:none; border-color:var(--accent); }
 .ew-size{ display:flex; align-items:center; gap:6px; }
 .ew-size input{ width:64px !important; }
 .ew-size i{ color:var(--faint); font-style:normal; }

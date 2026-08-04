@@ -18,7 +18,7 @@ export const SURFACES = {
 export const CATS = [
   "Core & UI", "Nodes", "Ingest & Processing", "OpenTelemetry (EDOT)", "Beats",
   "Security", "ML & NLP", "Maps & Geo", "Clients & Tooling", "Orchestration",
-  "Air-Gapped Services", "Custom", "General",
+  "Air-Gapped Services", "Custom", "General", "Annotation",
 ];
 
 /* One Elastic-brand accent per category so a node's colour reads as its role.
@@ -39,6 +39,7 @@ export const CAT_COLORS = {
   "Air-Gapped Services":  "#FF957D", // coral
   "Custom":               "#D6BF57", // gold
   "General":              "#98A2B3", // neutral grey
+  "Annotation":           "#FEC514", // Elastic yellow (sticky paper)
 };
 
 /* Typed node registry. `flow` overrides the color of connections leaving
@@ -203,13 +204,28 @@ export const TYPES = {
     fields: [{ key: "backend", label: "Backend", kind: "select", options: ["S3", "Azure Blob", "GCS", "MinIO", "NFS"] }] },
   monitoring: { cat: "General", label: "Monitoring Cluster", sub: "Separate ES + Kibana", stage: "ops", ops: true, w: 212, h: 76,
     fields: [{ key: "retention", label: "Retention", kind: "text", placeholder: "e.g. 30d" }] },
+
+  /* --- Annotation: free text, not part of the architecture. `annotation`
+     opts these out of the uniform node footprint, the component catalog sent
+     to the AI, validation, and capacity totals. --- */
+  note: { cat: "Annotation", label: "Sticky note", sub: "", stage: "ops", annotation: "note",
+          w: 200, h: 132, color: "#FEC514" },
+  text: { cat: "Annotation", label: "Text", sub: "", stage: "ops", annotation: "text",
+          w: 240, h: 44 },
 };
+
+/* Annotation types keep their own footprint and are excluded from the uniform
+   node sizing applied below. */
+export const isAnnotation = (type) => !!(TYPES[type] && TYPES[type].annotation);
 
 /* Uniform node footprint: every component renders at the same 248x96 size,
    so any per-type w/h above is superseded here. Change these two numbers to
    resize the whole palette at once. */
 export const NODE_W = 248, NODE_H = 96;
-for (const k of Object.keys(TYPES)) { TYPES[k].w = NODE_W; TYPES[k].h = NODE_H; }
+for (const k of Object.keys(TYPES)) {
+  if (TYPES[k].annotation) continue;
+  TYPES[k].w = NODE_W; TYPES[k].h = NODE_H;
+}
 
 /* instance type on all Nodes-category types (tiers & node roles) */
 const INSTANCE = { key: "instance", label: "Instance type", kind: "text",

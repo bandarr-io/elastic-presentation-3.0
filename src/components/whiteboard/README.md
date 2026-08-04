@@ -46,7 +46,11 @@ Everything is plain React + SVG. No canvas libraries, no external dependencies.
 
 ### Nodes
 - Drag to move (multi-selections move together), corner grip to resize,
-  double-click to rename, `⌘D` to duplicate.
+  double-click to rename, `⌘D` to duplicate, arrow keys to nudge by one grid
+  step (hold Shift for 1px).
+- `⌘C` / `⌘X` / `⌘V` copy, cut, and paste a whole selection — nodes, zones, and
+  the connections between them — through the system clipboard, so a subsystem
+  can be lifted into another board or another browser tab.
 - Inspector: rename, subtitle, accent color, size, per-node specs.
 - Copy / paste visual style across nodes (`⌘⇧C` / `⌘⇧V`).
 - Align and distribute controls for multi-selections.
@@ -64,6 +68,15 @@ Everything is plain React + SVG. No canvas libraries, no external dependencies.
   - **Shape** — drag the hollow dots on a selected line to add bends; drag solid
     dots to move them, double-click to remove, or *Reset shape*.
 - An animated particle flows along each connection to suggest data movement.
+
+### Annotations
+- The **Annotation** palette category adds two non-architecture primitives:
+  a **Sticky note** (colored paper, multi-line, for questions and decisions
+  captured mid-conversation) and a **Text** label (plain heading text).
+- Double-click to edit; `⌘Enter` or `Esc` commits, Enter adds a line.
+- Both can be connected to components like any other element, and both render
+  in SVG/PNG exports. They're excluded from the AI component catalog, the
+  capacity totals, and architecture validation.
 
 ### Zones
 - Labeled, colored containers for grouping (e.g. a data center, a VPC, a site).
@@ -105,6 +118,8 @@ Everything is plain React + SVG. No canvas libraries, no external dependencies.
 | Bend a connection | select it, drag the hollow midpoints |
 | Move zone (with contents / alone) | drag pill / Alt-drag |
 | Duplicate | `⌘/Ctrl+D` |
+| Copy / cut / paste selection | `⌘/Ctrl+C` · `⌘/Ctrl+X` · `⌘/Ctrl+V` |
+| Nudge selection | arrow keys (Shift for 1px) |
 | Delete | `Del` / `Backspace` (works on mixed node + zone selections) |
 | Undo / redo | `⌘/Ctrl+Z` / `⌘/Ctrl+Shift+Z` |
 | Copy / paste node style | `⌘/Ctrl+Shift+C` / `⌘/Ctrl+Shift+V` |
