@@ -175,7 +175,7 @@ applied (the New Prospect preset governs the actual default flow).
 | Node Types | `node-types` | Elasticsearch node roles — master, data, ingest, coordinating, ML |
 | Elastic Overview | `elastic-overview` | The visualization, data, and ETL planes with optional management plane |
 | Enterprise Deployment | `enterprise-deployment` | Full reference architecture — sources, ingest, tiered cluster, consumers, monitoring |
-| Architecture Whiteboard | `whiteboard` | Live drag-and-drop canvas for whiteboarding Elastic architectures ([full docs](src/components/whiteboard/README.md)) |
+| Architecture Whiteboard | `whiteboard` | Live drag-and-drop canvas for whiteboarding, sizing, and presenting Elastic architectures ([full docs](src/components/whiteboard/README.md)) |
 
 ---
 
@@ -228,26 +228,35 @@ left-to-right data-flow lanes.
 keep one per customer. Built-in architecture presets remain available in the
 Architectures menu.
 
+**Sizing.** *Size…* turns ingest per day and retention per tier into node
+counts, using Elastic's disk-to-RAM tier ratios, and draws the result as tiers
+wired with ILM. Cold and frozen mount searchable snapshots, so replicas don't
+multiply their storage.
+
 **Analysis.** A `Σ` panel rolls up nodes, vCPU, RAM, and per-tier storage, and
 runs advisory best-practice checks (master quorum, frozen tier without object
-storage, single data node, orphans). Sizing copies out in one line for the
-Pricing / ROM scene.
+storage, single data node, orphans). It emits 64 GB resource-unit quote lines
+in the tab-delimited shape the Pricing / ROM builder's paste importer already
+parses, so a drawn architecture becomes a priced estimate without retyping it.
 
 **Real data.** Paste `GET _cat/nodes?v`, `_nodes`, or `_cluster/stats` output
 and the board draws the customer's actual topology into a new board. Parsing is
-entirely local.
+entirely local. **Compare** any two boards to get the migration delta: what the
+target adds, drops, and resizes, and how the rollups move.
 
 **Presenting.** *Present* hides the editing chrome; click a component to
 spotlight it and its connections. Tag components with **build steps** to reveal
 the architecture piece by piece — those steps are published through
 `useSceneMotion`, so the [presenter view](#presenter-view) drives them like any
-other multi-step scene, complete with beat pills and per-beat speaker notes. A
-pen and arrow tool annotate over the top, with strokes tied to the step they
-were drawn on.
+other multi-step scene, complete with beat pills and per-beat speaker notes.
+*Flow* walks the data through the diagram one hop at a time for narrating the
+path. A pen and arrow tool annotate over the top, with strokes tied to the step
+they were drawn on.
 
 **Sharing.** Export JSON, SVG, or PNG (2x/4x) with an optional title block and
 category legend, copy the image straight to the clipboard, or copy a share link
-that packs the whole board into a compressed URL.
+that packs the whole board into a compressed URL. *✦ Write it up* drafts the
+follow-up note from the diagram, the rollups, and the review findings.
 
 See the [whiteboard README](src/components/whiteboard/README.md) for the full
 feature tour, interaction cheat sheet, document schema, and code map.
@@ -395,8 +404,11 @@ Vitest covers the parts where a regression would be silent:
 |---|---|
 | `src/presenter/presenterSync.test.js` | Presenter command handling (next/prev, beats, scene actions) |
 | `src/utils/whiteboardTemplates.test.js` | Pattern block instantiation and layout |
-| `src/utils/whiteboardAnalysis.test.js` | Tidy lane layout, architecture validation rules, capacity math |
+| `src/utils/whiteboardAnalysis.test.js` | Tidy lane layout, flow hops, architecture validation rules, capacity math |
+| `src/utils/whiteboardSizing.test.js` | Ingest → node counts, and the Pricing/ROM quote lines |
+| `src/utils/whiteboardDiff.test.js` | Matching components across boards and the reported delta |
 | `src/utils/whiteboardImport.test.js` | Parsing `_cat/nodes` / `_nodes` / `_cluster/stats` into a board |
 | `src/utils/whiteboardShare.test.js` | Share-link round-tripping and hash param handling |
-| `src/components/whiteboard/reveal.test.js` | Text wrapping, ink paths, build-step visibility |
-| `src/components/whiteboard/ElasticWhiteboard.smoke.test.jsx` | Mounts the whiteboard in jsdom: boards, presenting, ink, steps, cluster import |
+| `src/utils/whiteboardAI.test.js` | Board description and the summary prompt |
+| `src/utils/whiteboardPresenting.test.js` | Text wrapping, ink paths, build-step visibility |
+| `src/components/whiteboard/ElasticWhiteboard.smoke.test.jsx` | Mounts the whiteboard in jsdom: boards, presenting, ink, steps, sizing, comparison, the written summary, cluster import |

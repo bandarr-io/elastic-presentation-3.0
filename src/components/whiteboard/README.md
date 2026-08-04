@@ -22,12 +22,17 @@ Everything is plain React + SVG. No canvas libraries, no external dependencies.
   architectures, keep a named board per account, and round-trip boards as JSON.
 - **Start from their reality.** Paste `_cat/nodes` or `_nodes` output from the
   customer's cluster and the board draws their actual topology, node counts and
-  hardware included.
+  hardware included — then compare it against the target design to get the
+  migration delta.
+- **Answer the sizing question.** Give it ingest per day and retention per tier
+  and it derives node counts from Elastic's tier ratios, draws them, and hands
+  the result to the Pricing / ROM builder as quote lines.
 - **Present it, don't just draw it.** Tag components with build steps and reveal
-  the architecture piece by piece, driven from the presenter view; annotate over
-  the top with a pen while you talk.
+  the architecture piece by piece, driven from the presenter view; trace the
+  data path hop by hop; annotate over the top with a pen while you talk.
 - **Takeaways.** Export the finished diagram as SVG or PNG (with a title block
-  and legend), copy it to the clipboard, or send a share link.
+  and legend), copy it to the clipboard, send a share link, or have the board
+  written up as the follow-up note.
 
 ---
 
@@ -114,8 +119,48 @@ Everything is plain React + SVG. No canvas libraries, no external dependencies.
   storage, warm/cold tiers with no hot tier, a replication flow with no remote
   cluster, a single data node, no monitoring cluster, and unconnected
   components. The button shows a count of hard warnings.
-- **Copy sizing for Pricing/ROM** puts a one-line summary on the clipboard,
-  ready to paste into the Pricing / ROM scene's description column.
+- **Copy quote lines** emits one 64 GB resource-unit line item per tier, plus
+  one for the master/ML/coordinating nodes, tab-delimited in the column order
+  the Pricing / ROM builder's paste importer reads (SKU, description, quantity,
+  unit price, discount). Unit price is left blank for you to fill in. Set
+  **Memory** on the nodes — resource units are priced per 64 GB of RAM.
+- **Copy summary** is the same numbers as one line of prose, for notes.
+- **✦ Write it up** drafts the follow-up note (below).
+
+### Size a cluster
+- **Size…** in the toolbar asks the question that comes before drawing: given
+  this much ingest, how big does the cluster need to be?
+- Enter raw ingest in GB/day, replica count, index overhead (index size against
+  raw — roughly 1:1 for logs with default mappings, less with synthetic
+  `_source`), RAM per node, and the days held in each tier.
+- Node counts come from Elastic's published disk-to-RAM tier ratios — 1:30 hot,
+  1:160 warm and cold, 1:1000 frozen — so a 64 GB hot node carries about 1.9 TB
+  and a frozen node addresses about 62 TB of object storage. Cold and frozen
+  mount searchable snapshots, so replicas don't multiply their storage, and a
+  replicated tier always gets at least two nodes.
+- **Draw it** adds the tiers to the current board as a stack wired with ILM,
+  inside a zone labelled with the inputs. The numbers land on the nodes, so the
+  capacity rollup and the quote lines pick them up immediately.
+
+### Compare boards
+- The board menu's **Compare this board with** holds the current board against
+  another one — the current-state sketch, or a cluster imported from the
+  customer's diagnostics.
+- Components are matched across boards by type and name, since ids only mean
+  something within a single board. Repeated components pair up one for one, so
+  only the surplus counts as added or dropped.
+- The panel lists what the board **adds**, **drops**, and **resizes** (with the
+  properties that moved), and how the node, vCPU, RAM, and storage rollups
+  shift. Added and resized components are outlined on the canvas — dropped ones
+  aren't on this board, so nothing is highlighted for them.
+
+### Write it up
+- **✦ Write it up** in the capacity panel drafts the note that follows the
+  session, from the diagram, the capacity rollup, and the review findings.
+- The model is told to describe what it's given and to flag gaps rather than
+  fill them, so it won't invent components or numbers. The draft opens in an
+  editable box — check it before you send it.
+- Uses the same provider configuration as the AI chat.
 
 ### Presenting
 - **Present** hides the palette, inspector, and editing chrome, leaving the
@@ -132,6 +177,11 @@ Everything is plain React + SVG. No canvas libraries, no external dependencies.
   them like any other multi-step scene: the beat pills, Next step button, and
   per-beat speaker notes all work, and the live preview mirrors the reveal.
   Arrow keys and space step the board directly while presenting.
+- **Flow** walks data through the architecture one leg at a time, grouping the
+  connections into hops from the sources outward and lighting one hop while
+  dimming the rest — for narrating the path rather than pointing at it. It
+  advances on its own, or a hop per press if the viewer prefers reduced motion.
+  Spotlighting a component stops the trace, and vice versa.
 
 ### Annotation layer
 - **Pen** draws freehand; **Arrow** drags a straight arrow with a head. Pick one
@@ -199,6 +249,9 @@ Everything is plain React + SVG. No canvas libraries, no external dependencies.
 | Present / exit | **Present** button / `Esc` |
 | Step the reveal (presenting) | arrow keys or space |
 | Spotlight (presenting) | click a component; click empty space to clear |
+| Trace the data path (presenting) | **Flow** |
+| Size a cluster from ingest | **Size…** |
+| Compare with another board | board menu → **Compare this board with** |
 | Deselect / cancel | `Esc` |
 
 ---
@@ -214,15 +267,18 @@ Everything is plain React + SVG. No canvas libraries, no external dependencies.
 | `src/data/whiteboardTypes.js` | Node type catalog, categories, palettes, built-in SEED architectures |
 | `src/data/whiteboardTemplates.js` | Pattern blocks and their config forms |
 | `src/utils/whiteboardGeometry.js` | Snapping, elbow routing, path helpers |
-| `src/utils/whiteboardAI.js` | AI chat: catalog, tool schema, prompt, LLM call |
-| `src/utils/whiteboardAnalysis.js` | Tidy layout, architecture validation, capacity rollup |
+| `src/utils/whiteboardAI.js` | AI chat and the written summary: catalog, tool schema, prompts, LLM calls |
+| `src/utils/whiteboardAnalysis.js` | Tidy layout, flow hops, architecture validation, capacity rollup |
+| `src/utils/whiteboardSizing.js` | Ingest → node counts, and board → Pricing/ROM quote lines |
+| `src/utils/whiteboardDiff.js` | Comparing two boards |
 | `src/utils/whiteboardImport.js` | Parsing `_cat/nodes` / `_nodes` / `_cluster/stats` into a board |
 | `src/utils/whiteboardShare.js` | Packing a board into a share URL and back |
+| `src/utils/whiteboardPresenting.js` | Ink paths, build-step visibility, export text wrapping |
 
 Tests live beside their modules (`*.test.js`), plus
 `src/components/whiteboard/ElasticWhiteboard.smoke.test.jsx`, which mounts the
-whole component in jsdom and exercises boards, presenting, ink, build steps, and
-cluster import.
+whole component in jsdom and exercises boards, presenting, ink, build steps,
+sizing, comparison, the written summary, and cluster import.
 
 ## The document
 
