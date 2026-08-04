@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../context/ThemeContext";
-import { buildCatalog, describeDoc, describeSections, buildTool, systemPrompt, runLLM } from "../utils/whiteboardAI";
+import { buildCatalog, describeDoc, describeSections, buildTool, systemPrompt, runLLM,
+         SUMMARY_SYSTEM, summaryPrompt } from "../utils/whiteboardAI";
 import { buildFromSections, instantiateTemplate, sectionEndpoint, TEMPLATE_MENU, TEMPLATE_CONFIG, defaultFill } from "../data/whiteboardTemplates";
 import { STAGE_PALETTES, SURFACES, CATS, CAT_COLORS, TYPES, tagOf, SEEDS,
          NODE_W, NODE_H } from "../data/whiteboardTypes";
@@ -1573,6 +1574,31 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       () => flashSeedNote(ok),
       () => flashSeedNote("Couldn't reach the clipboard"));
   };
+  /* Write up the board as the note that follows the session. The model is
+     given the diagram, the rollups, and the review findings, and asked to
+     describe them rather than design anything. */
+  const [summary, setSummary] = useState(null);   // { busy } | { text } | { error }
+  const writeSummary = async () => {
+    setSummary({ busy: true });
+    try {
+      const text = await runLLM(
+        { provider, apiKey, model, proxyUrl, proxyToken },
+        {
+          system: SUMMARY_SYSTEM,
+          messages: [{ role: "user", content: summaryPrompt({
+            boardName: activeBoard.name,
+            board: describeDoc({ nodes, edges, zones }, TYPES),
+            totals,
+            warnings,
+          }) }],
+        },
+        { text: true });
+      setSummary({ text });
+    } catch (e) {
+      setSummary({ error: e.message });
+    }
+  };
+
   const copySizing = () =>
     copyToClipboard(sizingSummary(), "Sizing summary copied",
                     "Set node counts and capacities first");
@@ -1808,6 +1834,10 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
       {importOpen && <ClusterImport onClose={() => setImportOpen(false)} onImport={importCluster} />}
       {sizeOpen && <SizingCalculator onClose={() => setSizeOpen(false)} onDraw={drawSizing} />}
+      {summary && (
+        <BoardSummary state={summary} onClose={() => setSummary(null)} onRetry={writeSummary}
+                      onCopy={(text) => copyToClipboard(text, "Note copied", "Nothing to copy")} />
+      )}
 
       <div className="ew-body">
         {/* palette */}
@@ -2159,6 +2189,10 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                   <button className="ew-btn" onClick={copySizing}
                           title="Copy a one-line sizing summary">
                     Copy summary
+                  </button>
+                  <button className="ew-btn" onClick={writeSummary}
+                          title="Write up this board as a follow-up note">
+                    ✦ Write it up
                   </button>
                 </div>
                 <div className="ew-review-checks">
@@ -2707,6 +2741,44 @@ function ClusterImport({ onClose, onImport }) {
           <button className="ew-btn primary" disabled={!summary} onClick={() => onImport(parsed)}>
             Create board
           </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* The written follow-up. Editable before it's copied — the model drafts, the
+   SA decides what actually goes to the customer. */
+function BoardSummary({ state, onClose, onCopy, onRetry }) {
+  const [draft, setDraft] = useState(state.text || "");
+  useEffect(() => { if (state.text) setDraft(state.text); }, [state.text]);
+
+  return (
+    <>
+      <div className="ew-modal-backdrop" onClick={onClose} />
+      <div className="ew-modal">
+        <div className="ew-modal-h">
+          <b>Follow-up note</b>
+          <button className="ew-x" onClick={onClose}>×</button>
+        </div>
+        <div className="ew-modal-body">
+          {state.busy && <p className="ew-modal-hint">Writing up the board…</p>}
+          {state.error && <p className="ew-modal-bad">{state.error}</p>}
+          {state.text && (
+            <>
+              <textarea className="ew-itext" rows={12} value={draft}
+                        onChange={(e) => setDraft(e.target.value)} />
+              <p className="ew-ihint">Drafted from the diagram, the capacity rollup, and the review findings. Check it before you send it.</p>
+            </>
+          )}
+        </div>
+        <div className="ew-modal-foot">
+          <span className="ew-ihint" />
+          <button className="ew-btn" onClick={onClose}>Close</button>
+          {state.error && <button className="ew-btn" onClick={onRetry}>Try again</button>}
+          {state.text && (
+            <button className="ew-btn primary" onClick={() => onCopy(draft)}>Copy</button>
+          )}
         </div>
       </div>
     </>

@@ -170,37 +170,41 @@ CURRENT BOARD:
 ${docDescription}`;
 }
 
-/* Call Anthropic's Messages API from the browser (BYO key) and return the
-   forced edit_whiteboard tool input. Throws a readable error on failure. */
-export async function callClaude({ apiKey, model, system, messages, tools }) {
+/* POST JSON and hand back the parsed body, turning transport and API failures
+   into one readable error. `explain` lets a caller add context to the API's
+   own message. */
+async function postJSON(url, headers, body, { who, hint = "Check your connection.", explain }) {
   let res;
   try {
-    res = await fetch(ANTHROPIC_URL, {
+    res = await fetch(url, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        system,
-        messages,
-        tools,
-        tool_choice: { type: "tool", name: "edit_whiteboard" },
-      }),
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
     });
   } catch (e) {
-    throw new Error(`Network error reaching Anthropic (${e.message}). Check your connection.`);
+    throw new Error(`Network error reaching ${who} (${e.message}). ${hint}`);
   }
   if (!res.ok) {
     let detail = `HTTP ${res.status}`;
-    try { const j = await res.json(); detail = j?.error?.message || detail; } catch { /* non-JSON */ }
-    throw new Error(detail);
+    try { const j = await res.json(); detail = j?.error?.message || j?.message || detail; } catch { /* non-JSON */ }
+    throw new Error(explain ? explain(detail, res.status) : detail);
   }
-  const data = await res.json();
+  return res.json();
+}
+
+const anthropicRequest = (apiKey, body) => postJSON(ANTHROPIC_URL, {
+  "x-api-key": apiKey,
+  "anthropic-version": "2023-06-01",
+  "anthropic-dangerous-direct-browser-access": "true",
+}, { max_tokens: 4096, ...body }, { who: "Anthropic" });
+
+/* Call Anthropic's Messages API from the browser (BYO key) and return the
+   forced edit_whiteboard tool input. Throws a readable error on failure. */
+export async function callClaude({ apiKey, model, system, messages, tools }) {
+  const data = await anthropicRequest(apiKey, {
+    model, system, messages, tools,
+    tool_choice: { type: "tool", name: "edit_whiteboard" },
+  });
   const tu = (data.content || []).find((b) => b.type === "tool_use");
   if (!tu || !tu.input) throw new Error("Claude did not return a whiteboard edit.");
   return tu.input;
@@ -226,34 +230,26 @@ function normalizeProxyUrl(url) {
 
 /* Call an OpenAI-compatible proxy (e.g. LiteLLM) with a Bearer token, using
    function-calling to force the structured edit_whiteboard output. */
+const proxyRequest = (url, token, model, body) => postJSON(
+  normalizeProxyUrl(url),
+  { authorization: `Bearer ${token}` },
+  { model, max_tokens: 4096, ...body },
+  {
+    who: "proxy",
+    hint: "Check the endpoint URL / CORS.",
+    explain: (detail, status) =>
+      (status === 404 || status === 400 || /model/i.test(detail))
+        ? `${detail} — check that the model "${model}" is available on this proxy (Settings ⚙).`
+        : detail,
+  },
+);
+
 export async function callProxy({ url, token, model, system, messages, tools }) {
-  const endpoint = normalizeProxyUrl(url);
-  const oaMessages = [{ role: "system", content: system }, ...messages];
-  let res;
-  try {
-    res = await fetch(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        messages: oaMessages,
-        tools: toOpenAITools(tools),
-        tool_choice: { type: "function", function: { name: "edit_whiteboard" } },
-      }),
-    });
-  } catch (e) {
-    throw new Error(`Network error reaching proxy (${e.message}). Check the endpoint URL / CORS.`);
-  }
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try { const j = await res.json(); detail = j?.error?.message || j?.message || detail; } catch { /* non-JSON */ }
-    if (res.status === 404 || res.status === 400 || /model/i.test(detail)) {
-      detail += ` — check that the model "${model}" is available on this proxy (Settings ⚙).`;
-    }
-    throw new Error(detail);
-  }
-  const data = await res.json();
+  const data = await proxyRequest(url, token, model, {
+    messages: [{ role: "system", content: system }, ...messages],
+    tools: toOpenAITools(tools),
+    tool_choice: { type: "function", function: { name: "edit_whiteboard" } },
+  });
   const msg = data?.choices?.[0]?.message;
   const call = msg?.tool_calls && msg.tool_calls[0];
   let raw = call?.function?.arguments;
@@ -266,12 +262,69 @@ export async function callProxy({ url, token, model, system, messages, tools }) 
   }
 }
 
-/* Provider dispatcher: routes to Anthropic direct or an OpenAI-compatible proxy. */
-export async function runLLM(cfg, payload) {
+/* Ask for prose rather than a board edit — used for the written summary. */
+export async function callClaudeText({ apiKey, model, system, messages }) {
+  const data = await anthropicRequest(apiKey, { model, system, messages });
+  const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("").trim();
+  if (!text) throw new Error("Claude returned an empty response.");
+  return text;
+}
+
+export async function callProxyText({ url, token, model, system, messages }) {
+  const data = await proxyRequest(url, token, model, {
+    messages: [{ role: "system", content: system }, ...messages],
+  });
+  const text = (data?.choices?.[0]?.message?.content || "").trim();
+  if (!text) throw new Error("The proxy returned an empty response.");
+  return text;
+}
+
+/* Provider dispatcher: routes to Anthropic direct or an OpenAI-compatible
+   proxy. `text: true` asks for prose instead of a forced tool call. */
+export async function runLLM(cfg, payload, { text = false } = {}) {
   if (cfg.provider === "proxy") {
     if (!cfg.proxyUrl || !cfg.proxyToken) throw new Error("Set the proxy endpoint URL and token in settings (⚙).");
-    return callProxy({ url: cfg.proxyUrl, token: cfg.proxyToken, model: cfg.model, ...payload });
+    const call = text ? callProxyText : callProxy;
+    return call({ url: cfg.proxyUrl, token: cfg.proxyToken, model: cfg.model, ...payload });
   }
   if (!cfg.apiKey) throw new Error("Add your Anthropic API key in settings (⚙).");
-  return callClaude({ apiKey: cfg.apiKey, model: cfg.model, ...payload });
+  const call = text ? callClaudeText : callClaude;
+  return call({ apiKey: cfg.apiKey, model: cfg.model, ...payload });
+}
+
+/* ---------------- written summary ---------------- */
+
+/* Turn the board and its rollups into the follow-up note an SA would send
+   after the whiteboard session. The model gets facts only — it writes them up,
+   it doesn't invent architecture. */
+export const SUMMARY_SYSTEM = `You are an Elastic solutions architect writing the follow-up note after a whiteboard session with a customer.
+
+Write in plain, specific prose for a technical audience. Use the facts you are given and nothing else — never invent components, numbers, or requirements that aren't in the board description. If something important is missing from the design, say so plainly rather than filling the gap.
+
+Structure the note as:
+- One short paragraph describing what the architecture does, following the data from ingest through to the people using it.
+- A paragraph on sizing, if node counts or capacity are given.
+- A short list of open questions or risks, drawn from the review findings and anything the diagram leaves undecided.
+
+No preamble, no sign-off, no markdown headings. Around 200 words.`;
+
+export function summaryPrompt({ board, totals, warnings = [], boardName }) {
+  const facts = [`BOARD: ${boardName || "Untitled"}`, "", board];
+
+  if (totals && (totals.count || totals.storageTB || totals.mem)) {
+    const tiers = (totals.tiers || [])
+      .map((t) => `${t.label}: ${t.count} node${t.count === 1 ? "" : "s"}`)
+      .join(", ");
+    facts.push("", "SIZING:",
+      `  ${totals.count || 0} nodes, ${totals.cpu || 0} vCPU, ${totals.mem || 0} GB RAM`,
+      ...(tiers ? [`  tiers — ${tiers}`] : []),
+      ...(totals.storageTB ? [`  storage — ${totals.storageTB.toFixed(1)} TB across the tiers`] : []));
+  }
+
+  if (warnings.length) {
+    facts.push("", "REVIEW FINDINGS:",
+      ...warnings.map((w) => `  [${w.level}] ${w.title}: ${w.detail}`));
+  }
+
+  return facts.join("\n");
 }

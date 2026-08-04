@@ -240,6 +240,47 @@ describe('ElasticWhiteboard', () => {
     }
   })
 
+  it('writes the board up as an editable follow-up note', async () => {
+    localStorage.setItem('ew-anthropic-key', 'test-key')
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ content: [{ type: 'text', text: 'The cluster ingests through Logstash.' }] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    mount()
+    fireEvent.click(root.querySelector('.ew-totals'))
+    fireEvent.click(btn('✦ Write it up'))
+    await vi.waitFor(() => expect(root.querySelector('.ew-modal textarea')).toBeTruthy())
+
+    expect(root.querySelector('.ew-modal-h b').textContent).toBe('Follow-up note')
+    expect(root.querySelector('.ew-modal textarea').value).toBe('The cluster ingests through Logstash.')
+
+    // the board description and its review findings are what the model is given
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body)
+    expect(sent.messages[0].content).toContain('BOARD: My board')
+    expect(sent.tools).toBeUndefined()
+
+    vi.unstubAllGlobals()
+  })
+
+  it('offers a retry when the model call fails', async () => {
+    localStorage.setItem('ew-anthropic-key', 'test-key')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false, status: 401, json: async () => ({ error: { message: 'invalid key' } }),
+    }))
+
+    mount()
+    fireEvent.click(root.querySelector('.ew-totals'))
+    fireEvent.click(btn('✦ Write it up'))
+    await vi.waitFor(() => expect(root.querySelector('.ew-modal-bad')).toBeTruthy())
+
+    expect(root.querySelector('.ew-modal-bad').textContent).toBe('invalid key')
+    expect(btn('Try again')).toBeTruthy()
+
+    vi.unstubAllGlobals()
+  })
+
   it('imports a pasted cluster into its own board', () => {
     mount()
     fireEvent.click(btn(/^File/))
