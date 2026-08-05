@@ -222,22 +222,54 @@ blocks (cluster tiers, ingestion, user space), zones, styled connections
 (per-edge color; solid/dashed/dotted/long-dash/dash-dot; thin/normal/thick),
 sticky notes and text labels, clipboard copy/paste of whole subsystems,
 arrow-key nudging, and a **Tidy** button that lays everything out in
-left-to-right data-flow lanes.
+left-to-right data-flow lanes. Nodes keep a fixed width per type but grow in
+height to fit whatever they're showing — titles, sub-lines, and spec chips —
+and template stacks and zones re-open around the taller boxes. Data Source
+nodes carry an integration picked from the Elastic Agent catalog (384 GA
+integrations, scraped from the package registry) plus a raw-ingest GB/day
+figure.
 
 **Boards.** Named boards with independent autosave and undo history, so you can
 keep one per customer. Built-in architecture presets remain available in the
 Architectures menu.
 
-**Sizing.** *Size…* turns ingest per day and retention per tier into node
-counts, using Elastic's disk-to-RAM tier ratios, and draws the result as tiers
-wired with ILM. Cold and frozen mount searchable snapshots, so replicas don't
-multiply their storage.
+**Sizing.** *Size…* turns ingest per day, retention per tier, and agent/user
+counts into a whole deployment: data tiers, a three-node master quorum (added
+automatically once the data tiers reach six nodes), Logstash sized from
+throughput, Kibana sized from concurrent users, optional dedicated ML nodes for
+inference and anomaly detection (off by default, 16 GB floor and HA pair,
+grown from ingest, and excluded from the master threshold since they hold no
+shards), Elastic Agent in the ingestion zone, a separate monitoring cluster
+hung off the cluster zone below the User Space, and the object store the frozen
+tier snapshots into. Ingest is either
+one hand-entered total or the **sum of the board's Data Source volumes** — in
+which case the drawn architecture wires those very source nodes into its new
+ingestion zone. Pick a provider: on Elastic Cloud (AWS, GCP, or Azure) the maths uses
+the instance configurations ECH actually offers — documented disk:RAM and
+vCPU/RAM ratios, node RAM snapped to each config's published size ladder, and
+scale-out past the top rung — a hot-profile picker mirrors the deployment
+templates (Storage Optimized, CPU Optimized, Vector Search Optimized, …), a
+region picker narrows hardware to what each of the 58 ECH regions actually
+offers, and the hardware table names the real config ids
+(`aws.es.datahot.i8g`, `gcp.es.datawarm.n2.68x10x190`, …). Self-managed keeps
+Elastic's tier-guidance ratios with best-practice raw EC2 picks (NVMe `i3en`
+hot/frozen, dense `d3en` warm/cold, and so on). Every cell — instance, vCPU,
+RAM, disk — is editable before drawing. It draws all of it as one wired
+architecture using the same deterministic templates as the Patterns menu, with
+every node fully specified. Cold and frozen mount searchable snapshots, so
+replicas don't multiply their storage.
 
 **Analysis.** A `Σ` panel rolls up nodes, vCPU, RAM, and per-tier storage, and
 runs advisory best-practice checks (master quorum, frozen tier without object
 storage, single data node, orphans). It emits 64 GB resource-unit quote lines
 in the tab-delimited shape the Pricing / ROM builder's paste importer already
-parses, so a drawn architecture becomes a priced estimate without retyping it.
+parses (including a bold-label column so pasted rows look like the builder's
+own), so a drawn architecture becomes a priced estimate without retyping it.
+**Send to Pricing** does the same in one click without the clipboard, landing
+the rows as a new scenario in the ROM builder — with the per-tier memory, node
+counts, and storage that the text paste can't carry — and never overwriting a
+quote already in progress. Imported rows arrive with a blank unit price shown
+as a neutral "awaiting price" to-do rather than a broken $0.
 
 **Real data.** Paste `GET _cat/nodes?v`, `_nodes`, or `_cluster/stats` output
 and the board draws the customer's actual topology into a new board. Parsing is
@@ -257,6 +289,11 @@ they were drawn on.
 category legend, copy the image straight to the clipboard, or copy a share link
 that packs the whole board into a compressed URL. *✦ Write it up* drafts the
 follow-up note from the diagram, the rollups, and the review findings.
+
+**AI.** The *✦ AI* chat builds or edits the board from natural language, and
+*✦ Write it up* drafts prose — both run on **Amazon Bedrock** (Converse API)
+with SigV4-signed requests sent straight from the browser. Bring an IAM key
+pair with `bedrock:InvokeModel`; no proxy or backend involved.
 
 See the [whiteboard README](src/components/whiteboard/README.md) for the full
 feature tour, interaction cheat sheet, document schema, and code map.
@@ -403,12 +440,14 @@ Vitest covers the parts where a regression would be silent:
 | Suite | What it covers |
 |---|---|
 | `src/presenter/presenterSync.test.js` | Presenter command handling (next/prev, beats, scene actions) |
-| `src/utils/whiteboardTemplates.test.js` | Pattern block instantiation and layout |
+| `src/utils/whiteboardTemplates.test.js` | Pattern block instantiation and layout, props landing, zone-level cross edges |
+| `src/utils/nodeMetrics.test.js` | Content-driven node heights and chip formatting |
 | `src/utils/whiteboardAnalysis.test.js` | Tidy lane layout, flow hops, architecture validation rules, capacity math |
 | `src/utils/whiteboardSizing.test.js` | Ingest → node counts, and the Pricing/ROM quote lines |
+| `src/utils/pricing.test.js` | Paste delimiter detection, the bold-label column, priced-vs-unpriced rows, and the whiteboard → quote-line round trip |
 | `src/utils/whiteboardDiff.test.js` | Matching components across boards and the reported delta |
 | `src/utils/whiteboardImport.test.js` | Parsing `_cat/nodes` / `_nodes` / `_cluster/stats` into a board |
 | `src/utils/whiteboardShare.test.js` | Share-link round-tripping and hash param handling |
-| `src/utils/whiteboardAI.test.js` | Board description and the summary prompt |
+| `src/utils/whiteboardAI.test.js` | The `edit_whiteboard` tool schema, component catalog, board snapshot, cluster guidance, and the summary prompt |
 | `src/utils/whiteboardPresenting.test.js` | Text wrapping, ink paths, build-step visibility |
 | `src/components/whiteboard/ElasticWhiteboard.smoke.test.jsx` | Mounts the whiteboard in jsdom: boards, presenting, ink, steps, sizing, comparison, the written summary, cluster import |

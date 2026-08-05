@@ -14,8 +14,11 @@
    ============================================================ */
 
 import { TYPES } from "./whiteboardTypes";
+import { nodeAutoHeight } from "../utils/nodeMetrics";
 
 const dim = (type) => ({ w: TYPES[type]?.w || 180, h: TYPES[type]?.h || 72 });
+/* Effective footprint of a placed node: type width, content-driven height. */
+const edim = (n) => ({ w: n.w != null ? n.w : dim(n.type).w, h: nodeAutoHeight(n) });
 const stageOf = (type) => TYPES[type]?.flow || TYPES[type]?.stage || "ops";
 
 /* Fixed left-to-right lane per functional stage (used to place whole sections). */
@@ -89,16 +92,16 @@ function clusterTemplate(fill = {}) {
         ...(wantIngest ? ["ingest"] : []),
         ...(wantCoord ? ["coord"] : []),
         ...(wantML ? ["ml"] : [])];
-      // Hot is two rows up, so its auto-route would cut across under the other
-      // nodes; steer it up the whitespace gutter between the tier and right
-      // columns instead (all other master edges route cleanly on their own).
+      /* The tiers sit in another column and mostly on other rows, so their
+         auto-routes would cut across the diagram. Run every master<->tier edge
+         up one lane in the whitespace gutter between the two columns: a single
+         spine with a branch per tier, and no crossings by construction. The
+         other master edges (ingest, coordinating, ML) route cleanly on their
+         own. `gutterX` is a routing intent, not waypoints — instantiateTemplate
+         resolves it once content has grown the nodes to their final size. */
       const gutterX = tierX + colTw + CG / 2;
-      const masterCY = ry + dim("node_master").h / 2;
-      for (const t of targets) {
-        const edge = { from: "master", to: t, bi: true };
-        if (t === "hot") edge.pts = [{ x: gutterX, y: masterCY }, { x: gutterX, y: hotY + dim("tier_hot").h / 2 }];
-        edges.push(edge);
-      }
+      for (const t of targets)
+        edges.push({ from: "master", to: t, bi: true, ...(order.includes(t) ? { gutterX } : {}) });
     }
   }
 
@@ -222,7 +225,8 @@ export const TEMPLATES = {
   cluster: {
     label: "Elastic Production Cluster", lane: 2, build: clusterTemplate,
     ports: {
-      in: (k) => (k.ingest ? "ingest" : k.coord ? "coord" : null),   // data lands at ingest
+      // data lands at ingest, else coordinating, else straight on the hot tier
+      in: (k) => (k.ingest ? "ingest" : k.coord ? "coord" : k.hot ? "hot" : null),
       out: (k) => (k.coord ? "coord" : k.hot ? "hot" : null),        // serving leaves via coordinating
     },
   },
@@ -306,7 +310,7 @@ function zoneRect(members, pad = ZONE_PAD) {
   const p = { ...ZONE_PAD, ...(pad || {}) };
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const m of members) {
-    const d = dim(m.type);
+    const d = edim(m);
     x0 = Math.min(x0, m.x); y0 = Math.min(y0, m.y);
     x1 = Math.max(x1, m.x + d.w); y1 = Math.max(y1, m.y + d.h);
   }
@@ -314,35 +318,84 @@ function zoneRect(members, pad = ZONE_PAD) {
   return { x: x0 - p.x, y: y0 - p.top, w: x1 - x0 + p.x * 2, h: y1 - y0 + p.top + p.bottom };
 }
 
+/* Builders position nodes from their static type heights; content (titles,
+   props chips) can make them taller. Re-open each vertical stack so every
+   node keeps its designed gap below the node above it: for any pair that
+   overlaps horizontally, the lower one shifts down by however much the upper
+   one (and its own shift) outgrew the original layout. */
+function relaxStacks(nodes) {
+  const items = nodes
+    .map((n) => ({ n, w: edim(n).w, h0: dim(n.type).h, h1: edim(n).h, dy: 0 }))
+    .sort((a, b) => a.n.y - b.n.y);
+  for (let i = 0; i < items.length; i++) {
+    for (let j = 0; j < i; j++) {
+      const above = items[j], b = items[i];
+      const xOverlap = above.n.x < b.n.x + b.w && b.n.x < above.n.x + above.w;
+      if (!xOverlap) continue;
+      const gap0 = b.n.y - (above.n.y + above.h0);
+      if (gap0 < 0) continue;                       // side-by-side or overlapping by design
+      b.dy = Math.max(b.dy, above.n.y + above.dy + above.h1 + gap0 - b.n.y);
+    }
+  }
+  for (const it of items) if (it.dy > 0) it.n.y += it.dy;
+}
+
 /* Instantiate one template at an origin, returning absolute nodes/edges, a zone
-   (unless the template is zone-less), and a key->id map for edge resolution. */
-export function instantiateTemplate(templateId, fill = {}, origin = { x: 0, y: 0 }, sectionId) {
+   (unless the template is zone-less), and a key->id map for edge resolution.
+   `propsByKey` lands node props (counts, hardware…) before layout is final, so
+   stacks and the zone box grow around the content they'll actually show. */
+export function instantiateTemplate(templateId, fill = {}, origin = { x: 0, y: 0 }, sectionId, propsByKey) {
   const tpl = TEMPLATES[templateId];
   if (!tpl) return null;
   const built = tpl.build(fill || {});
   const pfx = sectionId || `${templateId}${nextSeq()}`;
   const nid = (key) => `${pfx}__${key}`;
-  const nodes = built.nodes.map((n) => ({
-    id: nid(n.key), type: n.type, x: origin.x + n.x, y: origin.y + n.y,
-    ...(n.title ? { title: n.title } : {}), ...(n.props ? { props: n.props } : {}),
-  }));
-  const edges = built.edges.map((e, i) => ({
-    id: `${pfx}__e${i}`, s: nid(e.from), e: nid(e.to),
-    ...(e.lbl ? { lbl: e.lbl } : {}),
-    ...(e.bi ? { bi: true } : {}),
-    ...(e.pts ? { pts: e.pts.map((p) => ({ x: origin.x + p.x, y: origin.y + p.y })) } : {}),
-  }));
+  const nodes = built.nodes.map((n) => {
+    const props = (n.props || propsByKey?.[n.key])
+      ? { ...(n.props || {}), ...(propsByKey?.[n.key] || {}) } : undefined;
+    return {
+      id: nid(n.key), type: n.type, x: origin.x + n.x, y: origin.y + n.y,
+      ...(n.title ? { title: n.title } : {}), ...(props ? { props } : {}),
+    };
+  });
+  relaxStacks(nodes);
+  /* An edge's `gutterX` (local) asks for a detour up a vertical lane rather
+     than an auto-route. It resolves to waypoints here, after relaxStacks, so
+     the lane meets the nodes where they ended up rather than where the builder
+     drew them. */
+  const placedByKey = new Map(built.nodes.map((n, i) => [n.key, nodes[i]]));
+  const midY = (key) => {
+    const n = placedByKey.get(key);
+    return n ? n.y + edim(n).h / 2 : null;
+  };
+  const gutterPts = (e) => {
+    const from = midY(e.from), to = midY(e.to);
+    // level nodes need no detour; waypoints there would only stack drag handles
+    if (from == null || to == null || Math.abs(from - to) < 1) return null;
+    const x = origin.x + e.gutterX;
+    return [{ x, y: from }, { x, y: to }];
+  };
+  const edges = built.edges.map((e, i) => {
+    const pts = e.pts ? e.pts.map((p) => ({ x: origin.x + p.x, y: origin.y + p.y }))
+      : e.gutterX != null ? gutterPts(e) : null;
+    return {
+      id: `${pfx}__e${i}`, s: nid(e.from), e: nid(e.to),
+      ...(e.lbl ? { lbl: e.lbl } : {}),
+      ...(e.bi ? { bi: true } : {}),
+      ...(pts ? { pts } : {}),
+    };
+  });
   const keys = Object.fromEntries(built.nodes.map((n) => [n.key, nid(n.key)]));
 
   let zone = null;
   if (!built.noZone) {
-    const members = built.nodes.filter((n) => !n.outsideZone).map((n) => ({ x: origin.x + n.x, y: origin.y + n.y, type: n.type }));
+    const members = nodes.filter((_, i) => !built.nodes[i].outsideZone);
     const rect = zoneRect(members, built.zonePad);
     if (rect) zone = { id: `${pfx}__zone`, x: rect.x, y: rect.y, w: rect.w, h: rect.h, label: built.label, color: built.color };
   }
   const bbox = (() => {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const n of nodes) { const d = dim(n.type); x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x + d.w); y1 = Math.max(y1, n.y + d.h); }
+    for (const n of nodes) { const d = edim(n); x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x + d.w); y1 = Math.max(y1, n.y + d.h); }
     if (zone) { x0 = Math.min(x0, zone.x); y0 = Math.min(y0, zone.y); x1 = Math.max(x1, zone.x + zone.w); y1 = Math.max(y1, zone.y + zone.h); }
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   })();
@@ -356,22 +409,28 @@ const laneOf = (section) => {
 };
 
 /* Place a list of sections in fixed lane order (left-to-right by stage), each
-   lane stacked vertically. Returns combined nodes/edges/zones + a placed map
-   (sectionId -> instance) for cross-section edge resolution. */
+   lane stacked vertically. A section can instead declare `below: <sectionId>`
+   to hang off another section rather than take a lane of its own. Returns
+   combined nodes/edges/zones + a placed map (sectionId -> instance) for
+   cross-section edge resolution. */
 export function placeSections(sections = []) {
   const byLane = new Map();
+  const ids = new Set(sections.map((s, i) => s.id || `${s.template}${i}`));
+  const stacked = [];
   sections.forEach((s, i) => {
     const id = s.id || `${s.template}${i}`;
+    // an unresolvable host leaves the section in its own lane
+    if (s.below && s.below !== id && ids.has(s.below)) { stacked.push({ ...s, id }); return; }
     const lane = laneOf(s);
     if (!byLane.has(lane)) byLane.set(lane, []);
     byLane.get(lane).push({ ...s, id });
   });
   const lanes = [...byLane.keys()].sort((a, b) => a - b);
   const out = { nodes: [], edges: [], zones: [], placed: {} };
-  const LANE_GAP = 150, STACK_GAP = 90, ROW_GAP = 80, TOP = 60;
+  const LANE_GAP = 150, STACK_GAP = 90, ROW_GAP = 80, TOP = 60, BELOW_GAP = 120;
   let laneX = 60;
   const place = (s, x, y) => {
-    const inst = instantiateTemplate(s.template, s.fill, { x, y }, s.id);
+    const inst = instantiateTemplate(s.template, s.fill, { x, y }, s.id, s.props);
     if (!inst) return null;
     out.nodes.push(...inst.nodes);
     out.edges.push(...inst.edges);
@@ -402,6 +461,17 @@ export function placeSections(sections = []) {
     }
     laneX = right + LANE_GAP;
   }
+  /* Sections pinned below a host land against that host's frame — its zone box,
+     or its bounding box when it has none — left-aligned and gapped underneath.
+     Templates offset their zone from their origin by their own padding, so the
+     origin is derived from where the frame has to end up. */
+  for (const s of stacked) {
+    const host = out.placed[s.below];
+    const probe = host && instantiateTemplate(s.template, s.fill, { x: 0, y: 0 }, s.id, s.props);
+    if (!probe) continue;
+    const hf = host.zone || host.bbox, sf = probe.zone || probe.bbox;
+    place(s, hf.x - sf.x, hf.y + hf.h + BELOW_GAP - sf.y);
+  }
   return out;
 }
 
@@ -426,19 +496,31 @@ export function sectionEndpoint(ref, dir, metaById) {
 }
 
 /* Build a whole board from sections + cross-section flows. Returns the board
-   plus `meta` (sectionId -> { template, fill, keys, zoneId }) for incremental
-   editing later. */
+   plus `meta` (sectionId -> { template, fill, props, keys, zoneId }) for
+   incremental editing later. `props` rides along so a re-sent section keeps the
+   node counts/hardware it was built with. */
 export function buildFromSections(sections = [], crossEdges = []) {
   const withIds = sections.map((s, i) => ({ ...s, id: s.id || `${s.template}${i}` }));
   const { nodes, edges, zones, placed } = placeSections(withIds);
   const meta = {};
   for (const s of withIds) {
     const inst = placed[s.id];
-    if (inst) meta[s.id] = { template: s.template, fill: s.fill || {}, keys: inst.keys, zoneId: inst.zone ? inst.zone.id : null };
+    if (inst) meta[s.id] = { template: s.template, fill: s.fill || {},
+      ...(s.props ? { props: s.props } : {}), keys: inst.keys, zoneId: inst.zone ? inst.zone.id : null };
   }
   const cross = [];
+  /* `sourceZone` / `targetZone` pin that end of the edge to the section's
+     zone box instead of a port node (e.g. stack monitoring watches the whole
+     cluster, not one tier). */
+  const at = (ref, dir, zoneLevel) => {
+    if (zoneLevel) {
+      const m = meta[String(ref).split(".")[0]];
+      if (m && m.zoneId) return m.zoneId;
+    }
+    return sectionEndpoint(ref, dir, meta);
+  };
   (crossEdges || []).forEach((e, i) => {
-    const s = sectionEndpoint(e.source, "out", meta), t = sectionEndpoint(e.target, "in", meta);
+    const s = at(e.source, "out", e.sourceZone), t = at(e.target, "in", e.targetZone);
     if (s && t && s !== t) cross.push({ id: `x${i}_${nextSeq()}`, s, e: t, ...(e.label ? { lbl: e.label } : {}) });
   });
   return { nodes, edges: [...edges, ...cross], zones, meta };

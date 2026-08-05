@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { instantiateTemplate, buildFromSections, sectionEndpoint } from "../data/whiteboardTemplates";
 import { TYPES } from "../data/whiteboardTypes";
+import { nodeAutoHeight } from "./nodeMetrics";
 
-const dim = (n) => ({ w: TYPES[n.type].w, h: TYPES[n.type].h });
+const dim = (n) => ({ w: TYPES[n.type].w, h: nodeAutoHeight(n) });
 const overlap = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 const rects = (nodes) => nodes.map((n) => ({ x: n.x, y: n.y, ...dim(n) }));
 const noOverlap = (nodes) => {
@@ -68,9 +69,44 @@ describe("cluster template", () => {
       expect(me).toBeTruthy();
       expect(me.bi).toBe(true);
     }
-    // master->Hot is steered up the gutter (has waypoints); the rest auto-route
-    expect(Array.isArray(edge(master.id, hot.id).pts)).toBe(true);
+    // every master->tier edge is steered up the gutter (has waypoints); the
+    // edges within the right column and to Ingest auto-route
+    for (const tier of [hot, warm, frozen]) expect(Array.isArray(edge(master.id, tier.id).pts)).toBe(true);
+    expect(edge(master.id, coord.id).pts).toBeUndefined();
+    expect(edge(master.id, ml.id).pts).toBeUndefined();
+    expect(edge(master.id, ingest.id).pts).toBeUndefined();
+    // Cold shares the master's row here, so it needs no detour
     expect(edge(master.id, cold.id).pts).toBeUndefined();
+  });
+
+  it("routes master<->tier edges up one gutter lane, against the relaxed positions", () => {
+    const hw = { nodes: 5, capacity: "2.5 TB", instance: "i3en.2xlarge", cpu: 8, mem: 64, disk: "7.5 TB" };
+    const tiers = ["hot", "warm", "cold", "frozen"];
+    const props = { ...Object.fromEntries(tiers.map((t) => [t, hw])), master: { nodes: 3 } };
+    const inst = instantiateTemplate(
+      "cluster", { tiers, ingest: false, coord: false, master: true, ml: false },
+      { x: 0, y: 0 }, "cg", props);
+    const master = byKey(inst, "master");
+    const midY = (n) => n.y + dim(n).h / 2;
+
+    const lanes = new Set();
+    for (const key of tiers) {
+      const tier = byKey(inst, key);
+      const e = inst.edges.find((x) => x.s === master.id && x.e === tier.id);
+      expect(e.pts).toHaveLength(2);
+      // a vertical lane in the whitespace between the tier and master columns
+      expect(e.pts[0].x).toBe(e.pts[1].x);
+      expect(e.pts[0].x).toBeGreaterThan(tier.x + dim(tier).w);
+      expect(e.pts[0].x).toBeLessThan(master.x);
+      lanes.add(e.pts[0].x);
+      // …meeting both nodes where the relaxed layout actually left them
+      expect(e.pts[0].y).toBe(midY(master));
+      expect(e.pts[1].y).toBe(midY(tier));
+    }
+    expect(lanes.size).toBe(1);                 // one shared spine, branch per tier
+    // the hardware chips moved the lower tiers well past their designed rows,
+    // so waypoints taken from the builder's geometry would miss them
+    expect(byKey(inst, "frozen").y).toBeGreaterThan(3 * (TYPES.tier_hot.h + 64));
   });
 
   it("honours a reduced tier set (Hot+Frozen only)", () => {
@@ -78,6 +114,27 @@ describe("cluster template", () => {
     expect(inst.nodes.some((n) => n.type === "tier_warm")).toBe(false);
     expect(inst.nodes.some((n) => n.type === "tier_hot")).toBe(true);
     expect(inst.nodes.some((n) => n.type === "tier_frozen")).toBe(true);
+  });
+
+  it("lands slot props at build time and relaxes stacks around taller nodes", () => {
+    const hw = { nodes: 5, capacity: "2.5 TB", instance: "i3en.2xlarge", cpu: 8, mem: 64, disk: "7.5 TB" };
+    const props = { hot: hw, warm: hw, cold: hw, frozen: hw, master: { nodes: 3 } };
+    const inst = instantiateTemplate(
+      "cluster", { tiers: ["hot", "warm", "cold", "frozen"], ingest: false, coord: false, master: true },
+      { x: 0, y: 0 }, "cp", props);
+    // props landed on the right slots
+    expect(byKey(inst, "hot").props).toMatchObject(hw);
+    expect(byKey(inst, "master").props).toMatchObject({ nodes: 3 });
+    // chips make the tiers taller than their designed 96px…
+    expect(nodeAutoHeight(byKey(inst, "hot"))).toBeGreaterThan(TYPES.tier_hot.h);
+    // …and the stack re-opens so nothing overlaps at the effective heights
+    expect(noOverlap(inst.nodes)).toBe(true);
+    // the zone still contains every member at its effective size
+    for (const n of inst.nodes.filter((m) => m.type !== "objstore")) {
+      const d = dim(n);
+      expect(n.y).toBeGreaterThanOrEqual(inst.zone.y);
+      expect(n.y + d.h).toBeLessThanOrEqual(inst.zone.y + inst.zone.h);
+    }
   });
 });
 
@@ -157,6 +214,42 @@ describe("buildFromSections", () => {
     expect(tzones[1].x).toBeLessThan(tzones[2].x);
     // each tenant wired to shared ingestion
     expect(board.edges.filter((e) => String(e.id).startsWith("x")).length).toBe(3);
+  });
+
+  it("hangs a `below` section under its host instead of giving it a lane", () => {
+    const build = (below) => buildFromSections([
+      { id: "cl", template: "cluster", fill: { tiers: ["hot"] } },
+      { id: "ui", template: "userSpace", fill: { consumers: ["kibana", "users"] } },
+      { id: "mon", template: "management", below, fill: { tools: ["monitoring"] } },
+    ], []);
+    const zoneOf = (board, id) => board.zones.find((z) => z.id === `${id}__zone`);
+
+    const board = build("ui");
+    const user = zoneOf(board, "ui"), mon = zoneOf(board, "mon");
+    expect(mon.x).toBe(user.x);                       // left-aligned with its host
+    expect(mon.y).toBe(user.y + user.h + 120);        // directly below it
+    // its nodes travelled with the zone
+    for (const n of board.nodes.filter((x) => x.id.startsWith("mon__"))) {
+      expect(n.x).toBeGreaterThanOrEqual(mon.x);
+      expect(n.y).toBeGreaterThanOrEqual(mon.y);
+    }
+
+    // an unknown host is no placement at all: the section keeps its own lane
+    const orphan = build("nope");
+    expect(zoneOf(orphan, "mon").x).toBeGreaterThan(zoneOf(orphan, "ui").x);
+  });
+
+  it("pins a cross edge to the section's zone when sourceZone is set", () => {
+    const board = buildFromSections(
+      [
+        { id: "cl", template: "cluster", fill: { tiers: ["hot"] } },
+        { id: "mon", template: "management", fill: { tools: ["monitoring"] } },
+      ],
+      [{ source: "cl", target: "mon", label: "stack monitoring", sourceZone: true }],
+    );
+    const edge = board.edges.find((e) => e.lbl === "stack monitoring");
+    expect(edge.s).toBe("cl__zone");            // from the whole cluster, not a port node
+    expect(edge.e).toBe("mon__zone");           // into the monitoring deployment's zone
   });
 
   it("supports a zone-less single node section", () => {

@@ -102,3 +102,23 @@ export function plMid(pl) {
 
 /* Snap a world coordinate to the 8px grid. */
 export const snap = (v) => Math.round(v / 8) * 8;
+
+/* Translate manual edge waypoints when a gesture moves endpoints. By default
+   both endpoints must be in movedIds (matches paste/shift semantics); zoneFrameOnly
+   translates any edge touching the moved zone (Alt-drag frame without contents). */
+export function translateEdgePts(edges, movedIds, dx, dy, opts = {}) {
+  if (!dx && !dy) return edges;
+  const moved = movedIds instanceof Set ? movedIds : new Set(movedIds);
+  const zoneFrame = !!opts.zoneFrameOnly;
+  let changed = false;
+  const out = edges.map((e) => {
+    if (!e.pts?.length) return e;
+    const hit = zoneFrame
+      ? moved.has(e.s) || moved.has(e.e)
+      : moved.has(e.s) && moved.has(e.e);
+    if (!hit) return e;
+    changed = true;
+    return { ...e, pts: e.pts.map((p) => ({ x: snap(p.x + dx), y: snap(p.y + dy) })) };
+  });
+  return changed ? out : edges;
+}

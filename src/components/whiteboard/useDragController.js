@@ -1,5 +1,5 @@
 import { TYPES } from "../../data/whiteboardTypes";
-import { snap } from "../../utils/whiteboardGeometry";
+import { snap, translateEdgePts } from "../../utils/whiteboardGeometry";
 
 /* Pointer-gesture controller for the whiteboard canvas: pan, marquee select,
    node move/resize, zone move/resize, connect, and palette drag-and-drop.
@@ -11,7 +11,7 @@ export function useDragController(deps) {
   const {
     dragRef, viewportRef, lastClickRef,
     view, sel, nodes, edges, zones, nodeById,
-    setView, setMarquee, setSel, setNodes, setZones, setEdges, setConnect, setGhost, setEditing, setRouteTick,
+    setView, setMarquee, setSel, setNodes, setZones, setEdges, setConnect, setGhost, setEditing,
     toWorld, snapshot, uid, rectOf,
   } = deps;
 
@@ -226,9 +226,23 @@ export function useDragController(deps) {
     if (!d) return;
     if (d.mode === "palette") return;                  /* finalized by window paletteUp */
     dragRef.current = null;
-    // a completed move/resize/reshape needs a clean full re-route (final coords)
-    if (d.mode === "move" || d.mode === "resize" || d.mode === "zmove" || d.mode === "zresize" || d.mode === "edgept") {
-      setRouteTick((t) => t + 1);
+    if (d.mode === "move" || d.mode === "zmove") {
+      const w = toWorld(e.clientX, e.clientY);
+      const rawDx = w.x - d.px, rawDy = w.y - d.py;
+      if (d.mode === "move") {
+        const id0 = d.ids[0];
+        const dx = snap(d.starts[id0].x + rawDx) - d.starts[id0].x;
+        const dy = snap(d.starts[id0].y + rawDy) - d.starts[id0].y;
+        if (dx || dy) setEdges((es) => translateEdgePts(es, d.ids, dx, dy));
+      } else {
+        const dx = snap(d.zx + rawDx) - d.zx;
+        const dy = snap(d.zy + rawDy) - d.zy;
+        if (dx || dy) {
+          const moved = new Set([d.id, ...Object.keys(d.nstarts)]);
+          const zoneFrameOnly = !Object.keys(d.nstarts).length;
+          setEdges((es) => translateEdgePts(es, moved, dx, dy, { zoneFrameOnly }));
+        }
+      }
     }
     if (d.mode === "connect") {
       const w = toWorld(e.clientX, e.clientY);

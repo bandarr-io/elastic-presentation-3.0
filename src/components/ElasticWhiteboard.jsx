@@ -1,21 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../context/ThemeContext";
 import { buildCatalog, describeDoc, describeSections, buildTool, systemPrompt, runLLM,
-         SUMMARY_SYSTEM, summaryPrompt } from "../utils/whiteboardAI";
+         SUMMARY_SYSTEM, summaryPrompt, BEDROCK_DEFAULT_MODEL, BEDROCK_DEFAULT_REGION } from "../utils/whiteboardAI";
+import { parseAwsCredentials, usableProfiles } from "../utils/awsCredentials";
 import { buildFromSections, instantiateTemplate, sectionEndpoint, TEMPLATE_MENU, TEMPLATE_CONFIG, defaultFill } from "../data/whiteboardTemplates";
 import { STAGE_PALETTES, SURFACES, CATS, CAT_COLORS, TYPES, tagOf, SEEDS,
          NODE_W, NODE_H } from "../data/whiteboardTypes";
 import { encodeBoard, decodeBoard, boardParamFromHash, shareUrl } from "../utils/whiteboardShare";
 import { tidyLayout, flowHops, validateBoard, capacityTotals, formatTB } from "../utils/whiteboardAnalysis";
 import { parseClusterInput, summarizeCluster, clusterToBoard } from "../utils/whiteboardImport";
-import { sizeCluster, romRows, romTSV, RU_GB, SIZING_TIERS, SIZING_DEFAULTS } from "../utils/whiteboardSizing";
+import { sizeCluster, romRows, romTSV, romScenario, RU_GB, SIZING_TIERS, SIZING_DEFAULTS,
+         SIZING_PROVIDERS, recommendHardware } from "../utils/whiteboardSizing";
+import { sendScenarioToPricing } from "../utils/pricingHandoff";
+import { echProfiles, ECH_REGIONS } from "../data/echInstanceConfigs";
 import { diffBoards, diffMarks } from "../utils/whiteboardDiff";
 import { INK_COLORS, INK_WIDTH, INK_MIN_STEP, inkPath, stepCountOf,
          visibleAtStep, wrapText } from "../utils/whiteboardPresenting";
 import { useSceneMotion } from "../hooks/useSceneMotion";
 import { useReducedMotion } from "../hooks/useReducedMotion";
 import { useSceneMotionFollow } from "../context/SceneMotionFollowContext";
-import { anchor, elbowPath, roundedPath, plMid, snap } from "../utils/whiteboardGeometry";
+import { anchor, elbowPath, roundedPath, plMid, snap, translateEdgePts } from "../utils/whiteboardGeometry";
+import { nodeAutoHeight, nodeChips } from "../utils/nodeMetrics";
+import { INTEGRATION_TITLES } from "../data/elasticIntegrations";
 import { useHistory } from "./whiteboard/useHistory";
 import { useDragController } from "./whiteboard/useDragController";
 
@@ -83,23 +89,17 @@ const CLIP_MARK = "__elasticWhiteboard";
 
 /* ---------------- pure geometry ---------------- */
 
+/* Width comes from the type (or a manual resize); height fits the content
+   being shown unless the user resized the node explicitly. */
 const rectOf = (n) => ({
   x: n.x, y: n.y,
   w: n.w != null ? n.w : TYPES[n.type].w,
-  h: n.h != null ? n.h : TYPES[n.type].h,
+  h: n.h != null ? n.h : nodeAutoHeight(n),
 });
 const nodeTag = (n, stages) => n.color || tagOf(TYPES[n.type], stages);
 const nodeSub = (n) => (n.sub !== undefined ? n.sub : TYPES[n.type].sub);
 const noteText = (n) => (n.title !== undefined ? n.title : "");
-const fieldChips = (n) => {
-  const out = [];
-  for (const f of TYPES[n.type].fields || []) {
-    const v = n.props && n.props[f.key] !== undefined ? n.props[f.key] : f.def;
-    if (v === undefined || v === "" || v === false) continue;
-    out.push(f.kind === "toggle" ? f.label : (f.pre || "") + v + (f.unit ? " " + f.unit : ""));
-  }
-  return out;
-};
+const fieldChips = (n) => nodeChips(n.type, n.props);
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
@@ -309,6 +309,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const [editing, setEditing] = useState(null);  // node id being renamed
   const [marquee, setMarquee] = useState(null);  // {x0,y0,x1,y1} world coords
   const [q, setQ] = useState("");
+  const [paletteOpen, setPaletteOpen] = useState(true);
   const [styleClip, setStyleClip] = useState(null); // copied node style {color,w,h}
   const [openCats, setOpenCats] = useState(() => new Set(CATS.filter((c) => c !== "General")));
   const [patternCfg, setPatternCfg] = useState(null); // { id, fill } while configuring a Patterns block
@@ -319,19 +320,23 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const [importOpen, setImportOpen] = useState(false);    // paste-a-real-cluster dialog
   const [sizeOpen, setSizeOpen] = useState(false);        // ingest -> node count calculator
   const [seedNote, setSeedNote] = useState("");       // transient "saved" confirmation
-  const [routeTick, setRouteTick] = useState(0);     // forces a full re-route after a drag ends
-
   /* ---------- AI chat ---------- */
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMsgs, setChatMsgs] = useState([]);   // {role:'user'|'ai'|'error', text}
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [showChatSettings, setShowChatSettings] = useState(false);
-  const [provider, setProvider] = useState(() => localStorage.getItem("ew-llm-provider") || "anthropic");
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("ew-anthropic-key") || "");
-  const [model, setModel] = useState(() => localStorage.getItem("ew-anthropic-model") || "claude-sonnet-5");
-  const [proxyUrl, setProxyUrl] = useState(() => localStorage.getItem("ew-proxy-url") || "");
-  const [proxyToken, setProxyToken] = useState(() => localStorage.getItem("ew-proxy-token") || "");
+  /* Bedrock credentials: an IAM key pair (plus session token for temporary
+     STS credentials) and the region + model to converse with. */
+  const [awsRegion, setAwsRegion] = useState(() => localStorage.getItem("ew-aws-region") || BEDROCK_DEFAULT_REGION);
+  const [awsKeyId, setAwsKeyId] = useState(() => localStorage.getItem("ew-aws-key-id") || "");
+  const [awsSecret, setAwsSecret] = useState(() => localStorage.getItem("ew-aws-secret") || "");
+  const [awsSession, setAwsSession] = useState(() => localStorage.getItem("ew-aws-session") || "");
+  const [model, setModel] = useState(() => localStorage.getItem("ew-bedrock-model") || BEDROCK_DEFAULT_MODEL);
+  const [awsProfiles, setAwsProfiles] = useState(null);   // multi-profile credential files offer a picker
+  const [awsProfileName, setAwsProfileName] = useState("");
+  const [credsNote, setCredsNote] = useState("");
+  const credsFileRef = useRef(null);
   const chatLogRef = useRef(null);
   const viewportRef = useRef(null);
   const fileRef = useRef(null);
@@ -565,7 +570,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       setZones((all) => all.map((z) => (zs.has(z.id) ? { ...z, x: z.x + dx, y: z.y + dy } : z)));
     }
     if (nodeIds.size) setNodes((ns) => ns.map((n) => (nodeIds.has(n.id) ? { ...n, x: n.x + dx, y: n.y + dy } : n)));
-    setRouteTick((t) => t + 1);
+    setEdges((es) => translateEdgePts(es, [...nodeIds, ...zoneIds], dx, dy));
   };
 
   /* ---------- clipboard ----------
@@ -730,16 +735,24 @@ export default function ElasticWhiteboard({ height = "100%" }) {
      so aligned/distributed zones keep the nodes they contain. */
   const moveZones = (pos) => {
     const shift = {};
+    const edgeShifts = [];
     for (const z of zones) {
       const p = pos[z.id];
       if (!p) continue;
       const dx = (p.x != null ? p.x : z.x) - z.x, dy = (p.y != null ? p.y : z.y) - z.y;
-      if (dx || dy) for (const n of nodesInZone(z)) shift[n.id] = { dx, dy };
+      if (dx || dy) {
+        for (const n of nodesInZone(z)) shift[n.id] = { dx, dy };
+        edgeShifts.push({ moved: new Set([z.id, ...nodesInZone(z).map((n) => n.id)]), dx, dy });
+      }
     }
     snapshot();
     setZones((zs) => zs.map((z) => (pos[z.id] ? { ...z, ...pos[z.id] } : z)));
     setNodes((ns) => ns.map((n) => (shift[n.id]
       ? { ...n, x: snap(n.x + shift[n.id].dx), y: snap(n.y + shift[n.id].dy) } : n)));
+    if (edgeShifts.length) {
+      setEdges((es) => edgeShifts.reduce((acc, { moved, dx, dy }) =>
+        translateEdgePts(acc, moved, dx, dy), es));
+    }
   };
   const zoneRects = () => sel.ids.map((id) => zoneById[id]).filter(Boolean)
     .map((z) => ({ id: z.id, x: z.x, y: z.y, w: z.w, h: z.h }));
@@ -753,11 +766,11 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   };
 
   /* ---------- AI: apply a model-generated document/edit ---------- */
-  useEffect(() => { localStorage.setItem("ew-llm-provider", provider); }, [provider]);
-  useEffect(() => { localStorage.setItem("ew-anthropic-key", apiKey); }, [apiKey]);
-  useEffect(() => { localStorage.setItem("ew-anthropic-model", model); }, [model]);
-  useEffect(() => { localStorage.setItem("ew-proxy-url", proxyUrl); }, [proxyUrl]);
-  useEffect(() => { localStorage.setItem("ew-proxy-token", proxyToken); }, [proxyToken]);
+  useEffect(() => { localStorage.setItem("ew-aws-region", awsRegion); }, [awsRegion]);
+  useEffect(() => { localStorage.setItem("ew-aws-key-id", awsKeyId); }, [awsKeyId]);
+  useEffect(() => { localStorage.setItem("ew-aws-secret", awsSecret); }, [awsSecret]);
+  useEffect(() => { localStorage.setItem("ew-aws-session", awsSession); }, [awsSession]);
+  useEffect(() => { localStorage.setItem("ew-bedrock-model", model); }, [model]);
 
   useEffect(() => {
     const el = chatLogRef.current;
@@ -807,7 +820,9 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     if (!res || typeof res !== "object") return null;
     const incoming = (Array.isArray(res.sections) ? res.sections : [])
       .filter((s) => s && s.template && TEMPLATES_OK.has(s.template))
-      .map((s, i) => ({ id: s.id || `${s.template}${i}`, template: s.template, ...(s.row ? { row: true } : {}),
+      .map((s, i) => ({ id: s.id || `${s.template}${i}`, template: s.template,
+                        ...(s.row ? { row: true } : {}), ...(s.below ? { below: s.below } : {}),
+                        ...(s.props ? { props: s.props } : {}),
                         fill: { ...(s.fill || {}), ...(s.label ? { label: s.label } : {}) } }));
     const removeIds = new Set(res.remove || []);
     if (!incoming.length && !removeIds.size) return null;
@@ -830,13 +845,14 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
     // ---- incremental edit ----
     const incomingById = new Map(incoming.map((s) => [s.id, s]));
-    const sameFill = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     const rebuild = new Set(), keep = new Set();
     for (const sid of Object.keys(secs)) {
       if (removeIds.has(sid)) continue;
       const inc = incomingById.get(sid);
       if (!inc) { keep.add(sid); continue; }
-      if (inc.template === secs[sid].template && sameFill(inc.fill, secs[sid].fill)) keep.add(sid);
+      // props changes (node counts, hardware) rebuild the section too
+      if (inc.template === secs[sid].template && same(inc.fill, secs[sid].fill) && same(inc.props, secs[sid].props)) keep.add(sid);
       else rebuild.add(sid);
     }
     const news = incoming.filter((s) => !secs[s.id] && !removeIds.has(s.id));
@@ -858,14 +874,15 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     // rebuild changed sections anchored to their current top-left node
     for (const sid of rebuild) {
       const inc = incomingById.get(sid);
-      const fresh = instantiateTemplate(inc.template, inc.fill, { x: 0, y: 0 }, sid);
+      const fresh = instantiateTemplate(inc.template, inc.fill, { x: 0, y: 0 }, sid, inc.props);
       if (!fresh || !fresh.nodes.length) continue;
       const lmx = Math.min(...fresh.nodes.map((n) => n.x)), lmy = Math.min(...fresh.nodes.map((n) => n.y));
       const old = cur.nodes.filter((n) => n.id.startsWith(`${sid}__`));
       const cmx = Math.min(...old.map((n) => n.x)), cmy = Math.min(...old.map((n) => n.y));
-      const inst = instantiateTemplate(inc.template, inc.fill, { x: cmx - lmx, y: cmy - lmy }, sid);
+      const inst = instantiateTemplate(inc.template, inc.fill, { x: cmx - lmx, y: cmy - lmy }, sid, inc.props);
       nodes.push(...inst.nodes); edges.push(...inst.edges); if (inst.zone) zones.push(inst.zone);
-      meta[sid] = { template: inc.template, fill: inc.fill, keys: inst.keys, zoneId: inst.zone ? inst.zone.id : null };
+      meta[sid] = { template: inc.template, fill: inc.fill, ...(inc.props ? { props: inc.props } : {}),
+        keys: inst.keys, zoneId: inst.zone ? inst.zone.id : null };
     }
 
     // place new sections in a fresh column to the right of existing content
@@ -873,17 +890,23 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     let curY = box ? box.y0 : 80;
     const rightX = box ? box.x1 + 160 : 80;
     for (const s of news) {
-      const inst0 = instantiateTemplate(s.template, s.fill, { x: 0, y: 0 }, s.id);
+      const inst0 = instantiateTemplate(s.template, s.fill, { x: 0, y: 0 }, s.id, s.props);
       if (!inst0 || !inst0.nodes.length) continue;
       const p = shiftInst(inst0, rightX, curY);
       nodes.push(...p.nodes); edges.push(...p.edges); if (p.zone) zones.push(p.zone);
-      meta[s.id] = { template: s.template, fill: s.fill, keys: p.keys, zoneId: p.zone ? p.zone.id : null };
+      meta[s.id] = { template: s.template, fill: s.fill, ...(s.props ? { props: s.props } : {}),
+        keys: p.keys, zoneId: p.zone ? p.zone.id : null };
       curY = p.bbox.y + p.bbox.h + 90;
     }
 
-    // rebuild cross-section flows for the resulting section set
+    // rebuild cross-section flows for the resulting section set; a *Zone flag
+    // pins that end to the section's zone box rather than a port node
     (res.edges || []).forEach((e, i) => {
-      const s = sectionEndpoint(e.source, "out", meta), t = sectionEndpoint(e.target, "in", meta);
+      const at = (ref, dir, zoneLevel) => {
+        if (zoneLevel) { const m = meta[String(ref).split(".")[0]]; if (m && m.zoneId) return m.zoneId; }
+        return sectionEndpoint(ref, dir, meta);
+      };
+      const s = at(e.source, "out", e.sourceZone), t = at(e.target, "in", e.targetZone);
       if (!s || !t || s === t) return;
       const pts = oldCrossPts[`${s}|${t}`];
       edges.push({ id: uid("x"), s, e: t, ...(e.label ? { lbl: e.label } : {}), ...(pts ? { pts } : {}) });
@@ -938,17 +961,58 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     });
   };
 
+  /* One credentials object for every model call; missing keys open settings. */
+  const hasAwsCreds = !!(awsKeyId && awsSecret);
+  const bedrockCfg = () => ({
+    region: awsRegion, model,
+    accessKeyId: awsKeyId, secretAccessKey: awsSecret, sessionToken: awsSession,
+  });
+
+  /* Load credentials from ~/.aws/credentials. Under `npm run dev` the Vite
+     server reads the file itself; on a static host (Vercel etc.) there is no
+     server-side home directory, so it falls back to a file picker and the
+     user selects the file by hand. Either way the same parser fills the
+     fields and nothing leaves the browser. */
+  const applyAwsProfile = (profile) => {
+    setAwsKeyId(profile.accessKeyId);
+    setAwsSecret(profile.secretAccessKey);
+    setAwsSession(profile.sessionToken || "");
+    if (profile.region) setAwsRegion(profile.region);
+    setAwsProfileName(profile.name);
+    setCredsNote(`Loaded profile "${profile.name}"${profile.sessionToken ? " (with session token)" : ""}`);
+  };
+  const takeAwsCredsText = (text, from) => {
+    const found = usableProfiles(parseAwsCredentials(text));
+    if (!found.length) return setCredsNote(`No usable profiles in ${from}.`);
+    setAwsProfiles(found.length > 1 ? found : null);
+    applyAwsProfile(found[0]);   // "default" first; the picker switches profiles
+  };
+  const loadAwsCreds = async () => {
+    try {
+      const res = await fetch("/__aws/credentials", { headers: { accept: "text/plain" } });
+      const text = res.ok ? await res.text() : "";
+      // a static host's SPA fallback answers everything with index.html
+      if (res.ok && !text.trimStart().startsWith("<"))
+        return takeAwsCredsText(text, "~/.aws/credentials");
+    } catch { /* no dev server — fall through to the picker */ }
+    credsFileRef.current?.click();
+  };
+  const pickAwsCredsFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) file.text().then((text) => takeAwsCredsText(text, file.name));
+  };
+
   const sendChat = async () => {
     const text = chatInput.trim();
     if (!text || chatBusy) return;
-    const missingCreds = provider === "proxy" ? (!proxyUrl || !proxyToken) : !apiKey;
-    if (missingCreds) { setShowChatSettings(true); return; }
+    if (!hasAwsCreds) { setShowChatSettings(true); return; }
     setChatInput("");
     const history = [...chatMsgs, { role: "user", text }];
     setChatMsgs(history);
     setChatBusy(true);
     try {
-      const cfg = { provider, apiKey, model, proxyUrl, proxyToken };
+      const cfg = bedrockCfg();
       const convo = history
         .filter((m) => m.role === "user" || m.role === "ai")
         .map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text }));
@@ -1024,7 +1088,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
           startPalette, startEdgePoint, onMove, onUp } = useDragController({
     dragRef, viewportRef, lastClickRef,
     view, sel, nodes, edges, zones, nodeById,
-    setView, setMarquee, setSel, setNodes, setZones, setEdges, setConnect, setGhost, setEditing, setRouteTick,
+    setView, setMarquee, setSel, setNodes, setZones, setEdges, setConnect, setGhost, setEditing,
     toWorld, snapshot, uid, rectOf,
   });
 
@@ -1492,7 +1556,20 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   useEffect(() => { setCompareId(null); }, [activeBoardId]);
 
   const totals = useMemo(() => capacityTotals(nodes), [nodes]);
-  const warnings = useMemo(() => validateBoard(nodes, edges), [nodes, edges]);
+  /* Data Source nodes carrying a raw-ingest volume; the sizing dialog can sum
+     these instead of taking one hand-entered total, honouring each source's
+     own retention where one is set. */
+  const boardSources = useMemo(() => {
+    const rows = nodes
+      .filter((n) => n.type === "source" && +(n.props?.ingest || 0) > 0)
+      .map((n) => ({ gb: +n.props.ingest, days: +(n.props.retention || 0) || undefined }));
+    return {
+      rows,
+      count: rows.length,
+      total: rows.reduce((sum, r) => sum + r.gb, 0),
+    };
+  }, [nodes]);
+  const warnings = useMemo(() => validateBoard(nodes, edges, zones), [nodes, edges, zones]);
   const warnCount = warnings.filter((w) => w.level === "warn").length;
   const hasTotals = totals.count > 0 || totals.cpu > 0 || totals.mem > 0 || warnings.length > 0;
 
@@ -1508,49 +1585,173 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     flashSeedNote(`Imported ${built.summary.total} nodes from ${built.summary.source}`);
   };
 
-  /* Draw the output of the sizing calculator: one box per tier, stacked in
-     ILM order inside a zone labelled with the inputs that produced it. The
-     numbers land on the nodes themselves, so the capacity rollup and the
-     quote lines pick them up straight away. */
-  const drawSizing = (result) => {
+  /* Draw the output of the sizing calculator as a whole architecture, built
+     from the same deterministic templates the AI and the Patterns menu use:
+     data sources feeding Logstash, the tiered cluster with its masters and
+     object store, and Kibana on the serving side. The derived numbers land on
+     the nodes themselves, so the capacity rollup and the quote lines pick
+     them up straight away. Pieces sized to zero stay off the drawing. */
+  /* Stack a Data Source node per dialog row down the left edge of the diagram
+     (viewport centre on an empty board), carrying integration + volume. */
+  const addSourceNodes = (rows) => {
+    if (!rows.length) return;
+    const GAP = 28;
+    const drafts = rows.map((r) => {
+      const integration = (r.integration || "").trim();
+      return {
+        id: uid("n"), type: "source",
+        ...(integration ? { title: integration } : {}),
+        props: {
+          ...(integration ? { integration } : {}),
+          ...(+r.gb > 0 ? { ingest: +r.gb } : {}),
+          ...(+r.days > 0 ? { retention: +r.days } : {}),
+        },
+      };
+    });
+    const stackH = drafts.reduce((s, n) => s + nodeAutoHeight(n) + GAP, -GAP);
+    const b = bbox(), c = centerOfViewport();
+    const x = snap(b ? b.x0 - TYPES.source.w - 160 : c.x - TYPES.source.w / 2);
+    let y = snap(b ? b.y0 : c.y - stackH / 2);
+    for (const n of drafts) { n.x = x; n.y = y; y += nodeAutoHeight(n) + GAP; }
+    snapshot();
+    setNodes((ns) => [...ns, ...drafts]);
+    setSel({ kind: "nodes", ids: drafts.map((n) => n.id) });
+    flashSeedNote(`Added ${drafts.length} data source${drafts.length === 1 ? "" : "s"}`);
+  };
+
+  const drawSizing = (result, hardware, opts = {}) => {
     if (!result.tiers.length) return;
-    const gap = 24;
-    const built = result.tiers.map((t, i) => ({
-      id: uid("n"),
-      type: t.type,
-      x: 0,
-      y: i * (NODE_H + gap),
-      props: {
-        nodes: t.nodes,
-        capacity: formatTB(t.perNodeTB),
-        mem: result.input.nodeRAM,
-      },
-    }));
-    const edges = built.slice(1).map((n, i) => ({ id: uid("e"), s: built[i].id, e: n.id, lbl: "ILM" }));
-    const pad = 28;
-    const inner = { w: NODE_W, h: built.length * NODE_H + (built.length - 1) * gap };
-    const zone = {
-      id: uid("z"),
-      x: -pad, y: -pad - 18,
-      w: inner.w + pad * 2, h: inner.h + pad * 2 + 18,
-      label: `${result.input.dailyGB} GB/day · ${result.retentionDays} day retention`,
-      color: "#00BFB3",
+    /* Sized from the board's own Data Source nodes: skip the generic sources
+       zone and wire those very nodes into the new architecture instead. */
+    const fromBoard = !!opts.fromBoardSources;
+    const { stack, input } = result;
+    /* Per-component hardware (instance / cpu / mem / disk): the dialog passes
+       its possibly-edited rows; recommendations fill any gap. */
+    const hw = { ...recommendHardware(result), ...(hardware || {}) };
+    const hwProps = (key) => {
+      const row = hw[key];
+      return row ? { instance: row.instance, cpu: row.cpu, mem: row.mem, disk: row.disk } : {};
     };
+    const sid = { src: uid("sec"), ing: uid("sec"), cluster: uid("sec"), user: uid("sec"), mon: uid("sec") };
+
+    /* Agents live in the Ingestion zone (they're collectors, not sources),
+       whether or not Logstash sits behind them; data sources hold only the
+       source hosts. Whatever the ingestion zone holds flows straight to the
+       hot tier. */
+    const hasIngestion = stack.agents > 0 || stack.logstash > 0;
+    const ingTools = [
+      ...(stack.agents > 0 ? ["agent"] : []),
+      ...(stack.logstash > 0 ? ["logstash"] : []),
+    ];
+
+    /* Derived numbers land on the template slots up front (keyed by each
+       template's local slot names) so layout can size nodes around them. */
+    const clusterProps = {};
+    for (const t of result.tiers)
+      clusterProps[t.key] = { nodes: t.nodes, capacity: formatTB(t.perNodeTB), ...hwProps(t.key) };
+    if (stack.masters) clusterProps.master = { nodes: stack.masters, ...hwProps("master") };
+    if (stack.ml) clusterProps.ml = { nodes: stack.ml, ...hwProps("ml") };
+    if (result.objectStoreTB) clusterProps.objstore = { capacity: formatTB(result.objectStoreTB) };
+    const ingProps = {};
+    if (stack.agents) ingProps.tool0 = { count: stack.agents };
+    if (stack.logstash)
+      ingProps[stack.agents > 0 ? "tool1" : "tool0"] = { instances: stack.logstash, ...hwProps("logstash") };
+
+    /* The cluster zone label names where it runs, then what it holds. */
+    const isECH = input.provider !== "selfmanaged";
+    const providerLabel = (SIZING_PROVIDERS.find(([key]) => key === input.provider) || [])[1]
+      || input.provider;
+    const regionLabel = isECH && input.region
+      ? ((ECH_REGIONS[input.provider] || []).find(([id]) => id === input.region)?.[1] || input.region)
+      : null;
+    const profileLabel = isECH
+      ? (input.profile || echProfiles(input.provider, input.region)[0])
+      : null;
+    const clusterLabel = [
+      providerLabel, regionLabel, profileLabel,
+      `${input.dailyGB} GB/day`, `${result.retentionDays} day retention`,
+    ].filter(Boolean).join(" · ");
+
+    const sections = [
+      stack.agents > 0 && !fromBoard && { id: sid.src, template: "dataZone",
+        fill: { label: "Data sources", sources: ["source"], collectors: [] } },
+      hasIngestion && { id: sid.ing, template: "sharedIngestion",
+        fill: { label: "Ingestion", tools: ingTools }, props: ingProps },
+      { id: sid.cluster, template: "cluster",
+        /* The block the Patterns sidebar inserts, with only what sizing
+           actually decides overridden: which tiers exist, whether the quorum
+           needs dedicated masters, whether dedicated ML nodes are on, and
+           whether there's an object store for the frozen tier to snapshot into.
+           Ingest and coordinating nodes stay off, as they are in the sidebar
+           default. */
+        fill: { ...defaultFill("cluster"),
+                label: clusterLabel,
+                tiers: result.tiers.map((t) => t.key),
+                master: stack.masters > 0,
+                ml: stack.ml > 0,
+                objectStorage: result.objectStoreTB > 0 },
+        props: clusterProps },
+      stack.kibana > 0 && { id: sid.user, template: "userSpace",
+        fill: { consumers: ["kibana", "users"], idp: false },
+        props: { kibana: { instances: stack.kibana, ...hwProps("kibana") },
+                 users: { users: input.users } } },
+      /* The monitoring deployment watches the cluster from the side rather
+         than sitting in a lane of its own, so it hangs under the User Space
+         (and falls back to its lane when there is no Kibana to sit under). */
+      stack.monitoring > 0 && { id: sid.mon, template: "management", below: sid.user,
+        fill: { label: "Management", tools: ["monitoring"] } },
+    ].filter(Boolean);
+
+    const cross = [
+      stack.agents > 0 && !fromBoard && { source: sid.src, target: sid.ing, label: "logs & metrics" },
+      hasIngestion && { source: sid.ing, target: sid.cluster, label: "ingest" },
+      stack.kibana > 0 && { source: sid.cluster, target: sid.user, label: "queries" },
+      stack.monitoring > 0 && { source: sid.cluster, target: sid.mon,
+        label: "stack monitoring", sourceZone: true },
+    ].filter(Boolean);
+
+    const built = buildFromSections(sections, cross);
+    const newNodes = built.nodes;
+
+    /* Place below-left of the existing diagram (viewport centre when empty)
+       and re-frame around everything, matching how pattern blocks land.
+       Drawing from the board's own sources continues their data flow instead:
+       the architecture lands to the right of those source nodes, top-aligned,
+       so the wired-up sources read as the left edge of the diagram. */
+    const bb = boxOf(newNodes, built.zones);
+    const b = bbox();
+    const c = centerOfViewport();
+    const srcBox = fromBoard
+      ? boxOf(nodes.filter((n) => n.type === "source" && +(n.props?.ingest || 0) > 0), [])
+      : null;
+    const dx = snap((srcBox ? srcBox.x1 + 180 : b ? b.x0 : c.x - (bb.x1 - bb.x0) / 2) - bb.x0);
+    const dy = snap((srcBox ? srcBox.y0 : b ? b.y1 + 140 : c.y - (bb.y1 - bb.y0) / 2) - bb.y0);
+    const shiftPt = (p) => ({ x: p.x + dx, y: p.y + dy });
+
+    /* Connect the contributing Data Source nodes to the new intake. */
+    const srcLinks = [];
+    if (fromBoard) {
+      const into = sectionEndpoint(sid.ing, "in", built.meta)
+                || sectionEndpoint(sid.cluster, "in", built.meta);
+      if (into) for (const n of nodes) {
+        if (n.type === "source" && +(n.props?.ingest || 0) > 0)
+          srcLinks.push({ id: uid("e"), s: n.id, e: into, lbl: "logs & metrics" });
+      }
+    }
 
     snapshot();
-    const b = bbox();
-    const dx = snap(b ? b.x0 : centerOfViewport().x - inner.w / 2);
-    const dy = snap(b ? b.y1 + 140 : centerOfViewport().y - inner.h / 2);
-    setNodes((ns) => [...ns, ...built.map((n) => ({ ...n, x: n.x + dx, y: n.y + dy }))]);
-    setEdges((es) => [...es, ...edges]);
-    setZones((zs) => [...zs, { ...zone, x: zone.x + dx, y: zone.y + dy }]);
+    setNodes((ns) => [...ns, ...newNodes.map((n) => ({ ...n, x: n.x + dx, y: n.y + dy }))]);
+    setEdges((es) => [...es, ...built.edges.map((e) => (e.pts ? { ...e, pts: e.pts.map(shiftPt) } : e)), ...srcLinks]);
+    setZones((zs) => [...zs, ...built.zones.map((z) => ({ ...z, x: z.x + dx, y: z.y + dy }))]);
+    /* Register the sections so the AI chat can reference and edit them. */
+    sectionsRef.current = { ...sectionsRef.current, ...built.meta };
     setSel(null);
     setSizeOpen(false);
     fitTo({
-      x0: Math.min(b ? b.x0 : Infinity, zone.x + dx),
-      y0: Math.min(b ? b.y0 : Infinity, zone.y + dy),
-      x1: Math.max(b ? b.x1 : -Infinity, zone.x + dx + zone.w),
-      y1: Math.max(b ? b.y1 : -Infinity, zone.y + dy + zone.h),
+      x0: Math.min(b ? b.x0 : Infinity, bb.x0 + dx),
+      y0: Math.min(b ? b.y0 : Infinity, bb.y0 + dy),
+      x1: Math.max(b ? b.x1 : -Infinity, bb.x1 + dx),
+      y1: Math.max(b ? b.y1 : -Infinity, bb.y1 + dy),
     });
     flashSeedNote(`Sized ${result.nodes} nodes for ${formatTB(result.dataTB)} of data`);
   };
@@ -1582,7 +1783,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     setSummary({ busy: true });
     try {
       const text = await runLLM(
-        { provider, apiKey, model, proxyUrl, proxyToken },
+        bedrockCfg(),
         {
           system: SUMMARY_SYSTEM,
           messages: [{ role: "user", content: summaryPrompt({
@@ -1609,6 +1810,20 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                     "Quote lines copied — paste into Pricing / ROM",
                     "Set Memory on the nodes first — resource units are priced per 64 GB");
 
+  /* Push the same quote lines straight into the Pricing / ROM builder — no
+     paste step in front of the customer. Lands as a new, clearly-labelled
+     scenario so nothing already in the builder is overwritten, and carries the
+     per-tier RAM / node / storage the flat text paste would drop. */
+  const sendRom = () => {
+    const rows = romRows(totals);
+    if (!rows.length)
+      return flashSeedNote("Set Memory on the nodes first — resource units are priced per 64 GB");
+    const ok = sendScenarioToPricing(romScenario(totals, { label: `Whiteboard — ${activeBoard.name}` }));
+    flashSeedNote(ok
+      ? `Sent ${rows.length} line${rows.length === 1 ? "" : "s"} to Pricing / ROM`
+      : "Couldn't reach the Pricing / ROM builder");
+  };
+
   /* Lay every component out in left-to-right data-flow lanes. Zones are left
      alone: they'd need re-fitting around content that has moved, and the user
      usually wants to redraw them anyway. */
@@ -1619,7 +1834,6 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     const next = nodes.map((n) => (pos[n.id] ? { ...n, ...pos[n.id] } : n));
     setNodes(next);
     setSel(null);
-    setRouteTick((t) => t + 1);
     fitTo(boxOf(next, []));
   };
 
@@ -1638,14 +1852,12 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       const { pts: _drop, ...rest } = x;
       return rest;
     }));
-    setRouteTick((t) => t + 1);
   };
 
   /* Clear all manual waypoints on an edge (Reset shape). */
   const resetEdgeShape = (edgeId) => {
     snapshot();
     setEdges((es) => es.map((x) => { if (x.id !== edgeId) return x; const { pts: _drop, ...rest } = x; return rest; }));
-    setRouteTick((t) => t + 1);
   };
 
   const selNodeIds = sel && (sel.kind === "nodes" || sel.kind === "mixed") ? sel.ids : [];
@@ -1833,7 +2045,8 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       )}
 
       {importOpen && <ClusterImport onClose={() => setImportOpen(false)} onImport={importCluster} />}
-      {sizeOpen && <SizingCalculator onClose={() => setSizeOpen(false)} onDraw={drawSizing} />}
+      {sizeOpen && <SizingCalculator onClose={() => setSizeOpen(false)} onDraw={drawSizing}
+                                     sources={boardSources} onAddSources={addSourceNodes} />}
       {summary && (
         <BoardSummary state={summary} onClose={() => setSummary(null)} onRetry={writeSummary}
                       onCopy={(text) => copyToClipboard(text, "Note copied", "Nothing to copy")} />
@@ -1841,7 +2054,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
       <div className="ew-body">
         {/* palette */}
-        {!present && (
+        {!present && paletteOpen && (
         <div className="ew-palette">
           <div className="ew-patterns">
             <div className="ew-patterns-h">Patterns</div>
@@ -1892,6 +2105,12 @@ export default function ElasticWhiteboard({ height = "100%" }) {
             })
           )}
         </div>
+        )}
+        {!present && (
+          <button className="ew-paltoggle" onClick={() => setPaletteOpen((open) => !open)}
+                  title={paletteOpen ? "Collapse the palette" : "Expand the palette"}>
+            {paletteOpen ? "◂" : "▸"}
+          </button>
         )}
 
         {/* canvas */}
@@ -2185,6 +2404,10 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                   <button className="ew-btn" onClick={copyRom}
                           title={`Copy ${RU_GB} GB resource-unit line items to paste into the Pricing / ROM builder`}>
                     Copy quote lines
+                  </button>
+                  <button className="ew-btn" onClick={sendRom}
+                          title="Send these line items straight into the Pricing / ROM builder as a new option — no paste step">
+                    Send to Pricing
                   </button>
                   <button className="ew-btn" onClick={copySizing}
                           title="Copy a one-line sizing summary">
@@ -2526,6 +2749,9 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                           {v === "" && <option value="">—</option>}
                           {f.options.map((o) => <option key={o} value={o}>{o}</option>)}
                         </select>);
+                      else if (f.kind === "search") ctrl = (
+                        <SearchSelect value={v} options={f.options}
+                                      placeholder={f.placeholder || ""} onChange={setP} />);
                       else if (f.kind === "toggle") ctrl = (
                         <input type="checkbox" checked={!!v} onChange={(e) => setP(e.target.checked)} />);
                       else if (f.kind === "number") ctrl = (
@@ -2566,41 +2792,38 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
           {showChatSettings && (
             <div className="ew-chat-settings">
-              <label className="ew-flabel">Provider</label>
-              <select className="ew-chat-select" value={provider}
-                      onChange={(e) => setProvider(e.target.value)}>
-                <option value="anthropic">Anthropic (direct)</option>
-                <option value="proxy">OpenAI-compatible proxy</option>
-              </select>
+              <div className="ew-awsload">
+                <button className="ew-btn" onClick={loadAwsCreds}>Load from ~/.aws/credentials</button>
+                {awsProfiles && (
+                  <select className="ew-chat-select" value={awsProfileName} title="AWS profile"
+                          onChange={(e) => applyAwsProfile(awsProfiles.find((p) => p.name === e.target.value))}>
+                    {awsProfiles.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+                  </select>
+                )}
+                <input ref={credsFileRef} type="file" style={{ display: "none" }} onChange={pickAwsCredsFile} />
+              </div>
+              {credsNote && <p className="ew-chat-note">{credsNote}</p>}
 
-              {provider === "proxy" ? (
-                <>
-                  <label className="ew-flabel">Endpoint URL</label>
-                  <input value={proxyUrl} placeholder="https://…/v1/chat/completions"
-                         onChange={(e) => setProxyUrl(e.target.value.trim())} />
-                  <label className="ew-flabel">Bearer token</label>
-                  <input type="password" value={proxyToken} placeholder="sk-…"
-                         onChange={(e) => setProxyToken(e.target.value.trim())} />
-                  <label className="ew-flabel">Model</label>
-                  <input value={model} placeholder="claude-opus-4-7"
-                         onChange={(e) => setModel(e.target.value.trim())} />
-                  <p className="ew-chat-note">
-                    Requests go to your proxy with an <code>Authorization: Bearer</code> header. The URL and token are stored in this browser (localStorage). Don’t use this on a shared computer.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <label className="ew-flabel">Anthropic API key</label>
-                  <input type="password" value={apiKey} placeholder="sk-ant-…"
-                         onChange={(e) => setApiKey(e.target.value.trim())} />
-                  <label className="ew-flabel">Model</label>
-                  <input value={model} placeholder="claude-sonnet-5"
-                         onChange={(e) => setModel(e.target.value.trim())} />
-                  <p className="ew-chat-note">
-                    Your key is stored in this browser (localStorage) and sent directly to Anthropic from your machine. Don’t use this on a shared computer.
-                  </p>
-                </>
-              )}
+              <label className="ew-flabel">AWS region</label>
+              <input value={awsRegion} placeholder="us-east-1"
+                     onChange={(e) => setAwsRegion(e.target.value.trim())} />
+              <label className="ew-flabel">Access key ID</label>
+              <input value={awsKeyId} placeholder="AKIA…"
+                     onChange={(e) => setAwsKeyId(e.target.value.trim())} />
+              <label className="ew-flabel">Secret access key</label>
+              <input type="password" value={awsSecret} placeholder="wJalr…"
+                     onChange={(e) => setAwsSecret(e.target.value.trim())} />
+              <label className="ew-flabel">Session token (optional)</label>
+              <input type="password" value={awsSession} placeholder="for temporary STS credentials"
+                     onChange={(e) => setAwsSession(e.target.value.trim())} />
+              <label className="ew-flabel">Model / inference profile</label>
+              <input value={model} placeholder={BEDROCK_DEFAULT_MODEL}
+                     onChange={(e) => setModel(e.target.value.trim())} />
+              <p className="ew-chat-note">
+                Requests are SigV4-signed and sent straight to Amazon Bedrock in your region — the
+                IAM identity needs <code>bedrock:InvokeModel</code>. Credentials are stored in this
+                browser (localStorage). Don’t use this on a shared computer.
+              </p>
             </div>
           )}
 
@@ -2625,7 +2848,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
           <div className="ew-chat-form">
             <textarea className="ew-chat-input" rows={2} value={chatInput}
-                      placeholder={(provider === "proxy" ? (proxyUrl && proxyToken) : apiKey) ? "Describe or edit the diagram…" : "Add credentials (⚙) to begin…"}
+                      placeholder={hasAwsCreds ? "Describe or edit the diagram…" : "Add AWS credentials (⚙) to begin…"}
                       onChange={(e) => setChatInput(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }} />
             <button className="ew-chat-send" onClick={sendChat} disabled={chatBusy || !chatInput.trim()}
@@ -2710,8 +2933,13 @@ function ClusterImport({ onClose, onImport }) {
         </div>
         <div className="ew-modal-body">
           <p className="ew-modal-hint">
-            Paste the output of <code>GET _cat/nodes?v</code>, <code>GET _nodes</code>, or{" "}
-            <code>GET _cluster/stats</code> from Kibana Dev Tools. Nothing leaves the browser.
+            Best fidelity: <code>GET _nodes</code> — it carries CPU core counts and the
+            Elasticsearch version. Quicker: <code>GET _cat/nodes?v&h=name,node.role,ram.max,disk.total</code>{" "}
+            (the explicit columns matter — the default <code>?v</code> set has no RAM or disk, so those
+            nodes import with none). <code>GET _cluster/stats</code> also works but is approximate — its
+            role counts overlap, so the node breakdown is reconstructed against the total. Paste from
+            Kibana Dev Tools (request line, <code>curl</code>, or <code>?format=json</code> all fine).
+            Nothing leaves the browser.
           </p>
           <textarea className="ew-itext ew-modal-input" autoFocus value={text} rows={11}
                     spellCheck={false}
@@ -2787,12 +3015,139 @@ function BoardSummary({ state, onClose, onCopy, onRetry }) {
 
 /* Sizing calculator: the arithmetic an SA does on a napkin before drawing.
    Ingest rate and retention per tier in, node counts out, then draw it. */
-function SizingCalculator({ onClose, onDraw }) {
+/* Searchable dropdown for long option lists — the native datalist popup can't
+   be scrolled reliably across browsers. Free text still works: typing commits
+   as you go and filters the list; picking an entry commits it and closes. */
+function SearchSelect({ value, options, placeholder, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(null);   // null: not filtering, show the value
+  const needle = (query || "").trim().toLowerCase();
+  const matches = useMemo(() => {
+    const list = needle ? options.filter((o) => o.toLowerCase().includes(needle)) : options;
+    return list.slice(0, 200);
+  }, [options, needle]);
+  return (
+    <div className="ew-combo">
+      <input value={query !== null ? query : (value || "")} placeholder={placeholder}
+             onFocus={() => setOpen(true)}
+             onChange={(e) => { setQuery(e.target.value); setOpen(true); onChange(e.target.value); }}
+             onBlur={() => { setOpen(false); setQuery(null); }}
+             onKeyDown={(e) => { if (e.key === "Escape" || e.key === "Enter") e.target.blur(); }} />
+      {open && matches.length > 0 && (
+        <div className="ew-combo-list"
+             onPointerDown={(e) => e.preventDefault()} /* keep input focus while scrolling/picking */>
+          {matches.map((o) => (
+            <button key={o} type="button"
+                    onClick={() => { onChange(o); setQuery(null); setOpen(false); }}>
+              {o}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Row-based intake for data sources: each row picks an integration from the
+   Elastic Agent catalog (free text works too) with an optional raw ingest
+   volume, and lands on the board as one Data Source node in a vertical stack. */
+function DataSourcesDialog({ onClose, onAdd }) {
+  const blankRow = () => ({ id: uid("srcrow"), integration: "", gb: "", days: "" });
+  const [rows, setRows] = useState(() => [blankRow()]);
+  const setRow = (id, patch) =>
+    setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const filled = rows.filter((r) => r.integration.trim() || +r.gb > 0);
+  const total = filled.reduce((sum, r) => sum + (+r.gb || 0), 0);
+  return (
+    <>
+      <div className="ew-modal-backdrop" onClick={onClose} />
+      <div className="ew-modal">
+        <div className="ew-modal-h">
+          <b>Add data sources</b>
+          <button className="ew-x" onClick={onClose}>×</button>
+        </div>
+        <div className="ew-modal-body">
+          <p className="ew-ihint">
+            Pick each source from the Elastic Agent integrations catalog (or type any
+            name) with an optional raw ingest volume and retention. Each row becomes a
+            Data Source node on the board, stacked in a column; the sizing dialog can
+            sum the volumes, and a per-source retention caps how far that source's
+            data ages through the tiers.
+          </p>
+          {rows.map((r) => (
+            <div className="ew-srcrow" key={r.id}>
+              <SearchSelect value={r.integration} options={INTEGRATION_TITLES}
+                            placeholder="Search integrations…"
+                            onChange={(v) => setRow(r.id, { integration: v })} />
+              <input className="ew-itext" type="number" min="0" step="10" placeholder="GB/day"
+                     value={r.gb} onChange={(e) => setRow(r.id, { gb: e.target.value })} />
+              <input className="ew-itext" type="number" min="1" placeholder="days"
+                     value={r.days} onChange={(e) => setRow(r.id, { days: e.target.value })} />
+              <button className="ew-x" title="Remove row"
+                      onClick={() => setRows((rs) => rs.filter((x) => x.id !== r.id))}>×</button>
+            </div>
+          ))}
+          <button className="ew-btn" onClick={() => setRows((rs) => [...rs, blankRow()])}>+ Add row</button>
+        </div>
+        <div className="ew-modal-foot">
+          <span className="ew-ihint">
+            {filled.length} source{filled.length === 1 ? "" : "s"} · {total} GB/day
+          </span>
+          <button className="ew-btn" onClick={onClose}>Cancel</button>
+          <button className="ew-btn primary" disabled={!filled.length}
+                  onClick={() => { onAdd(filled); onClose(); }}>
+            Add to board
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function SizingCalculator({ onClose, onDraw, sources = { total: 0, count: 0 }, onAddSources }) {
   const [input, setInput] = useState(SIZING_DEFAULTS);
-  const result = useMemo(() => sizeCluster(input), [input]);
+  /* Ingest can be a hand-entered total, or the sum of the Data Source nodes
+     on the board that carry a raw-ingest volume. */
+  const [fromBoard, setFromBoard] = useState(false);
+  const [srcOpen, setSrcOpen] = useState(false);
+  const useBoard = fromBoard && sources.total > 0;
+  const sizingInput = useMemo(
+    () => (useBoard ? { ...input, dailyGB: sources.total, sources: sources.rows } : input),
+    [input, useBoard, sources]);
+  /* Instance / vCPU / disk cells edited away from the recommendation; RAM
+     edits live in input.ram because RAM re-derives node counts too. */
+  const [hwOver, setHwOver] = useState({});
+  const result = useMemo(() => sizeCluster(sizingInput), [sizingInput]);
+  const recommended = useMemo(() => recommendHardware(result), [result]);
+  const hardware = useMemo(() => Object.fromEntries(
+    Object.entries(recommended).map(([k, row]) => [k, { ...row, ...(hwOver[k] || {}) }])),
+    [recommended, hwOver]);
+  const hwTouched = Object.keys(hwOver).length > 0 || Object.keys(input.ram).length > 0;
+
   const set = (key, value) => setInput((prev) => ({ ...prev, [key]: value }));
   const setDays = (key, value) =>
     setInput((prev) => ({ ...prev, days: { ...prev.days, [key]: value } }));
+  const setRam = (key, value) =>
+    setInput((prev) => ({ ...prev, ram: { ...prev.ram, [key]: value } }));
+  const overrideHw = (key, field, value) =>
+    setHwOver((prev) => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
+  const resetHw = () => { setHwOver({}); setInput((prev) => ({ ...prev, ram: {} })); };
+  /* Hardware edits are tied to a provider, region, and profile, so switching
+     any of them drops the edits (and the narrower choices). */
+  const setProvider = (value) => {
+    setHwOver({});
+    setInput((prev) => ({ ...prev, provider: value, region: "", profile: "", ram: {} }));
+  };
+  const setRegion = (value) => {
+    setHwOver({});
+    setInput((prev) => ({ ...prev, region: value, profile: "", ram: {} }));
+  };
+  const setProfile = (value) => {
+    setHwOver({});
+    setInput((prev) => ({ ...prev, profile: value, ram: {} }));
+  };
+  const isECH = input.provider !== "selfmanaged";
+  const profiles = isECH ? echProfiles(input.provider, input.region) : [];
 
   const num = (label, key, props) => (
     <label className="ew-size-f">
@@ -2801,25 +3156,84 @@ function SizingCalculator({ onClose, onDraw }) {
              onChange={(e) => set(key, e.target.value)} {...props} />
     </label>
   );
+  const toggle = (label, key) => (
+    <label className="ew-size-f ew-size-t">
+      <span>{label}</span>
+      <input type="checkbox" checked={!!input[key]} onChange={(e) => set(key, e.target.checked)} />
+    </label>
+  );
 
   return (
     <>
       <div className="ew-modal-backdrop" onClick={onClose} />
       <div className="ew-modal ew-modal-wide">
         <div className="ew-modal-h">
-          <b>Size a cluster</b>
+          <b>Draw a Cluster</b>
           <button className="ew-x" onClick={onClose}>×</button>
         </div>
         <div className="ew-modal-body">
           <div className="ew-size-grid">
-            {num("Ingest", "dailyGB", { step: 10 })}
+            <label className="ew-size-f">
+              <span>Provider</span>
+              <select className="ew-itext" value={input.provider}
+                      onChange={(e) => setProvider(e.target.value)}>
+                {SIZING_PROVIDERS.map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            </label>
+            {isECH && (
+              <label className="ew-size-f">
+                <span>Region</span>
+                <select className="ew-itext" value={input.region}
+                        onChange={(e) => setRegion(e.target.value)}>
+                  <option value="">Any region</option>
+                  {ECH_REGIONS[input.provider].map(([id, label]) => (
+                    <option key={id} value={id}>{label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {isECH && (
+              <label className="ew-size-f">
+                <span>Hot profile</span>
+                <select className="ew-itext" value={input.profile || profiles[0]}
+                        onChange={(e) => setProfile(e.target.value)}>
+                  {profiles.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </label>
+            )}
+            <label className="ew-size-f">
+              <span>Ingest</span>
+              <input className="ew-itext" type="number" min="0" step="10"
+                     value={useBoard ? sources.total : input.dailyGB}
+                     disabled={useBoard}
+                     onChange={(e) => set("dailyGB", e.target.value)} />
+            </label>
+            <label className="ew-size-f ew-size-t">
+              <span>Data sources</span>
+              <button className="ew-btn" onClick={() => setSrcOpen(true)}>+ Add…</button>
+            </label>
+            {sources.total > 0 && (
+              <label className="ew-size-f ew-size-t">
+                <span>Sum board sources</span>
+                <input type="checkbox" checked={fromBoard}
+                       onChange={(e) => setFromBoard(e.target.checked)} />
+              </label>
+            )}
             {num("Replicas", "replicas", { max: 3, step: 1 })}
             {num("Index overhead", "overhead", { step: 0.1 })}
-            {num("RAM per node", "nodeRAM", { step: 8 })}
+            {!isECH && num("RAM per node", "nodeRAM", { step: 8 })}
           </div>
           <p className="ew-ihint">
             Ingest in GB/day of raw data. Overhead is index size against raw — about 1:1 for
             logs with default mappings, less with synthetic <code>_source</code>.
+            {sources.total > 0 && <>{" "}Sum board sources totals the {sources.count} Data
+            Source node{sources.count === 1 ? "" : "s"} on the board that carry a raw-ingest
+            volume ({sources.total} GB/day) instead of a hand-entered figure.</>}
+            {isECH && <>{" "}On Elastic Cloud, node RAM follows each instance configuration's
+            published size ladder, the hot profile picks the deployment template's hot-tier
+            hardware, and the region narrows hardware to what's offered there.</>}
           </p>
 
           <div className="ew-size-grid">
@@ -2833,6 +3247,59 @@ function SizingCalculator({ onClose, onDraw }) {
           </div>
           <p className="ew-ihint">Days held in each tier. Cold and frozen mount searchable snapshots, so replicas don't multiply their storage.</p>
 
+          <div className="ew-size-grid">
+            {num("Agents", "agents", { step: 10 })}
+            {num("Kibana users", "users", { step: 10 })}
+            {toggle("Logstash", "logstash")}
+            {toggle("Machine learning", "ml")}
+            {toggle("Dedicated masters", "masters")}
+            {toggle("Monitoring cluster", "monitoring")}
+          </div>
+          <p className="ew-ihint">
+            The stack around the cluster: agents are hosts shipping data, users are concurrent
+            Kibana users. Logstash is sized from ingest (~1 TB/day per node, HA pair minimum),
+            dedicated masters join automatically once the data tiers reach six nodes, and the
+            monitoring cluster is a separate small deployment for stack monitoring. Machine
+            learning adds dedicated ML nodes for inference and anomaly detection, sized from
+            ingest (16 GB floor, HA pair minimum) and off unless you ask for them.
+            Zero a field or untick a toggle to leave that piece off the drawing.
+          </p>
+
+          {result.tiers.length > 0 && (
+            <>
+              <div className="ew-hw">
+                <div className="ew-hw-row ew-hw-head">
+                  <span>Component</span><span>Instance</span><span>vCPU</span><span>RAM (GB)</span><span>Disk</span>
+                </div>
+                {Object.values(hardware).map((row) => (
+                  <div className="ew-hw-row" key={row.key}>
+                    <span className="ew-hw-name">{row.label} <em>×{row.count}</em></span>
+                    <input className="ew-itext" value={row.instance}
+                           onChange={(e) => overrideHw(row.key, "instance", e.target.value)} />
+                    <input className="ew-itext" type="number" min="1" value={row.cpu}
+                           onChange={(e) => overrideHw(row.key, "cpu", e.target.value)} />
+                    <input className="ew-itext" type="number" min="1" value={input.ram[row.key] ?? row.mem}
+                           onChange={(e) => setRam(row.key, e.target.value)} />
+                    <input className="ew-itext" value={row.disk}
+                           onChange={(e) => overrideHw(row.key, "disk", e.target.value)} />
+                  </div>
+                ))}
+              </div>
+              <p className="ew-ihint">
+                {isECH ? (
+                  <>Elastic Cloud instance configurations from the docs: disk and vCPU follow each
+                  config's published ratios, RAM snaps up its size ladder, and a tier scales out
+                  past the top rung. Every cell is editable — RAM changes re-derive node counts.</>
+                ) : (
+                  <>Best-practice AWS boxes, per node: NVMe (i3en) for hot indexing and the frozen
+                  cache, dense disk (d3en) for warm and cold, small general-purpose masters. Every
+                  cell is editable — RAM changes re-derive node counts and the instance pick.</>
+                )}
+                {hwTouched && <>{" "}<button className="ew-linkbtn" onClick={resetHw}>Reset to recommended</button></>}
+              </p>
+            </>
+          )}
+
           {result.tiers.length > 0 ? (
             <div className="ew-modal-preview">
               <b>{result.nodes} nodes</b> · {formatTB(result.dataTB)} on disk · {result.ramGB} GB RAM
@@ -2844,6 +3311,11 @@ function SizingCalculator({ onClose, onDraw }) {
                     <em>{t.nodes} × {formatTB(t.perNodeTB)} = {formatTB(t.dataTB)}</em>
                   </li>
                 ))}
+                {result.stack.masters > 0 && <li><span>Dedicated masters</span><em>{result.stack.masters} × {hardware.master?.instance}</em></li>}
+                {result.stack.ml > 0 && <li><span>Machine learning</span><em>{result.stack.ml} × {hardware.ml?.instance}</em></li>}
+                {result.stack.logstash > 0 && <li><span>Logstash</span><em>{result.stack.logstash} × {hardware.logstash?.instance}</em></li>}
+                {result.stack.kibana > 0 && <li><span>Kibana</span><em>{result.stack.kibana} × {hardware.kibana?.instance}</em></li>}
+                {result.stack.agents > 0 && <li><span>Elastic Agent</span><em>{result.stack.agents} hosts</em></li>}
               </ul>
             </div>
           ) : (
@@ -2851,14 +3323,18 @@ function SizingCalculator({ onClose, onDraw }) {
           )}
         </div>
         <div className="ew-modal-foot">
-          <span className="ew-ihint">Adds a tier column to the current board.</span>
+          <span className="ew-ihint">Draws the architecture onto the current board.</span>
           <button className="ew-btn" onClick={onClose}>Cancel</button>
           <button className="ew-btn primary" disabled={!result.tiers.length}
-                  onClick={() => onDraw(result)}>
+                  onClick={() => onDraw(result, hardware, { fromBoardSources: useBoard })}>
             Draw it
           </button>
         </div>
       </div>
+      {srcOpen && (
+        <DataSourcesDialog onClose={() => setSrcOpen(false)}
+                           onAdd={(rows) => { onAddSources(rows); setFromBoard(true); }} />
+      )}
     </>
   );
 }
@@ -2973,7 +3449,7 @@ const CSS = `
   width:min(620px, calc(100vw - 48px)); max-height:calc(100vh - 96px); display:flex; flex-direction:column;
   background:var(--panel); border:1px solid var(--line); border-radius:13px;
   box-shadow:0 30px 70px rgba(0,0,0,.55); }
-.ew-modal-wide{ width:min(700px, calc(100vw - 48px)); }
+.ew-modal-wide{ width:min(880px, calc(100vw - 48px)); }
 .ew-modal-h{ display:flex; align-items:center; gap:8px; padding:13px 10px 13px 17px;
   border-bottom:1px solid var(--line); }
 .ew-modal-h b{ flex:1; font-family:var(--display); font-weight:500; font-size:15px; }
@@ -3042,6 +3518,16 @@ const CSS = `
 .ew-size-f > span{ display:flex; align-items:center; gap:5px; font-size:9.5px; font-family:var(--mono);
   letter-spacing:.06em; text-transform:uppercase; color:var(--faint); }
 .ew-size-f input{ width:100%; }
+.ew-size-t input{ width:auto; justify-self:start; margin:6px 0 0; accent-color:var(--teal, #00BFB3); }
+.ew-hw{ display:grid; gap:5px; margin-top:2px; }
+.ew-hw-row{ display:grid; grid-template-columns:1.3fr 1.2fr .6fr .7fr 1fr; gap:8px; align-items:center; }
+.ew-hw-head span{ font-size:9.5px; font-family:var(--mono); letter-spacing:.06em;
+  text-transform:uppercase; color:var(--faint); }
+.ew-hw-name{ font-size:11.5px; }
+.ew-hw-name em{ font-style:normal; color:var(--faint); font-family:var(--mono); font-size:10px; }
+.ew-hw-row .ew-itext{ width:100%; }
+.ew-linkbtn{ background:none; border:none; padding:0; cursor:pointer; color:var(--accent);
+  font:inherit; text-decoration:underline; }
 .ew-hint{ font-family:var(--mono); font-size:10.5px; color:var(--faint); }
 .ew-menuwrap{ position:relative; display:inline-flex; }
 .ew-menu-backdrop{ position:fixed; inset:0; z-index:40; }
@@ -3076,6 +3562,9 @@ const CSS = `
   background:var(--accent); background-clip:padding-box; }
 .ew-palette{ width:264px; flex:none; overflow-y:auto; padding:10px;
   border-right:1px solid var(--line); background:var(--panel2); display:grid; gap:8px; align-content:start; }
+.ew-paltoggle{ flex:none; width:15px; padding:0; border:none; border-right:1px solid var(--line);
+  background:var(--panel2); color:var(--muted); cursor:pointer; font-size:10px; line-height:1; }
+.ew-paltoggle:hover{ color:var(--ink); background:var(--panel); }
 .ew-patterns{ display:grid; gap:6px; padding-bottom:8px; margin-bottom:2px; border-bottom:1px solid var(--line); }
 .ew-patterns-h{ font-family:var(--mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
   color:var(--faint); padding:2px 2px 2px; }
@@ -3222,6 +3711,21 @@ const CSS = `
   padding:5px 8px; font-size:12.5px; font-family:var(--body); width:100%; box-sizing:border-box; min-width:0; }
 .ew-frow input:focus, .ew-frow select:focus{ outline:none; border-color:var(--accent); }
 .ew-frow input[type=number]{ font-family:var(--mono); font-size:12px; }
+.ew-combo{ position:relative; min-width:0; }
+.ew-srcrow{ display:grid; grid-template-columns:1fr 100px 80px 26px; gap:8px; align-items:center;
+  margin-bottom:8px; }
+.ew-srcrow .ew-combo input{ background:var(--panel); color:var(--ink); border:1px solid var(--line);
+  border-radius:6px; padding:7px 9px; font-size:12.5px; font-family:var(--body); width:100%;
+  box-sizing:border-box; }
+.ew-srcrow .ew-combo input:focus{ outline:none; border-color:var(--accent); }
+.ew-combo-list{ position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:30;
+  max-height:200px; overflow-y:auto; overscroll-behavior:contain;
+  background:var(--panel); border:1px solid var(--line); border-radius:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,.4); }
+.ew-combo-list button{ display:block; width:100%; text-align:left; padding:6px 10px;
+  background:none; border:0; color:var(--ink); font-size:12px; font-family:var(--body);
+  cursor:pointer; }
+.ew-combo-list button:hover{ background:var(--panel2); }
 .ew-frow input[type=checkbox]{ accent-color:var(--accent); width:15px; height:15px; justify-self:start; }
 .ew-frow input[type=color]{ width:42px; height:26px; padding:1px; background:var(--panel);
   border:1px solid var(--line); border-radius:6px; cursor:pointer; }
@@ -3273,6 +3777,7 @@ const CSS = `
 .ew-chat-settings input{ background:var(--panel2); color:var(--ink); border:1px solid var(--line);
   border-radius:6px; padding:6px 9px; font-family:var(--mono); font-size:12px; }
 .ew-chat-settings input:focus{ outline:none; border-color:var(--accent); }
+.ew-awsload{ display:flex; align-items:center; gap:6px; margin-bottom:2px; }
 .ew-chat-select{ background:var(--panel2); color:var(--ink); border:1px solid var(--line);
   border-radius:7px; padding:6px 8px; font-family:var(--body); font-size:12px; }
 .ew-chat-select:focus{ outline:none; border-color:var(--accent); }

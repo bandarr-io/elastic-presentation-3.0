@@ -17,27 +17,16 @@ import {
 import { useTheme } from '../context/ThemeContext'
 import PricingRomScene from '../scenes/PricingRomScene'
 import {
+  BLANK_ROW,
   DEFAULT_ROWS,
   computeScenario,
   formatCurrency,
   normalizeScenarios,
+  parsePaste,
   projectCell,
   scenarioYearCount,
   toNumber,
 } from '../utils/pricing'
-
-const BLANK_ROW = {
-  sku: '',
-  descLead: '',
-  description: '',
-  descNote: '',
-  term: '12',
-  quantity: '',
-  unitPrice: '',
-  discount: '',
-  marker: '',
-  overrides: {},
-}
 
 const TEMPLATES = [
   {
@@ -81,29 +70,6 @@ const TEMPLATES = [
     }),
   },
 ]
-
-// Split a pasted spreadsheet block into line items. Tab-delimited (Excel /
-// Sheets) is preferred; falls back to comma. Column order:
-// SKU | Description | Quantity | Unit Price | Discount%
-function parsePaste(text) {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const parts = (line.includes('\t') ? line.split('\t') : line.split(',')).map((s) => s.trim())
-      const num = (s) => (s || '').replace(/[^0-9.]/g, '')
-      return {
-        ...BLANK_ROW,
-        sku: parts[0] || '',
-        description: parts[1] || '',
-        quantity: num(parts[2]),
-        unitPrice: num(parts[3]),
-        discount: num(parts[4]),
-      }
-    })
-    .filter((r) => r.sku || r.description || r.quantity || r.unitPrice)
-}
 
 function csvEscape(value) {
   const s = String(value ?? '')
@@ -412,14 +378,19 @@ export default function PricingRomBuilder({ meta, onChange, onClose }) {
                     <span key={yr.index} className={muted}>{yr.label}: <span className={text}>{fmt(yr.subtotal)}</span></span>
                   ))}
                   {numYears > 1 && <span className={isDark ? 'text-elastic-teal' : 'text-elastic-blue'}>TCV: {fmt(calc.tcv)}</span>}
+                  {calc.unpricedCount > 0 && (
+                    <span className={muted} title="Line items still awaiting a unit price — totals are provisional until they're filled in">
+                      · {calc.unpricedCount} to price
+                    </span>
+                  )}
                 </div>
               </div>
 
               {/* Paste panel */}
               {showPaste && (
                 <div className={`rounded-xl border p-3 space-y-2 ${surface}`}>
-                  <p className={`text-[11px] ${muted}`}>Paste rows from Excel/Sheets. Columns: <b>SKU · Description · Qty · Unit Price · Discount%</b> (tab or comma separated).</p>
-                  <textarea rows={4} value={pasteText} onChange={(e) => setPasteText(e.target.value)} className={`${cell} font-mono`} placeholder={'ERU 64GB\t20TB Ingest\t85\t13400\t\nFlex Consulting\tServices\t90\t3300'} />
+                  <p className={`text-[11px] ${muted}`}>Paste rows from Excel/Sheets. Columns: <b>SKU · Description · Qty · Unit Price · Discount% · Bold label</b> (tab or comma separated; the 6th column is optional).</p>
+                  <textarea rows={4} value={pasteText} onChange={(e) => setPasteText(e.target.value)} className={`${cell} font-mono`} placeholder={'ERU 64GB\t20TB Ingest\t85\t13400\t\tSoftware Licensing:\nFlex Consulting\tServices\t90\t3300'} />
                   <div className="flex gap-2">
                     <button onClick={() => applyPaste('append')} className={`${chipBtn} ${isDark ? 'text-elastic-teal border-elastic-teal/40' : 'text-elastic-blue border-elastic-blue/40'}`}>Append</button>
                     <button onClick={() => applyPaste('replace')} className={chipBtn}>Replace all</button>
@@ -443,7 +414,9 @@ export default function PricingRomBuilder({ meta, onChange, onClose }) {
                 <div className="space-y-1.5">
                   {rows.map((row, ri) => {
                     const base = projectCell(row, 0, scenario)
-                    const invalid = base.lineTotal === 0
+                    // A blank unit price is a to-do, not a broken $0 line.
+                    const awaitingPrice = !base.priced
+                    const invalid = !awaitingPrice && base.lineTotal === 0
                     const isOpen = !!expanded[ri]
                     return (
                       <div key={ri} className={`rounded-lg border p-1.5 ${surface}`}>
@@ -455,8 +428,13 @@ export default function PricingRomBuilder({ meta, onChange, onClose }) {
                           <input inputMode="numeric" value={row.quantity ?? ''} onChange={(e) => updateRow(ri, { quantity: e.target.value })} className={cellRight} placeholder="Qty" />
                           <input inputMode="numeric" value={row.unitPrice ?? ''} onChange={(e) => updateRow(ri, { unitPrice: e.target.value })} className={cellRight} placeholder="Price" />
                           <input inputMode="numeric" value={row.discount ?? ''} onChange={(e) => updateRow(ri, { discount: e.target.value })} className={`${cell} text-center`} placeholder="TBD" />
-                          <div className={`text-right text-xs font-bold tabular-nums ${invalid ? (isDark ? 'text-amber-400/80' : 'text-amber-600') : text}`} title={invalid ? 'Quantity or price is empty/zero' : `${yearLabels[0]} line total`}>
-                            {fmt(base.lineTotal)}
+                          <div
+                            className={`text-right text-xs font-bold tabular-nums ${
+                              awaitingPrice ? muted : invalid ? (isDark ? 'text-amber-400/80' : 'text-amber-600') : text
+                            }`}
+                            title={awaitingPrice ? 'Awaiting unit price' : invalid ? 'Quantity or price is zero' : `${yearLabels[0]} line total`}
+                          >
+                            {awaitingPrice ? '—' : fmt(base.lineTotal)}
                           </div>
                           <div className="flex items-center justify-center gap-0.5">
                             <button onClick={() => moveRow(ri, -1)} className={`${iconBtn} ${ri === 0 ? 'opacity-30 pointer-events-none' : ''}`} title="Move up"><FontAwesomeIcon icon={faArrowUp} /></button>

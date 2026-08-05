@@ -68,6 +68,120 @@ describe('parseClusterInput', () => {
     expect(parseClusterInput('hello world')).toBeNull()
     expect(parseClusterInput('{ not json')).toBeNull()
   })
+
+  it('imports the default ?v column set even though it carries no ram.max/disk.total', () => {
+    // exactly what `GET _cat/nodes?v` returns: ip, heap, ram%, cpu, loads, role, master, name
+    const parsed = parseClusterInput(
+      `ip         heap.percent ram.percent cpu load_1m load_5m load_15m node.role master name
+127.0.0.1            65          99  42    3.07    3.10     3.15 himr      *      es-hot-1
+127.0.0.2            34          81   3    0.14    0.39     0.45 mr        -      es-master-1`)
+    expect(parsed.source).toBe('_cat/nodes')
+    expect(parsed.nodes).toHaveLength(2)
+    // the name is the trailing column and the roles still expand
+    expect(parsed.nodes[0].name).toBe('es-hot-1')
+    expect(parsed.nodes[0].roles).toEqual(expect.arrayContaining(['hot', 'ingest', 'master']))
+    // no ram.max/disk.total in the default set: hardware is absent, not fabricated
+    expect(parsed.nodes[0].ramBytes).toBe(0)
+    expect(parsed.nodes[0].diskBytes).toBe(0)
+    // cpu here is utilisation %, never a core count
+    expect(parsed.nodes[0].cpu).toBe(0)
+  })
+
+  it('does not read the _cat cpu utilisation column as a vCPU core count', () => {
+    const parsed = parseClusterInput('name node.role cpu\nhot-1 hir 87')
+    expect(parsed.nodes[0].cpu).toBe(0)
+    expect(summarizeCluster(parsed).groups.find((g) => g.type === 'tier_hot').cpu).toBe(0)
+  })
+
+  it('strips a Dev Tools request line pasted above the table', () => {
+    const parsed = parseClusterInput(
+      `GET _cat/nodes?v&h=name,node.role,ram.max,disk.total\nname node.role ram.max disk.total\nhot-1 hir 62.9gb 2tb`)
+    expect(parsed.source).toBe('_cat/nodes')
+    expect(parsed.nodes).toHaveLength(1)
+    expect(parsed.nodes[0].ramBytes).toBe(parseSize('62.9gb'))
+  })
+
+  it('strips a curl wrapper (with a continued line) from a paste', () => {
+    const parsed = parseClusterInput(
+      `curl -X GET "http://localhost:9200/_cat/nodes?v&h=name,node.role,ram.max,disk.total" \\\n  -H "Authorization: ApiKey abc123"\nname node.role ram.max disk.total\nhot-1 hir 62.9gb 2tb`)
+    expect(parsed.source).toBe('_cat/nodes')
+    expect(parsed.nodes).toHaveLength(1)
+    expect(parsed.nodes[0].name).toBe('hot-1')
+  })
+
+  it('parses _cat/nodes?format=json array output', () => {
+    const parsed = parseClusterInput(JSON.stringify([
+      { name: 'hot-1', 'node.role': 'hir', 'ram.max': '62.9gb', 'disk.total': '2tb' },
+      { name: 'master-1', 'node.role': 'mr', 'ram.max': '15.7gb', 'disk.total': '100gb' },
+    ]))
+    expect(parsed.source).toBe('_cat/nodes')
+    expect(parsed.nodes).toHaveLength(2)
+    expect(parsed.nodes[0].roles).toEqual(expect.arrayContaining(['hot', 'ingest']))
+    expect(parsed.nodes[0].ramBytes).toBe(parseSize('62.9gb'))
+  })
+
+  it('tolerates Windows CRLF line endings', () => {
+    const parsed = parseClusterInput('name node.role ram.max disk.total\r\nhot-1 hir 62.9gb 2tb\r\nmaster-1 mr 15.7gb 100gb\r\n')
+    expect(parsed.nodes).toHaveLength(2)
+    expect(parsed.nodes[0].ramBytes).toBe(parseSize('62.9gb'))
+  })
+
+  it('reconciles overlapping _cluster/stats buckets against count.total', () => {
+    // a hot node that is also master-eligible is tallied in data_hot, data, and
+    // master; summing would give 5+8=… — the reconstruction must equal total
+    const parsed = parseClusterInput(JSON.stringify({
+      cluster_name: 'overlap',
+      nodes: {
+        count: { total: 8, data: 5, data_hot: 3, data_warm: 2, master: 3, ingest: 5 },
+        versions: ['8.13.2'],
+        os: { available_processors: 128, mem: { total_in_bytes: 549755813888 } },
+        fs: { total_in_bytes: 10995116277760 },
+      },
+    }))
+    expect(parsed.source).toBe('_cluster/stats')
+    expect(parsed.nodes).toHaveLength(8)
+    expect(summarizeCluster(parsed).total).toBe(8)
+    // 5 data nodes (3 hot + 2 warm) + 3 dedicated masters = 8; ingest folds into data
+    const byType = Object.fromEntries(summarizeCluster(parsed).groups.map((g) => [g.type, g.count]))
+    expect(byType.tier_hot).toBe(3)
+    expect(byType.tier_warm).toBe(2)
+    expect(byType.node_master).toBe(3)
+  })
+
+  it('keeps content-only data nodes on the board as data nodes', () => {
+    // `s` (data_content) matched nothing in the old grouping and vanished
+    const parsed = parseClusterInput('name node.role\ncontent-1 s\ncontent-2 s')
+    const summary = summarizeCluster(parsed)
+    expect(summary.total).toBe(2)
+    expect(summary.groups.map((g) => g.type)).toEqual(['es'])
+    expect(summary.groups[0].count).toBe(2)
+  })
+
+  it('does not drop transform/voting-only nodes from the total', () => {
+    const parsed = parseClusterInput('name node.role\ntf-1 t\nvote-1 v')
+    const summary = summarizeCluster(parsed)
+    expect(summary.total).toBe(2)
+    // no dedicated box type exists, so they land in the coordinating catch-all
+    expect(summary.groups.reduce((sum, g) => sum + g.count, 0)).toBe(2)
+    expect(summary.groups.find((g) => g.type === 'node_coord').count).toBe(2)
+  })
+
+  it('lands the Elasticsearch version from _nodes JSON on the board', () => {
+    // generic data nodes (no explicit tier) fold into the es box, which is the
+    // only imported type declaring a version field
+    const parsed = parseClusterInput(JSON.stringify({
+      cluster_name: 'versioned',
+      nodes: {
+        aaa: { name: 'd-1', version: '8.13.2', roles: ['data', 'ingest', 'master'],
+               os: { available_processors: 8, mem: { total_in_bytes: 34359738368 } },
+               fs: { total: { total_in_bytes: 1099511627776 } } },
+      },
+    }))
+    expect(parsed.nodes[0].version).toBe('8.13.2')
+    const { board } = clusterToBoard(parsed)
+    const es = board.nodes.find((n) => n.type === 'es')
+    expect(es.props.version).toBe('8.13.2')
+  })
 })
 
 describe('summarizeCluster', () => {

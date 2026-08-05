@@ -1,11 +1,23 @@
 /* Turn real Elasticsearch output into a whiteboard board, so a discovery call
    can start from the customer's actual topology instead of a blank canvas.
 
-   Three inputs are understood, all of them things an SA can paste straight
-   from Kibana Dev Tools:
-     - `GET _cat/nodes?v` (or any ?v variant) — tabular text with a header row
-     - `GET _nodes` / `_nodes/stats` — JSON keyed by node id
-     - `GET _cluster/stats` — JSON with aggregate counts only              */
+   Everything an SA can realistically paste from Kibana Dev Tools or a terminal
+   is understood; the paste is de-noised (see stripRequestPreamble) before it is
+   dispatched by shape:
+     - `GET _cat/nodes?v&h=name,node.role,ram.max,disk.total` — tabular text.
+       A header row is required so columns can be named. The default `?v`
+       column set (no ram.max/disk.total) still imports; those nodes just carry
+       no hardware, since the paste genuinely doesn't contain it.
+     - `GET _cat/nodes?format=json` — a JSON *array* of per-node objects.
+     - `GET _nodes` / `_nodes/stats` — JSON keyed by node id (highest fidelity:
+       carries CPU core counts and the Elasticsearch version).
+     - `GET _cluster/stats` — JSON with aggregate counts only (approximate: the
+       role/tier buckets overlap, so the node breakdown is reconstructed against
+       `count.total` rather than summed — see parseClusterStats).
+   Each of the above is accepted whether pasted bare, with the Dev Tools request
+   line kept on top, wrapped in a `curl` command, or with Windows CRLF endings.  */
+
+import { nodeAutoHeight } from "./nodeMetrics";
 
 /* node.role letters as reported by _cat/nodes. */
 export const ROLE_LETTERS = {
@@ -25,18 +37,36 @@ export function parseSize(text) {
 const toGB = (bytes) => bytes / UNITS.gb;
 const toTB = (bytes) => bytes / UNITS.tb;
 
-const emptyNode = (name) => ({ name, roles: [], cpu: 0, ramBytes: 0, diskBytes: 0 });
+const emptyNode = (name) => ({ name, roles: [], cpu: 0, ramBytes: 0, diskBytes: 0, version: "" });
 
 /* ---------------- _cat/nodes ---------------- */
 
-/* Header names we care about, mapped to the field they fill. */
+/* Header names (and their documented aliases) we can act on, mapped to the
+   node field they fill. `cpu` is deliberately absent: _cat/nodes' cpu column
+   is instantaneous *utilisation percent*, not a core count, so it must never
+   populate a node's vCPU field the way _nodes' os.available_processors does —
+   core counts only come from the _nodes JSON paste. */
 const CAT_COLUMNS = {
   name: "name", n: "name",
-  "node.role": "roles", "node.roles": "roles", role: "roles", r: "roles",
-  "ram.max": "ram", rm: "ram",
-  "disk.total": "disk", dt: "disk", "disk.avail": "diskAvail",
-  cpu: "cpuPct",
+  "node.role": "roles", "node.roles": "roles", role: "roles", noderole: "roles", r: "roles",
+  "ram.max": "ram", rm: "ram", rammax: "ram",
+  "disk.total": "disk", dt: "disk", disktotal: "disk",
+  version: "version",
 };
+
+function nodeFromCells(fields, cells) {
+  const node = emptyNode("");
+  fields.forEach((field, i) => {
+    const cell = cells[i];
+    if (!field || cell === undefined) return;
+    if (field === "name") node.name = cell;
+    else if (field === "roles") node.roles = [...cell].map((ch) => ROLE_LETTERS[ch]).filter(Boolean);
+    else if (field === "ram") node.ramBytes = parseSize(cell);
+    else if (field === "disk") node.diskBytes = parseSize(cell);
+    else if (field === "version") node.version = cell;
+  });
+  return node;
+}
 
 function parseCatNodes(text) {
   const lines = text.split("\n").map((l) => l.trimEnd()).filter((l) => l.trim());
@@ -50,15 +80,30 @@ function parseCatNodes(text) {
   for (const line of lines.slice(1)) {
     const cells = line.trim().split(/\s+/);
     if (cells.length < fields.length) continue;
+    const node = nodeFromCells(fields, cells);
+    if (node.name || node.roles.length) nodes.push(node);
+  }
+  return nodes.length ? { source: "_cat/nodes", nodes } : null;
+}
+
+/* `GET _cat/nodes?format=json` returns an array of objects whose keys are the
+   same column names (or aliases) the tabular form uses. */
+function parseCatJson(arr) {
+  if (!Array.isArray(arr) || !arr.length) return null;
+  if (!arr.every((row) => row && typeof row === "object" && !Array.isArray(row))) return null;
+  const nodes = [];
+  for (const row of arr) {
     const node = emptyNode("");
-    fields.forEach((field, i) => {
-      const cell = cells[i];
-      if (!field || cell === undefined) return;
+    for (const [key, value] of Object.entries(row)) {
+      const field = CAT_COLUMNS[String(key).toLowerCase()];
+      if (!field || value == null) continue;
+      const cell = String(value);
       if (field === "name") node.name = cell;
       else if (field === "roles") node.roles = [...cell].map((ch) => ROLE_LETTERS[ch]).filter(Boolean);
       else if (field === "ram") node.ramBytes = parseSize(cell);
       else if (field === "disk") node.diskBytes = parseSize(cell);
-    });
+      else if (field === "version") node.version = cell;
+    }
     if (node.name || node.roles.length) nodes.push(node);
   }
   return nodes.length ? { source: "_cat/nodes", nodes } : null;
@@ -82,6 +127,7 @@ function parseNodesJson(doc) {
     node.cpu = n.os?.available_processors || n.os?.allocated_processors || 0;
     node.ramBytes = n.os?.mem?.total_in_bytes || 0;
     node.diskBytes = n.fs?.total?.total_in_bytes || 0;
+    node.version = n.version || "";
     return node;
   });
   return { source: "_nodes", clusterName: doc.cluster_name, nodes };
@@ -89,48 +135,96 @@ function parseNodesJson(doc) {
 
 /* ---------------- _cluster/stats ---------------- */
 
+/* _cluster/stats reports only aggregate node counts, and its buckets overlap:
+   a single hot node that is also master-eligible is tallied in `data_hot`,
+   `data`, *and* `master`. Summing them would draw a cluster several times
+   larger than reality, so instead we reconstruct exactly `count.total` nodes
+   against a defensible assumption we cannot verify from aggregates alone:
+
+     - the data-tier buckets (data_hot/warm/cold/frozen/content) name the data
+       nodes and are treated as disjoint (a node's tier is its placement);
+     - `count.data` (or the tier sum) is how many distinct data nodes there are;
+     - the remaining nodes are dedicated master/ingest/ml, assigned in that
+       priority — matching the common topology where a cluster big enough to be
+       read this way runs dedicated masters/ingest/ml separate from data nodes,
+       and any leftover becomes coordinating-only.
+   The synthesized list therefore always reconciles with count.total, and a
+   data node is never also drawn as a separate master. */
 function parseClusterStats(doc) {
   const count = doc?.nodes?.count;
   if (!count || typeof count.total !== "number") return null;
-  /* Aggregate-only: synthesize one representative node per role bucket so the
-     board still shows the shape of the cluster. */
-  const roleKeys = ["data_hot", "data_warm", "data_cold", "data_frozen", "data", "master", "ingest", "ml"];
-  const nodes = [];
+  const total = count.total;
   const cpuTotal = doc.nodes?.os?.available_processors || 0;
   const ramTotal = doc.nodes?.os?.mem?.total_in_bytes || 0;
   const diskTotal = doc.nodes?.fs?.total_in_bytes || 0;
-  const dataish = roleKeys.filter((k) => k.startsWith("data")).reduce((s, k) => s + (count[k] || 0), 0) || count.total;
+  const version = Array.isArray(doc.nodes?.versions) ? doc.nodes.versions[0] || "" : "";
 
-  for (const key of roleKeys) {
-    const n = count[key];
-    if (!n) continue;
-    const role = key === "data" ? "data" : key.replace("data_", "");
-    for (let i = 0; i < n; i++) {
-      const node = emptyNode(`${role}-${i + 1}`);
-      node.roles = [role];
-      if (role !== "master" && role !== "ingest" && role !== "ml") {
-        node.cpu = Math.round(cpuTotal / count.total) || 0;
-        node.ramBytes = ramTotal / count.total;
-        node.diskBytes = diskTotal / dataish;
-      }
-      nodes.push(node);
-    }
+  const nodes = [];
+  const push = (role) => { const n = emptyNode(`${role || "coordinating"}-${nodes.length + 1}`); if (role) n.roles = [role]; nodes.push(n); };
+
+  const tiers = [["data_hot", "hot"], ["data_warm", "warm"], ["data_cold", "cold"], ["data_frozen", "frozen"], ["data_content", "content"]];
+  let tierSum = 0;
+  for (const [key, role] of tiers) {
+    let n = Math.min(count[key] || 0, total - nodes.length);
+    tierSum += n;
+    while (n-- > 0) push(role);
+  }
+  // distinct data nodes: the reported `data` bucket, else the tiers we placed
+  const dataCount = Math.min(typeof count.data === "number" ? count.data : tierSum, total);
+  for (let i = tierSum; i < dataCount; i++) push("data");   // generic (untiered) data nodes
+
+  let remaining = total - nodes.length;
+  for (const role of ["master", "ingest", "ml"]) {
+    const n = Math.min(count[role] || 0, remaining);
+    remaining -= n;
+    for (let i = 0; i < n; i++) push(role);
+  }
+  while (remaining-- > 0) push("");   // coordinating-only remainder
+
+  const dataNodes = nodes.filter((n) => n.roles.length && n.roles[0] !== "master" && n.roles[0] !== "ingest" && n.roles[0] !== "ml").length || total;
+  for (const node of nodes) {
+    node.cpu = Math.round(cpuTotal / total) || 0;
+    node.ramBytes = total ? ramTotal / total : 0;
+    node.version = version;
+    const isData = node.roles.length && !["master", "ingest", "ml"].includes(node.roles[0]);
+    if (isData) node.diskBytes = dataNodes ? diskTotal / dataNodes : 0;
   }
   return nodes.length ? { source: "_cluster/stats", clusterName: doc.cluster_name, nodes } : null;
 }
 
 /* ---------------- entry point ---------------- */
 
+/* Drop the lines an SA pastes above the actual output: the Dev Tools request
+   line (`GET _cat/nodes?v`), a `curl` invocation (Dev Tools' "Copy as cURL",
+   including its `\`-continued lines and a leading shell prompt), and `#`
+   comments. Genuine output (a table, a `{`, or a `[`) ends the preamble. */
+function stripRequestPreamble(text) {
+  const lines = text.split("\n");
+  let i = 0, continued = false;
+  while (i < lines.length) {
+    const t = lines[i].trim();
+    if (continued) { continued = t.endsWith("\\"); i++; continue; }
+    if (!t) { i++; continue; }
+    if (/^\$?\s*curl\b/i.test(t) || /^(GET|POST|PUT|DELETE|HEAD)\b/i.test(t) || t.startsWith("#")) {
+      continued = t.endsWith("\\"); i++; continue;
+    }
+    break;
+  }
+  return lines.slice(i).join("\n");
+}
+
 /* Parse any supported paste. Returns { source, clusterName, nodes[] } or null. */
 export function parseClusterInput(text) {
-  const raw = String(text || "").trim();
-  if (!raw) return null;
-  if (raw.startsWith("{")) {
+  const normalized = String(text || "").replace(/\r\n?/g, "\n");   // tolerate Windows CRLF
+  if (!normalized.trim()) return null;
+  const body = stripRequestPreamble(normalized).trim();
+  if (!body) return null;
+  if (body[0] === "{" || body[0] === "[") {
     let doc;
-    try { doc = JSON.parse(raw); } catch { return null; }
-    return parseNodesJson(doc) || parseClusterStats(doc);
+    try { doc = JSON.parse(body); } catch { return null; }
+    return Array.isArray(doc) ? parseCatJson(doc) : (parseNodesJson(doc) || parseClusterStats(doc));
   }
-  return parseCatNodes(raw);
+  return parseCatNodes(body);
 }
 
 /* ---------------- board construction ---------------- */
@@ -148,38 +242,56 @@ const ROLE_TYPES = [
 ];
 
 const has = (node, role) => node.roles.includes(role) || node.roles.includes(`data_${role}`);
+/* content nodes are data nodes; treat any data_* role (and the bare tier
+   letters from _cat) as data so no data node falls through the grouping. */
+const isData = (node) => node.roles.some((r) => {
+  const base = r.replace(/^data_/, "");
+  return base === "data" || ["hot", "warm", "cold", "frozen", "content"].includes(base);
+});
 const avg = (values) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
+const firstVersion = (members) => members.map((m) => m.version).find(Boolean) || "";
+
+/* The single box each node belongs to. Exactly one per node, so the board's
+   counts always reconcile with the parsed total and a hot+master node isn't
+   drawn twice. Order matters: a data role wins over an eligibility role
+   (a hot node that is also master-eligible is a data node), and any node with
+   only auxiliary roles (transform / voting_only / remote_cluster_client) or no
+   roles at all is a coordinating node — the honest catch-all, since no
+   dedicated box type exists for those and every node must land somewhere. */
+function groupFor(node) {
+  const tier = TIER_TYPES.find(({ role }) => has(node, role));
+  if (tier) return { type: tier.type, label: tier.role };
+  if (isData(node)) return { type: "es", label: "data" };
+  const role = ROLE_TYPES.find(({ role }) => has(node, role));
+  if (role) return { type: role.type, label: role.role };
+  return { type: "node_coord", label: "coordinating" };
+}
+
+const GROUP_ORDER = [...TIER_TYPES.map((t) => t.type), "es", ...ROLE_TYPES.map((t) => t.type), "node_coord"];
 
 /* Group parsed nodes into the component boxes a diagram wants: one box per
-   data tier and per dedicated role, each carrying node count and per-node
-   hardware so the capacity rollup lights up. */
+   data tier and per dedicated role, each carrying node count, per-node
+   hardware, and (when known) the Elasticsearch version, so the capacity
+   rollup lights up and the inspector reflects what the paste knew. */
 export function summarizeCluster(parsed) {
   const nodes = parsed?.nodes || [];
-  const groups = [];
-  const addGroup = (type, label, members) => {
-    if (!members.length) return;
-    groups.push({
+  const buckets = new Map();
+  for (const node of nodes) {
+    const { type, label } = groupFor(node);
+    if (!buckets.has(type)) buckets.set(type, { type, label, members: [] });
+    buckets.get(type).members.push(node);
+  }
+
+  const groups = GROUP_ORDER.filter((type) => buckets.has(type)).map((type) => {
+    const { label, members } = buckets.get(type);
+    return {
       type, label, count: members.length,
       cpu: Math.round(avg(members.map((m) => m.cpu))) || 0,
       ramGB: Math.round(toGB(avg(members.map((m) => m.ramBytes)))) || 0,
       diskTB: +toTB(avg(members.map((m) => m.diskBytes))).toFixed(2) || 0,
-    });
-  };
-
-  for (const { role, type } of TIER_TYPES) addGroup(type, role, nodes.filter((n) => has(n, role)));
-  // generic data nodes (no tier roles at all) become one Elasticsearch box
-  const tierless = nodes.filter((n) => has(n, "data") && !TIER_TYPES.some(({ role }) => has(n, role)));
-  addGroup("es", "data", tierless);
-
-  for (const { role, type } of ROLE_TYPES) {
-    // only count nodes dedicated to the role, so a hot+master node isn't double-drawn
-    const dedicated = nodes.filter((n) => has(n, role)
-      && !TIER_TYPES.some(({ role: r }) => has(n, r)) && !has(n, "data"));
-    addGroup(type, role, dedicated);
-  }
-
-  const coordinating = nodes.filter((n) => n.roles.length === 0);
-  addGroup("node_coord", "coordinating", coordinating);
+      version: firstVersion(members),
+    };
+  });
 
   return {
     source: parsed?.source,
@@ -199,28 +311,41 @@ export function clusterToBoard(parsed, { nodeW = 248, nodeH = 96 } = {}) {
   const tiers = summary.groups.filter((g) => g.type.startsWith("tier_") || g.type === "es");
   const roles = summary.groups.filter((g) => !g.type.startsWith("tier_") && g.type !== "es");
 
+  /* Each column stacks at each node's content-driven height (the stats chips
+     make these taller than the designed box), so nothing overlaps and the
+     zone wraps what's actually drawn. */
   const nodes = [];
-  const place = (group, col, row) => {
+  const colBottom = [PAD, PAD];
+  const place = (group, col) => {
     const props = { nodes: group.count };
     if (group.cpu) props.cpu = group.cpu;
     if (group.ramGB) props.mem = group.ramGB;
+    // capacity is the tier's per-node storage the rollup multiplies out; the
+    // separate `disk` HW field would just duplicate it, and a paste never
+    // supplies the `instance` type, so both are left unset rather than guessed.
     if (group.diskTB) props.capacity = `${group.diskTB} TB`;
-    if (group.type === "es") { props.data = group.count; delete props.nodes; }
-    nodes.push({
+    if (group.type === "es") {
+      props.data = group.count; delete props.nodes;
+      // `version` is the only imported field only the generic Elasticsearch box
+      // declares; tier/role boxes have no version field, so it surfaces here.
+      if (group.version) props.version = group.version;
+    }
+    const node = {
       id: `imp_${group.type}`, type: group.type,
-      x: PAD + col * (nodeW + COL_GAP), y: PAD + row * (nodeH + ROW_GAP),
+      x: PAD + col * (nodeW + COL_GAP), y: colBottom[col],
       props,
-    });
+    };
+    colBottom[col] += Math.max(nodeH, nodeAutoHeight(node)) + ROW_GAP;
+    nodes.push(node);
   };
-  tiers.forEach((g, i) => place(g, 0, i));
-  roles.forEach((g, i) => place(g, 1, i));
+  tiers.forEach((g) => place(g, 0));
+  roles.forEach((g) => place(g, 1));
 
-  const rows = Math.max(tiers.length, roles.length);
   const cols = roles.length ? 2 : 1;
   const zone = {
     id: "imp_zone", x: 0, y: 0,
     w: PAD * 2 + cols * nodeW + (cols - 1) * COL_GAP,
-    h: PAD * 2 + rows * nodeH + (rows - 1) * ROW_GAP,
+    h: Math.max(...colBottom) - ROW_GAP + PAD,
     label: summary.clusterName || "Imported cluster",
     color: "#00BFB3",
   };

@@ -52,6 +52,75 @@ export const DEFAULT_ROWS = [
   },
 ]
 
+// A fresh, empty line item. Shared by the builder's "add row", its templates,
+// and the paste importer so every row — however it was created — has the same
+// shape. `descLead` is the bold label rendered before the description.
+export const BLANK_ROW = {
+  sku: '',
+  descLead: '',
+  description: '',
+  descNote: '',
+  term: '12',
+  quantity: '',
+  unitPrice: '',
+  discount: '',
+  marker: '',
+  overrides: {},
+}
+
+// Keep only the numeric part of a pasted cell (it may carry a currency symbol,
+// thousands separators, or a trailing %).
+function pasteNumber(value) {
+  return (value || '').replace(/[^0-9.]/g, '')
+}
+
+// A cell is "clean numeric" when the whole thing is just a number (optionally a
+// currency prefix, grouping commas, or a trailing %) — "85" or "$13,400", but
+// not "12 TB storage". Used to tell a real spreadsheet row from a tab-shaped
+// line that lost its tabs.
+function isNumericCell(value) {
+  return /^[$€£]?\s*\d[\d,]*(\.\d+)?\s*%?$/.test((value || '').trim())
+}
+
+// Choose the delimiter for one pasted line. Tab wins outright — that's what
+// Excel/Sheets copy, and whiteboard descriptions carry commas ("6 nodes, 12 TB
+// storage") that a comma split would shred. Comma is only trusted when the
+// split yields a spreadsheet-shaped row (SKU · Description · Qty …) with a
+// clean-numeric quantity; otherwise the line stays intact as a single cell so a
+// mangled paste fails visibly instead of silently landing in the wrong columns.
+function splitPasteLine(line) {
+  if (line.includes('\t')) return line.split('\t')
+  const commaParts = line.split(',')
+  const plausible = commaParts.length >= 3 && isNumericCell(commaParts[2])
+  return plausible ? commaParts : [line]
+}
+
+// Split a pasted spreadsheet block into line items. Documented column order:
+//   SKU · Description · Qty · Unit Price · Discount% · [Bold label]
+// The 6th column is optional; a plain 5-column Excel/Sheets paste leaves the
+// bold lead empty exactly as before, and the whiteboard's "Copy quote lines"
+// fills it so its rows arrive looking like the builder's own template rows.
+export function parsePaste(text) {
+  return String(text ?? '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = splitPasteLine(line).map((s) => s.trim())
+      return {
+        ...BLANK_ROW,
+        overrides: {},
+        sku: parts[0] || '',
+        description: parts[1] || '',
+        quantity: pasteNumber(parts[2]),
+        unitPrice: pasteNumber(parts[3]),
+        discount: pasteNumber(parts[4]),
+        descLead: parts[5] || '',
+      }
+    })
+    .filter((r) => r.sku || r.description || r.quantity || r.unitPrice)
+}
+
 // Strip commas/currency symbols and coerce to a finite number (0 on failure).
 export function toNumber(value) {
   if (value == null || value === '') return 0
@@ -103,7 +172,12 @@ export function projectCell(row, yearIndex, scenario) {
   const discountPct = hasDiscount ? toNumber(discountSource) : 0
   const lineTotal = Math.round(quantity * unitPrice * (1 - discountPct / 100))
 
-  return { quantity, unitPrice, discountPct, hasDiscount, lineTotal }
+  // "Priced" means a unit price is actually set. A blank price (the state
+  // whiteboard-imported rows arrive in) is a to-do, not a $0 line — so callers
+  // can show it neutrally instead of flagging it as broken.
+  const priced = isSet(override.unitPrice) || isSet(row?.unitPrice)
+
+  return { quantity, unitPrice, discountPct, hasDiscount, lineTotal, priced }
 }
 
 // Full computation for a scenario: per-year cells + subtotal, plus contract
@@ -129,7 +203,15 @@ export function computeScenario(scenario) {
   // Per line-item total across all years (for the All-Years summary rows).
   const rowTotals = rows.map((_, ri) => years.reduce((sum, yr) => sum + (yr.cells[ri]?.lineTotal || 0), 0))
 
-  return { numYears, years, tcv, avgAnnual, rowTotals }
+  // Real line items still awaiting a unit price. Lets the totals footer show
+  // that the running total is provisional rather than presenting an
+  // understated number as final.
+  const unpricedCount = rows.filter((row) => {
+    const hasContent = isSet(row?.quantity) || String(row?.sku || '').trim() || String(row?.description || '').trim()
+    return hasContent && !projectCell(row, 0, scenario).priced
+  }).length
+
+  return { numYears, years, tcv, avgAnnual, rowTotals, unpricedCount }
 }
 
 // Normalize scene metadata into a scenarios array. Legacy single-table metadata
