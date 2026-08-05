@@ -153,6 +153,18 @@ describe('validateBoard', () => {
     const orphan = validateBoard(nodes, [{ id: 'e', s: 'h', e: 'k' }]).find((w) => w.id === 'orphans')
     expect(orphan).toBeUndefined()
   })
+
+  it('treats nodes inside a connected zone as connected', () => {
+    // logstash sits inside a zone that has a flow to the hot tier
+    const nodes = [node('h', 'tier_hot', { x: 900 }), node('k', 'kibana', { x: 1200 }),
+                   node('ls', 'logstash', { x: 60, y: 60 })]
+    const zones = [{ id: 'z', x: 0, y: 0, w: 300, h: 300 }]
+    const edges = [{ id: 'e1', s: 'z', e: 'h' }, { id: 'e2', s: 'h', e: 'k' }]
+    expect(validateBoard(nodes, edges, zones).find((w) => w.id === 'orphans')).toBeUndefined()
+    // without the zone flow it is still an orphan
+    const orphan = validateBoard(nodes, [{ id: 'e2', s: 'h', e: 'k' }], zones).find((w) => w.id === 'orphans')
+    expect(orphan.detail).toContain('Logstash')
+  })
 })
 
 describe('capacity', () => {

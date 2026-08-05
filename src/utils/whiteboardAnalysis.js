@@ -113,7 +113,7 @@ const instances = (nodes, type) =>
 /* Best-practice checks an Elastic SA would raise in a design review. Returns
    [{ id, level: 'warn'|'info', title, detail }]. Deliberately advisory: a
    whiteboard is often a sketch, so nothing here blocks anything. */
-export function validateBoard(nodes = [], edges = []) {
+export function validateBoard(nodes = [], edges = [], zones = []) {
   const real = nodes.filter((n) => known(n) && !isAnn(n));
   const out = [];
   const has = (type) => real.some((n) => n.type === type);
@@ -186,7 +186,12 @@ export function validateBoard(nodes = [], edges = []) {
   // --- orphans ---
   const linked = new Set();
   for (const e of edges) { linked.add(e.s); linked.add(e.e); }
-  const orphans = real.filter((n) => !linked.has(n.id));
+  /* Edges may attach to a zone rather than a node; everything sitting inside
+     a connected zone shares its flow, so none of it is an orphan. */
+  const linkedZones = zones.filter((z) => linked.has(z.id));
+  const inLinkedZone = (n) => linkedZones.some((z) =>
+    n.x >= z.x && n.x <= z.x + z.w && n.y >= z.y && n.y <= z.y + z.h);
+  const orphans = real.filter((n) => !linked.has(n.id) && !inLinkedZone(n));
   if (orphans.length && real.length > 2) {
     add("orphans", "info", `${orphans.length} unconnected component${orphans.length > 1 ? "s" : ""}`,
         `Nothing flows in or out of: ${orphans.slice(0, 4).map((n) => n.title || TYPES[n.type].label).join(", ")}${orphans.length > 4 ? "…" : ""}.`);

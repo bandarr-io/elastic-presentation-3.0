@@ -2,6 +2,8 @@
    and seed templates. Extracted from ElasticWhiteboard.jsx so the component
    stays focused on behaviour and this data can be tested/reused. */
 
+import { INTEGRATION_TITLES } from "./elasticIntegrations";
+
 /* Data-flow stages mapped to the Elastic brand palette, per theme. Dark uses
    the bright brand hues; light darkens them for contrast on a pale canvas. */
 export const STAGE_PALETTES = {
@@ -106,6 +108,7 @@ export const TYPES = {
   streams:  { cat: "Ingest & Processing", label: "Streams", sub: "AI-powered log parsing & routing", stage: "process", w: 196, h: 72 },
   logstash: { cat: "Ingest & Processing", label: "Logstash", sub: "Ingest/transform · plugin ecosystem", stage: "process", w: 196, h: 76,
     fields: [
+      { key: "instances", label: "Instances", kind: "number", min: 1, max: 50, unit: "inst" },
       { key: "pipelines", label: "Pipelines", kind: "number", min: 1, max: 50, def: 1, unit: "pipelines" },
       { key: "workers",   label: "Workers",   kind: "number", min: 1, max: 64 },
     ] },
@@ -183,7 +186,12 @@ export const TYPES = {
     fields: [{ key: "protocol", label: "Protocol", kind: "select", options: ["HTTP", "TCP", "Kafka", "Webhook", "Syslog"] }] },
 
   /* --- General diagramming --- */
-  source:     { cat: "General", label: "Data Source", sub: "Servers · endpoints · DBs", stage: "ops", flow: "collect", w: 176, h: 76 },
+  source:     { cat: "General", label: "Data Source", sub: "Servers · endpoints · DBs", stage: "ops", flow: "collect", w: 176, h: 76,
+    fields: [
+      { key: "integration", label: "Integration", kind: "search", options: INTEGRATION_TITLES, placeholder: "Search the catalog…" },
+      { key: "ingest", label: "Raw ingest", kind: "number", min: 0, unit: "GB/day" },
+      { key: "retention", label: "Retention", kind: "number", min: 1, unit: "days" },
+    ] },
   k8s:        { cat: "General", label: "Kubernetes Cluster", sub: "Workloads · kube-state", stage: "ops", flow: "collect", w: 196, h: 70 },
   cloudsvc:   { cat: "General", label: "Cloud Services", sub: "CloudWatch · Azure Monitor · GCP Ops", stage: "ops", flow: "collect", w: 200, h: 70 },
   syslog:     { cat: "General", label: "Syslog Devices", sub: "Network & appliance logs", stage: "ops", flow: "collect", w: 184, h: 68 },
@@ -197,11 +205,15 @@ export const TYPES = {
     fields: [{ key: "protocol", label: "Protocol", kind: "select", options: ["SAML", "OIDC", "LDAP", "Active Directory"] }] },
   lb:         { cat: "General", label: "Load Balancer", sub: "HA entry point", stage: "serve", w: 172, h: 68,
     fields: [{ key: "layer", label: "Type", kind: "select", options: ["L4", "L7", "DNS"] }] },
-  users:      { cat: "General", label: "Users", sub: "Analysts · apps", stage: "serve", w: 152, h: 68 },
+  users:      { cat: "General", label: "Users", sub: "Analysts · apps", stage: "serve", w: 152, h: 68,
+    fields: [{ key: "users", label: "Users", kind: "number", min: 1, unit: "users" }] },
   cloud:      { cat: "General", label: "Cloud Hosting", sub: "AWS · Azure · GCP", stage: "store", w: 192, h: 72 },
   thirdparty: { cat: "General", label: "Third-Party", sub: "Slack · Teams · ServiceNow", stage: "serve", w: 204, h: 76 },
   storage:    { cat: "General", label: "Remote Storage", sub: "S3 · Blob · MinIO", stage: "ops", ops: true, w: 184, h: 72,
-    fields: [{ key: "backend", label: "Backend", kind: "select", options: ["S3", "Azure Blob", "GCS", "MinIO", "NFS"] }] },
+    fields: [
+      { key: "backend",  label: "Backend",  kind: "select", options: ["S3", "Azure Blob", "GCS", "MinIO", "NFS"] },
+      { key: "capacity", label: "Capacity", kind: "text", placeholder: "e.g. 60 TB" },
+    ] },
   monitoring: { cat: "General", label: "Monitoring Cluster", sub: "Separate ES + Kibana", stage: "ops", ops: true, w: 212, h: 76,
     fields: [{ key: "retention", label: "Retention", kind: "text", placeholder: "e.g. 30d" }] },
 
@@ -227,11 +239,13 @@ for (const k of Object.keys(TYPES)) {
   TYPES[k].w = NODE_W; TYPES[k].h = NODE_H;
 }
 
-/* instance type on all Nodes-category types (tiers & node roles) */
+/* instance type on all Nodes-category types (tiers & node roles) plus the
+   self-managed stack components the sizing calculator recommends boxes for */
 const INSTANCE = { key: "instance", label: "Instance type", kind: "text",
                    placeholder: "e.g. m5.2xlarge / r6gd.4xlarge" };
 for (const k of ["tier_hot", "tier_warm", "tier_cold", "tier_frozen",
-                 "node_master", "node_ml", "node_ingest", "node_coord"])
+                 "node_master", "node_ml", "node_ingest", "node_coord",
+                 "logstash", "kibana"])
   TYPES[k].fields = [...(TYPES[k].fields || []), INSTANCE];
 
 /* shared hardware sizing fields, attached to infrastructure-class types */
