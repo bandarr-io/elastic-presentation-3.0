@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
-  sizeCluster, romRows, romTSV, RU_SKU, SIZING_DEFAULTS, MASTER_NODES, MASTER_RAM_GB,
-  recommendInstance, recommendHardware, SIZING_PROVIDERS, ML_RAM_GB, ML_NODES_MIN,
+  sizeCluster, romRows, romTSV, RU_SKU, RU_LEAD, RU_TERM, SIZING_DEFAULTS, MASTER_NODES,
+  MASTER_RAM_GB, recommendInstance, recommendHardware, SIZING_PROVIDERS, ML_RAM_GB, ML_NODES_MIN,
+  ECU_SKU, ECU_LEAD, LICENSE_ERU, LICENSE_ECU, licenseModelFor,
 } from './whiteboardSizing'
 import { echProfiles } from '../data/echInstanceConfigs'
 
@@ -85,12 +86,17 @@ describe('sizeCluster', () => {
     expect(withMasters.ramGB).toBe(bare.ramGB + MASTER_NODES * MASTER_RAM_GB)
   })
 
-  it('sizes Logstash from throughput, with a two-node HA floor', () => {
-    const stackOf = (dailyGB, extra) => sizeCluster({ dailyGB, ...extra }).stack
+  it('sizes Logstash from throughput when asked for, with a two-node HA floor', () => {
+    const stackOf = (dailyGB, extra) => sizeCluster({ dailyGB, logstash: true, ...extra }).stack
     expect(stackOf(500).logstash).toBe(2)                 // under 1 TB/day still needs a pair
     expect(stackOf(3000).logstash).toBe(3)                // ~3 TB/day
     expect(stackOf(500, { logstash: false }).logstash).toBe(0)
     expect(stackOf(0).logstash).toBe(0)                   // nothing to ingest
+  })
+
+  it('leaves Logstash off by default — agent-direct is the default story', () => {
+    expect(SIZING_DEFAULTS.logstash).toBe(false)
+    expect(sizeCluster({ dailyGB: 500 }).stack.logstash).toBe(0)
   })
 
   it('sizes Kibana from concurrent users, with a two-instance HA floor', () => {
@@ -145,7 +151,7 @@ describe('sizeCluster', () => {
 
 describe('sizeCluster from per-source volumes', () => {
   it('sums the sources into the ingest total', () => {
-    const out = sizeCluster({ ...SELF, sources: [{ gb: 300 }, { gb: 200 }] })
+    const out = sizeCluster({ ...SELF, logstash: true, sources: [{ gb: 300 }, { gb: 200 }] })
     expect(out.input.dailyGB).toBe(500)
     // Logstash is derived from the summed rate like any other input
     expect(out.stack.logstash).toBe(2)
@@ -315,10 +321,10 @@ describe('sizeCluster machine learning nodes', () => {
     const without = sizeCluster({ provider: 'aws', dailyGB: 500 })
     expect(withMl.nodes - without.nodes).toBe(withMl.stack.ml)
     expect(withMl.ramGB - without.ramGB).toBe(withMl.stack.ml * withMl.stack.mlRAM)
-    // and the ROM rollup line that carries ML is emitted for that memory
+    // and the quote bills resource units against that memory, ML included
     const rows = romRows({ mem: withMl.ramGB, tiers: [] })
-    expect(rows[0].description).toContain('ML')
     expect(rows[0].ramGB).toBe(withMl.ramGB)
+    expect(rows[0].quantity).toBe(Math.ceil(withMl.ramGB / 64))
   })
 })
 
@@ -345,7 +351,7 @@ describe('recommendInstance', () => {
 
 describe('recommendHardware', () => {
   it('produces a complete hardware row for every drawn component', () => {
-    const rows = recommendHardware(sizeCluster({ ...SELF, dailyGB: 500 }))
+    const rows = recommendHardware(sizeCluster({ ...SELF, dailyGB: 500, logstash: true }))
     expect(Object.keys(rows)).toEqual(['hot', 'cold', 'frozen', 'master', 'logstash', 'kibana'])
     expect(rows.hot).toMatchObject({ mem: 64, instance: 'i3en.2xlarge', cpu: 8, disk: '5 TB NVMe' })
     expect(rows.master).toMatchObject({ count: 3, mem: MASTER_RAM_GB, instance: 'm6g.large' })
@@ -405,9 +411,9 @@ describe('recommendHardware', () => {
   })
 
   it('keeps Logstash on plain compute boxes from the matching cloud', () => {
-    const aws = recommendHardware(sizeCluster({ provider: 'aws', dailyGB: 500 }))
-    const gcp = recommendHardware(sizeCluster({ provider: 'gcp', dailyGB: 500 }))
-    const azure = recommendHardware(sizeCluster({ provider: 'azure', dailyGB: 500 }))
+    const aws = recommendHardware(sizeCluster({ provider: 'aws', dailyGB: 500, logstash: true }))
+    const gcp = recommendHardware(sizeCluster({ provider: 'gcp', dailyGB: 500, logstash: true }))
+    const azure = recommendHardware(sizeCluster({ provider: 'azure', dailyGB: 500, logstash: true }))
     expect(aws.logstash.instance).toBe('c6i.2xlarge')
     expect(gcp.logstash.instance).toBe('n2-standard-4')
     expect(azure.logstash.instance).toBe('F8s v2')
@@ -419,57 +425,124 @@ describe('recommendHardware', () => {
 describe('romRows', () => {
   const totals = {
     mem: 1024,
+    count: 8,
+    storageTB: 512,
     tiers: [
       { type: 'tier_hot', label: 'Hot', count: 6, storageTB: 12, mem: 384 },
       { type: 'tier_frozen', label: 'Frozen', count: 2, storageTB: 500, mem: 128 },
     ],
   }
 
-  it('emits a resource-unit line per tier, rounded up', () => {
+  it('rolls the whole deployment into one resource-unit line', () => {
     const rows = romRows(totals)
-    expect(rows[0]).toMatchObject({ sku: RU_SKU, quantity: 6 })
-    expect(rows[0].description).toBe('Hot tier — 6 nodes, 12 TB storage')
-    expect(rows[1]).toMatchObject({ quantity: 2 })
-    expect(rows[1].description).toBe('Frozen tier — 2 nodes, 500 TB storage')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ sku: RU_SKU, descLead: RU_LEAD, term: RU_TERM, quantity: 16 })
+    expect(rows[0].description).toBe('1,024 GB memory, 8 nodes, 512 TB storage (Hot, Frozen)')
   })
 
-  it('rolls the non-tier nodes into one line', () => {
-    const rows = romRows(totals)
-    expect(rows[2].description).toBe('Supporting nodes (masters, ML, Logstash, Kibana)')
-    expect(rows[2].quantity).toBe(8)   // 1024 total - 512 in tiers = 512 GB
+  it('rounds total memory up once rather than each tier separately', () => {
+    // 65 + 65 GB is three part-used units billed per tier, but only three whole
+    // units in total — rounding per tier would over-count the deal.
+    const split = { mem: 130, tiers: [{ label: 'Hot', count: 1, mem: 65 }, { label: 'Cold', count: 1, mem: 65 }] }
+    expect(romRows(split)[0].quantity).toBe(3)
   })
 
-  it('omits the remainder line when every node is in a tier', () => {
-    const rows = romRows({ mem: 512, tiers: totals.tiers })
-    expect(rows).toHaveLength(2)
+  it('counts memory that no tier holds, like masters and ML', () => {
+    const rows = romRows({ mem: 1024, tiers: [{ label: 'Hot', count: 6, storageTB: 12, mem: 384 }] })
+    expect(rows[0].quantity).toBe(16)   // all 1024 GB, not just the tier's 384
+    expect(rows[0].ramGB).toBe(1024)
   })
 
-  it('rounds a part-used resource unit up to a whole one', () => {
-    const rows = romRows({ mem: 0, tiers: [{ label: 'Hot', count: 1, storageTB: 0, mem: 65 }] })
-    expect(rows[0].quantity).toBe(2)
+  it('falls back to the tier rollup when the board totals omit it', () => {
+    const rows = romRows({ mem: 128, tiers: [{ label: 'Hot', count: 2, storageTB: 4, mem: 128 }] })
+    expect(rows[0].description).toBe('128 GB memory, 2 nodes, 4 TB storage (Hot)')
   })
 
-  it('skips tiers with no memory set', () => {
+  it('carries the list price and discount it is given', () => {
+    const rows = romRows(totals, { unitPrice: 13400, discount: 10 })
+    expect(rows[0]).toMatchObject({ unitPrice: '13400', discount: '10' })
+  })
+
+  it('leaves price and discount blank when none are set', () => {
+    expect(romRows(totals)[0]).toMatchObject({ unitPrice: '', discount: '' })
+  })
+
+  it('has nothing to quote without memory', () => {
+    expect(romRows()).toEqual([])
+    expect(romRows({})).toEqual([])
     expect(romRows({ mem: 0, tiers: [{ label: 'Hot', count: 3, storageTB: 6, mem: 0 }] })).toEqual([])
   })
 
-  it('handles an empty board', () => {
-    expect(romRows()).toEqual([])
-    expect(romRows({})).toEqual([])
+  it('bills no resource units for Logstash memory', () => {
+    // Elastic counts Logstash for information only, so it can't reach the count
+    const rows = romRows({ ...totals, logstashMem: 64 })
+    expect(rows[0].quantity).toBe(15)     // (1024 - 64) / 64, not 16
+    expect(rows[0].ramGB).toBe(960)
+    expect(rows[0].description).toContain('960 GB memory')
+    expect(rows[0].descNote).toContain('Logstash')
+  })
+
+  it('says nothing about Logstash when the board has none', () => {
+    expect(romRows(totals)[0].descNote).toBe('')
+  })
+})
+
+/* Cloud is metered consumption rather than licensed capacity, so the quantity
+   is the ECU figure off the pricing calculator at the fixed $1.00 rate. */
+describe('romRows on the Cloud consumption meter', () => {
+  const totals = { mem: 1024, count: 8, storageTB: 512, tiers: [{ label: 'Hot', count: 8, storageTB: 512, mem: 1024 }] }
+  const cloud = (ecuTotal, extra) => romRows(totals, { model: LICENSE_ECU, ecuTotal, ...extra })
+
+  it('quotes the consumption total at one dollar an ECU', () => {
+    const row = cloud(250000)[0]
+    expect(row).toMatchObject({ sku: ECU_SKU, descLead: ECU_LEAD, quantity: 250000, unitPrice: '1' })
+  })
+
+  it('ignores the resource-unit list price, which does not apply to Cloud', () => {
+    expect(cloud(1000, { unitPrice: 13400 })[0].unitPrice).toBe('1')
+  })
+
+  it('still carries a negotiated discount', () => {
+    expect(cloud(1000, { discount: 20 })[0].discount).toBe('20')
+  })
+
+  it('describes the deployment the consumption pays for', () => {
+    expect(cloud(1000)[0].description).toBe('1,024 GB memory, 8 nodes, 512 TB storage (Hot)')
+  })
+
+  it('has nothing to quote until the calculator figure is in', () => {
+    expect(cloud('')).toEqual([])
+    expect(cloud(0)).toEqual([])
+  })
+
+  it('quotes consumption even for a board carrying no memory', () => {
+    expect(romRows({}, { model: LICENSE_ECU, ecuTotal: 5000 })[0].quantity).toBe(5000)
+  })
+})
+
+describe('licenseModelFor', () => {
+  it('puts self-managed on resource units and every cloud on consumption', () => {
+    expect(licenseModelFor('selfmanaged')).toBe(LICENSE_ERU)
+    for (const p of ['aws', 'gcp', 'azure']) expect(licenseModelFor(p)).toBe(LICENSE_ECU)
   })
 })
 
 describe('romTSV', () => {
-  it('lays rows out in the importer column order with prices blank and the bold lead last', () => {
+  const totals = { mem: 128, tiers: [{ label: 'Hot', count: 2, storageTB: 4, mem: 128 }] }
+
+  it('lays the line out in the importer column order with the bold lead last', () => {
     // SKU | Description | Qty | Unit Price | Discount% | Bold label — the 6th
     // column carries the lead so a pasted row matches the builder's own rows.
-    const text = romTSV(romRows({ mem: 0, tiers: [{ label: 'Hot', count: 2, storageTB: 4, mem: 128 }] }))
-    expect(text).toBe(`${RU_SKU}\tHot tier — 2 nodes, 4 TB storage\t2\t\t\tSoftware Licensing:`)
+    const text = romTSV(romRows(totals, { unitPrice: 13400, discount: 10 }))
+    expect(text).toBe(`${RU_SKU}\t128 GB memory, 2 nodes, 4 TB storage (Hot)\t2\t13400\t10\t${RU_LEAD}`)
   })
 
-  it('puts one line item per row', () => {
-    const rows = romRows({ mem: 256, tiers: [{ label: 'Hot', count: 2, storageTB: 4, mem: 128 }] })
-    expect(romTSV(rows).split('\n')).toHaveLength(2)
+  it('leaves the price and discount cells empty when unpriced', () => {
+    expect(romTSV(romRows(totals))).toContain('\t2\t\t\t')
+  })
+
+  it('emits a single line for a whole board', () => {
+    expect(romTSV(romRows({ mem: 256, tiers: totals.tiers })).split('\n')).toHaveLength(1)
   })
 
   it('handles no rows', () => {

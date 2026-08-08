@@ -153,7 +153,7 @@ describe('parseClusterInput', () => {
     const parsed = parseClusterInput('name node.role\ncontent-1 s\ncontent-2 s')
     const summary = summarizeCluster(parsed)
     expect(summary.total).toBe(2)
-    expect(summary.groups.map((g) => g.type)).toEqual(['es'])
+    expect(summary.groups.map((g) => g.type)).toEqual(['node_data'])
     expect(summary.groups[0].count).toBe(2)
   })
 
@@ -167,8 +167,8 @@ describe('parseClusterInput', () => {
   })
 
   it('lands the Elasticsearch version from _nodes JSON on the board', () => {
-    // generic data nodes (no explicit tier) fold into the es box, which is the
-    // only imported type declaring a version field
+    // generic data nodes (no explicit tier) become Data Node boxes, the only
+    // imported type declaring a version field
     const parsed = parseClusterInput(JSON.stringify({
       cluster_name: 'versioned',
       nodes: {
@@ -179,7 +179,7 @@ describe('parseClusterInput', () => {
     }))
     expect(parsed.nodes[0].version).toBe('8.13.2')
     const { board } = clusterToBoard(parsed)
-    const es = board.nodes.find((n) => n.type === 'es')
+    const es = board.nodes.find((n) => n.type === 'node_data')
     expect(es.props.version).toBe('8.13.2')
   })
 })
@@ -208,32 +208,119 @@ describe('summarizeCluster', () => {
     expect(hot.diskTB).toBe(2)
   })
 
-  it('folds tierless data nodes into a single Elasticsearch box', () => {
+  it('folds tierless data nodes into one data-node group', () => {
     const parsed = parseClusterInput('name node.role\nd-1 dmr\nd-2 dmr')
     const summary = summarizeCluster(parsed)
-    expect(summary.groups.map((g) => g.type)).toEqual(['es'])
+    expect(summary.groups.map((g) => g.type)).toEqual(['node_data'])
     expect(summary.groups[0].count).toBe(2)
+  })
+
+  it('carries the instance names and the union of roles on each group', () => {
+    const summary = summarizeCluster(parseClusterInput(CAT_NODES))
+    const hot = summary.groups.find((g) => g.type === 'tier_hot')
+    expect(hot.names).toEqual(['es-hot-1', 'es-hot-2'])
+    // `himr` reads back under the names Elasticsearch uses, in documented order
+    expect(hot.roles).toEqual(['master', 'data_hot', 'ingest', 'remote_cluster_client'])
   })
 })
 
-describe('clusterToBoard', () => {
+/* Past PER_NODE_MAX nodes the board groups instead of drawing each instance;
+   `perNodeMax: 0` forces that path for the small fixtures here. */
+const GROUPED = { perNodeMax: 0 }
+
+describe('clusterToBoard grouped', () => {
   it('builds tier boxes with node counts, hardware, and an ILM flow', () => {
-    const { board } = clusterToBoard(parseClusterInput(CAT_NODES))
+    const { board } = clusterToBoard(parseClusterInput(CAT_NODES), GROUPED)
     const hot = board.nodes.find((n) => n.type === 'tier_hot')
     expect(hot.props).toMatchObject({ nodes: 2, mem: 63, capacity: '2 TB' })
     expect(board.edges.some((e) => e.lbl === 'ILM')).toBe(true)
   })
 
+  it('names the box by type and puts the instance names in the subtitle', () => {
+    const { board } = clusterToBoard(parseClusterInput(CAT_NODES), GROUPED)
+    const hot = board.nodes.find((n) => n.type === 'tier_hot')
+    expect(hot.title).toBeUndefined()          // the type label, "Hot Tier", stands
+    expect(hot.sub).toBe('es-hot-1, es-hot-2')
+  })
+
+  it('abbreviates a long list of instance names', () => {
+    const many = ['name node.role', ...Array.from({ length: 5 }, (_, i) => `d-${i} h`)].join('\n')
+    const { board } = clusterToBoard(parseClusterInput(many), GROUPED)
+    expect(board.nodes[0].sub).toBe('d-0, d-1, d-2 +2 more')
+  })
+
+  it('carries the roles the group holds', () => {
+    const { board } = clusterToBoard(parseClusterInput(CAT_NODES), GROUPED)
+    expect(board.nodes.find((n) => n.type === 'tier_hot').props.roles)
+      .toEqual(['master', 'data_hot', 'ingest', 'remote_cluster_client'])
+  })
+
   it('wraps the cluster in a zone named after it', () => {
-    const { board } = clusterToBoard(parseClusterInput(NODES_JSON))
+    const { board } = clusterToBoard(parseClusterInput(NODES_JSON), GROUPED)
     expect(board.zones[0].label).toBe('acme-prod')
   })
 
   it('lays tiers and roles out in two non-overlapping columns', () => {
-    const { board } = clusterToBoard(parseClusterInput(CAT_NODES))
+    const { board } = clusterToBoard(parseClusterInput(CAT_NODES), GROUPED)
     const hot = board.nodes.find((n) => n.type === 'tier_hot')
     const master = board.nodes.find((n) => n.type === 'node_master')
     expect(master.x).toBeGreaterThan(hot.x + 248)
+  })
+
+  it('wires the cluster the way the Elastic Cluster pattern does', () => {
+    const { board } = clusterToBoard(parseClusterInput(CAT_NODES), GROUPED)
+    const between = (s, e) => board.edges.find((x) => x.s === `imp_${s}` && x.e === `imp_${e}`)
+    expect(between('tier_hot', 'tier_warm').lbl).toBe('ILM')
+    // the master publishes cluster state to every other box, both ways
+    expect(between('node_master', 'tier_hot').bi).toBe(true)
+    expect(between('node_master', 'tier_warm').bi).toBe(true)
+  })
+
+  it('feeds the entry tier from ingest and coordinating nodes', () => {
+    const parsed = parseClusterInput('name node.role\nh-1 h\ni-1 i\nc-1 -\nm-1 m')
+    const { board } = clusterToBoard(parsed, GROUPED)
+    const to = (s) => board.edges.find((x) => x.s === `imp_${s}`)?.e
+    expect(to('node_ingest')).toBe('imp_tier_hot')
+    expect(to('node_coord')).toBe('imp_tier_hot')
+  })
+})
+
+describe('clusterToBoard per instance', () => {
+  it('draws a box per node once the cluster is small enough', () => {
+    const { board } = clusterToBoard(parseClusterInput(CAT_NODES))
+    expect(board.nodes).toHaveLength(6)
+    expect(board.nodes.filter((n) => n.type === 'tier_hot')).toHaveLength(2)
+    // each box stands for exactly one node, so the rollup still reconciles
+    expect(board.nodes.every((n) => n.props.nodes === 1)).toBe(true)
+  })
+
+  it('names each box after the instance and carries that node exact roles', () => {
+    const { board } = clusterToBoard(parseClusterInput(CAT_NODES))
+    expect(board.nodes.map((n) => n.title))
+      .toEqual(['es-hot-1', 'es-hot-2', 'es-warm-1', 'es-master-1', 'es-master-2', 'es-master-3'])
+    expect(board.nodes[0].props.roles).toEqual(['master', 'data_hot', 'ingest', 'remote_cluster_client'])
+  })
+
+  it('groups instead once the cluster outgrows per-node drawing', () => {
+    const big = ['name node.role', ...Array.from({ length: 13 }, (_, i) => `d-${i} h`)].join('\n')
+    const { board } = clusterToBoard(parseClusterInput(big))
+    expect(board.nodes).toHaveLength(1)
+    expect(board.nodes[0].props.nodes).toBe(13)
+  })
+
+  it('meshes the peers of an all-in-one cluster so nothing imports unconnected', () => {
+    const { board } = clusterToBoard(parseClusterInput('name node.role\nn-1 dmi\nn-2 dmi\nn-3 dmi'))
+    expect(board.nodes).toHaveLength(3)
+    expect(board.edges).toHaveLength(3)          // every pair, once
+    expect(board.edges.every((e) => e.bi)).toBe(true)
+  })
+
+  it('wires groups through one representative instance rather than every pair', () => {
+    const { board } = clusterToBoard(parseClusterInput(CAT_NODES))
+    const ilm = board.edges.filter((e) => e.lbl === 'ILM')
+    expect(ilm).toHaveLength(1)
+    expect(ilm[0].s).toBe('imp_tier_hot_0')
+    expect(ilm[0].e).toBe('imp_tier_warm_0')
   })
 
   it('returns null when there is nothing to draw', () => {

@@ -18,6 +18,7 @@
    line kept on top, wrapped in a `curl` command, or with Windows CRLF endings.  */
 
 import { nodeAutoHeight } from "./nodeMetrics";
+import { NODE_ROLES } from "../data/whiteboardTypes";
 
 /* node.role letters as reported by _cat/nodes. */
 export const ROLE_LETTERS = {
@@ -241,6 +242,22 @@ const ROLE_TYPES = [
   { role: "ml", type: "node_ml" },
 ];
 
+/* `_cat`'s role letters and pre-7.x tier attributes use short tier names; the
+   `node.roles` setting names them `data_*`. Normalize to what Elasticsearch
+   itself calls them, so an imported node's Roles field matches its
+   elasticsearch.yml. */
+const CANONICAL_ROLE = { hot: "data_hot", warm: "data_warm", cold: "data_cold",
+                         frozen: "data_frozen", content: "data_content" };
+export const canonicalRole = (role) => CANONICAL_ROLE[role] || role;
+
+/* The union of roles across some nodes, in the documented order so the same
+   set always reads the same way. */
+export function roleSet(members = []) {
+  const seen = new Set();
+  for (const m of members) for (const r of m.roles || []) seen.add(canonicalRole(r));
+  return NODE_ROLES.filter((r) => seen.has(r));
+}
+
 const has = (node, role) => node.roles.includes(role) || node.roles.includes(`data_${role}`);
 /* content nodes are data nodes; treat any data_* role (and the bare tier
    letters from _cat) as data so no data node falls through the grouping. */
@@ -261,13 +278,13 @@ const firstVersion = (members) => members.map((m) => m.version).find(Boolean) ||
 function groupFor(node) {
   const tier = TIER_TYPES.find(({ role }) => has(node, role));
   if (tier) return { type: tier.type, label: tier.role };
-  if (isData(node)) return { type: "es", label: "data" };
+  if (isData(node)) return { type: "node_data", label: "data" };
   const role = ROLE_TYPES.find(({ role }) => has(node, role));
   if (role) return { type: role.type, label: role.role };
   return { type: "node_coord", label: "coordinating" };
 }
 
-const GROUP_ORDER = [...TIER_TYPES.map((t) => t.type), "es", ...ROLE_TYPES.map((t) => t.type), "node_coord"];
+const GROUP_ORDER = [...TIER_TYPES.map((t) => t.type), "node_data", ...ROLE_TYPES.map((t) => t.type), "node_coord"];
 
 /* Group parsed nodes into the component boxes a diagram wants: one box per
    data tier and per dedicated role, each carrying node count, per-node
@@ -285,7 +302,9 @@ export function summarizeCluster(parsed) {
   const groups = GROUP_ORDER.filter((type) => buckets.has(type)).map((type) => {
     const { label, members } = buckets.get(type);
     return {
-      type, label, count: members.length,
+      type, label, count: members.length, members,
+      names: members.map((m) => m.name).filter(Boolean),
+      roles: roleSet(members),
       cpu: Math.round(avg(members.map((m) => m.cpu))) || 0,
       ramGB: Math.round(toGB(avg(members.map((m) => m.ramBytes)))) || 0,
       diskTB: +toTB(avg(members.map((m) => m.diskBytes))).toFixed(2) || 0,
@@ -301,47 +320,134 @@ export function summarizeCluster(parsed) {
   };
 }
 
-/* Build a board document from a parsed cluster: a column of data tiers beside
-   a column of dedicated roles, wrapped in a zone named after the cluster. */
-export function clusterToBoard(parsed, { nodeW = 248, nodeH = 96 } = {}) {
+/* Up to this many nodes, every instance is drawn as its own box carrying its
+   real name and role set — the fidelity an SA wants on a discovery call, and
+   the only way a "these three nodes are each master + data + ingest" topology
+   reads correctly. Past it, per-instance boxes stop being legible, so the
+   board groups by tier and role instead. */
+export const PER_NODE_MAX = 12;
+
+const COL_GAP = 80, ROW_GAP = 28, PAD = 44;
+
+/* Hardware a box carries, whether it stands for one node or a group of them.
+   `capacity` is per-node storage that the rollup multiplies out; the separate
+   `disk` HW field would just duplicate it, and no paste supplies the ECH
+   `instance` type, so both are left unset rather than guessed. */
+const hardwareProps = ({ cpu, ramGB, diskTB }) => ({
+  ...(cpu ? { cpu } : {}), ...(ramGB ? { mem: ramGB } : {}),
+  ...(diskTB ? { capacity: `${diskTB} TB` } : {}),
+});
+
+/* The wiring the Elastic Cluster pattern uses, applied to whatever stands for
+   each group — its single box when grouped, its first instance when drawn per
+   node. Keeping one representative per group is what stops a twelve-node
+   import turning into a hairball. */
+function clusterEdges(present, repOf) {
+  const edges = [];
+  const link = (from, to, extra = {}) => {
+    const s = repOf(from), e = repOf(to);
+    if (s && e && s !== e) edges.push({ id: `impe${edges.length}`, s, e, ...extra });
+  };
+
+  const tiers = TIER_TYPES.map((t) => t.type).filter((t) => present.has(t));
+  const data = [...tiers, ...(present.has("node_data") ? ["node_data"] : [])];
+
+  for (let i = 0; i < tiers.length - 1; i++) link(tiers[i], tiers[i + 1], { lbl: "ILM" });
+  link("node_ingest", data[0]);                       // ingest pipelines feed the entry tier
+  link("node_coord", data[0]);                        // coordinating routes requests in
+  for (const t of data) link(t, "node_ml");           // data feeds inference
+  // the elected master publishes cluster state to every other node type
+  for (const t of [...data, "node_ingest", "node_coord", "node_ml"])
+    link("node_master", t, { bi: true });
+  return edges;
+}
+
+/* Peers inside a group have no hierarchy to draw, but a cluster of three
+   all-in-one nodes is *only* peers — with no intra-group links it would import
+   as unconnected boxes. Mesh them while the mesh stays readable. */
+const PEER_MESH_MAX = 4;
+function peerEdges(ids, offset) {
+  const edges = [];
+  if (ids.length < 2 || ids.length > PEER_MESH_MAX) return edges;
+  for (let i = 0; i < ids.length; i++)
+    for (let j = i + 1; j < ids.length; j++)
+      edges.push({ id: `impp${offset + edges.length}`, s: ids[i], e: ids[j], bi: true });
+  return edges;
+}
+
+/* Instance names under a grouped box, so the box still says which machines it
+   stands for without the title becoming a list. */
+function namesSubtitle(names) {
+  if (!names.length) return "";
+  const shown = names.slice(0, 3).join(", ");
+  return names.length > 3 ? `${shown} +${names.length - 3} more` : shown;
+}
+
+/* Build a board document from a parsed cluster, wrapped in a zone named after
+   it. Small clusters draw one box per instance in a column per group; larger
+   ones draw a column of data tiers beside a column of dedicated roles. */
+export function clusterToBoard(parsed, { nodeW = 248, nodeH = 96, perNodeMax = PER_NODE_MAX } = {}) {
   const summary = summarizeCluster(parsed);
   if (!summary.groups.length) return null;
+  const perNode = summary.total <= perNodeMax;
 
-  const COL_GAP = 80, ROW_GAP = 28, PAD = 44;
-  const tiers = summary.groups.filter((g) => g.type.startsWith("tier_") || g.type === "es");
-  const roles = summary.groups.filter((g) => !g.type.startsWith("tier_") && g.type !== "es");
-
-  /* Each column stacks at each node's content-driven height (the stats chips
-     make these taller than the designed box), so nothing overlaps and the
-     zone wraps what's actually drawn. */
+  /* Columns stack at each box's content-driven height (the stats and role
+     chips make these taller than the designed box), so nothing overlaps and
+     the zone wraps what's actually drawn. */
   const nodes = [];
-  const colBottom = [PAD, PAD];
-  const place = (group, col) => {
-    const props = { nodes: group.count };
-    if (group.cpu) props.cpu = group.cpu;
-    if (group.ramGB) props.mem = group.ramGB;
-    // capacity is the tier's per-node storage the rollup multiplies out; the
-    // separate `disk` HW field would just duplicate it, and a paste never
-    // supplies the `instance` type, so both are left unset rather than guessed.
-    if (group.diskTB) props.capacity = `${group.diskTB} TB`;
-    if (group.type === "es") {
-      props.data = group.count; delete props.nodes;
-      // `version` is the only imported field only the generic Elasticsearch box
-      // declares; tier/role boxes have no version field, so it surfaces here.
-      if (group.version) props.version = group.version;
-    }
-    const node = {
-      id: `imp_${group.type}`, type: group.type,
-      x: PAD + col * (nodeW + COL_GAP), y: colBottom[col],
-      props,
-    };
+  const colBottom = [];
+  const place = (box, col) => {
+    while (colBottom.length <= col) colBottom.push(PAD);
+    const node = { ...box, x: PAD + col * (nodeW + COL_GAP), y: colBottom[col] };
     colBottom[col] += Math.max(nodeH, nodeAutoHeight(node)) + ROW_GAP;
     nodes.push(node);
+    return node.id;
   };
-  tiers.forEach((g) => place(g, 0));
-  roles.forEach((g) => place(g, 1));
 
-  const cols = roles.length ? 2 : 1;
+  const firstOf = new Map();     // group type -> the box that represents it
+  const edges = [];
+
+  if (perNode) {
+    summary.groups.forEach((group, col) => {
+      const ids = group.members.map((member, i) => place({
+        id: `imp_${group.type}_${i}`, type: group.type,
+        title: member.name || undefined,
+        props: {
+          nodes: 1,
+          ...hardwareProps({
+            cpu: member.cpu,
+            ramGB: Math.round(toGB(member.ramBytes)) || 0,
+            diskTB: +toTB(member.diskBytes).toFixed(2) || 0,
+          }),
+          ...(roleSet([member]).length ? { roles: roleSet([member]) } : {}),
+          ...(group.type === "node_data" && member.version ? { version: member.version } : {}),
+        },
+      }, col));
+      firstOf.set(group.type, ids[0]);
+      edges.push(...peerEdges(ids, edges.length));
+    });
+  } else {
+    const tiers = summary.groups.filter((g) => g.type.startsWith("tier_") || g.type === "node_data");
+    const roles = summary.groups.filter((g) => !g.type.startsWith("tier_") && g.type !== "node_data");
+    const box = (group, col) => firstOf.set(group.type, place({
+      id: `imp_${group.type}`, type: group.type,
+      ...(namesSubtitle(group.names) ? { sub: namesSubtitle(group.names) } : {}),
+      props: {
+        nodes: group.count,
+        ...hardwareProps(group),
+        ...(group.roles.length ? { roles: group.roles } : {}),
+        ...(group.type === "node_data" && group.version ? { version: group.version } : {}),
+      },
+    }, col));
+    tiers.forEach((g) => box(g, 0));
+    roles.forEach((g) => box(g, 1));
+  }
+
+  edges.push(...clusterEdges(new Set(summary.groups.map((g) => g.type)),
+                             (type) => firstOf.get(type))
+    .map((e, i) => ({ ...e, id: `impe${edges.length + i}` })));
+
+  const cols = colBottom.length;
   const zone = {
     id: "imp_zone", x: 0, y: 0,
     w: PAD * 2 + cols * nodeW + (cols - 1) * COL_GAP,
@@ -349,12 +455,6 @@ export function clusterToBoard(parsed, { nodeW = 248, nodeH = 96 } = {}) {
     label: summary.clusterName || "Imported cluster",
     color: "#00BFB3",
   };
-
-  /* ILM flow down the tier column mirrors how data actually ages. */
-  const edges = [];
-  for (let i = 0; i < tiers.length - 1; i++) {
-    edges.push({ id: `impe${i}`, s: `imp_${tiers[i].type}`, e: `imp_${tiers[i + 1].type}`, lbl: "ILM" });
-  }
 
   return { board: { nodes, edges, zones: [zone] }, summary };
 }

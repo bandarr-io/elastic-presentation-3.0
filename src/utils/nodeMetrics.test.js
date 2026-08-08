@@ -11,6 +11,12 @@ describe("nodeChips", () => {
     expect(nodeChips("tier_hot", { nodes: "", capacity: "" })).toEqual([]);
   });
 
+  it("gives a multi-role node one chip per role", () => {
+    const roles = ["master", "data_hot", "ingest"];
+    expect(nodeChips("tier_hot", { roles })).toEqual(roles);
+    expect(nodeChips("tier_hot", { roles: [] })).toEqual([]);
+  });
+
   it("includes field defaults even without explicit props", () => {
     // logstash ships a pipelines default, so it always shows that chip
     expect(nodeChips("logstash", undefined).join(" ")).toContain("pipelines");

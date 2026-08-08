@@ -4,6 +4,8 @@
 // Year-1 base using a price escalator and a volume ramp, with optional per-cell
 // overrides and a per-year discount schedule.
 
+import { RU_LIST_PRICE } from './whiteboardSizing'
+
 export const DEFAULT_COLUMNS = {
   lineItem: 'Line Item',
   sku: 'SKU',
@@ -23,7 +25,8 @@ export const DEFAULT_ROWS = [
     descNote: '',
     term: '12',
     quantity: '85',
-    unitPrice: '13400',
+    // the SKU is stable, the price isn't, so it comes from the one place that tracks it
+    unitPrice: String(RU_LIST_PRICE),
     discount: '',
     marker: '**',
   },

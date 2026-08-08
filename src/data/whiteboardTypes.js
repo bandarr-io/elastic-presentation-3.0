@@ -88,6 +88,12 @@ export const TYPES = {
       { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 50, unit: "nodes" },
       { key: "capacity", label: "Capacity", kind: "text", placeholder: "object store size" },
     ] },
+  node_data: { cat: "Nodes", label: "Data Node", sub: "Holds shards · CRUD, search, aggregations", stage: "store", w: 248, h: 96,
+    fields: [
+      { key: "nodes",    label: "Nodes",    kind: "number", min: 1, max: 200, unit: "nodes" },
+      { key: "capacity", label: "Capacity", kind: "text", placeholder: "e.g. 4 TB" },
+      { key: "version",  label: "Version",  kind: "text", placeholder: "8.x", pre: "v" },
+    ] },
   node_master: { cat: "Nodes", label: "Master Node", sub: "Cluster state · quorum", stage: "store", w: 248, h: 96,
     fields: [{ key: "nodes", label: "Nodes", kind: "number", min: 1, max: 9, unit: "nodes" }] },
   node_ml:     { cat: "Nodes", label: "ML Node", sub: "Anomaly detection · model inference", stage: "store", w: 248, h: 96,
@@ -244,9 +250,23 @@ for (const k of Object.keys(TYPES)) {
 const INSTANCE = { key: "instance", label: "Instance type", kind: "text",
                    placeholder: "e.g. m5.2xlarge / r6gd.4xlarge" };
 for (const k of ["tier_hot", "tier_warm", "tier_cold", "tier_frozen",
-                 "node_master", "node_ml", "node_ingest", "node_coord",
+                 "node_data", "node_master", "node_ml", "node_ingest", "node_coord",
                  "logstash", "kibana"])
   TYPES[k].fields = [...(TYPES[k].fields || []), INSTANCE];
+
+/* Node roles exactly as Elasticsearch names them. A node performs one or more,
+   and in a smaller cluster one box is commonly master + data + ingest at once,
+   so this is a set rather than a single choice. Coordinating-only isn't listed:
+   it's the *absence* of roles, which the Coordinating Node type already says.
+   Order follows the docs so a chosen set always reads the same way. */
+export const NODE_ROLES = [
+  "master", "voting_only", "data", "data_content", "data_hot", "data_warm",
+  "data_cold", "data_frozen", "ingest", "ml", "transform", "remote_cluster_client",
+];
+const ROLES = { key: "roles", label: "Roles", kind: "chips", options: NODE_ROLES };
+for (const k of ["tier_hot", "tier_warm", "tier_cold", "tier_frozen",
+                 "node_data", "node_master", "node_ml", "node_ingest", "node_coord"])
+  TYPES[k].fields = [...(TYPES[k].fields || []), ROLES];
 
 /* shared hardware sizing fields, attached to infrastructure-class types */
 const HW = [
@@ -257,7 +277,7 @@ const HW = [
 for (const k of [
   "es", "kibana", "logstash", "kafka", "fleet", "apm", "mapserver", "monitoring",
   "tier_hot", "tier_warm", "tier_cold", "tier_frozen",
-  "node_master", "node_ml", "node_ingest", "node_coord", "otel_collector",
+  "node_data", "node_master", "node_ml", "node_ingest", "node_coord", "otel_collector",
 ]) TYPES[k].fields = [...(TYPES[k].fields || []), ...HW];
 
 /* accent color for a type given the active stage palette */

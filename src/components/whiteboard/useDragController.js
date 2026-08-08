@@ -1,5 +1,5 @@
 import { TYPES } from "../../data/whiteboardTypes";
-import { snap, translateEdgePts } from "../../utils/whiteboardGeometry";
+import { snap, translateEdgePts, nearestPort, alignmentGuides } from "../../utils/whiteboardGeometry";
 
 /* Pointer-gesture controller for the whiteboard canvas: pan, marquee select,
    node move/resize, zone move/resize, connect, and palette drag-and-drop.
@@ -12,6 +12,7 @@ export function useDragController(deps) {
     dragRef, viewportRef, lastClickRef,
     view, sel, nodes, edges, zones, nodeById,
     setView, setMarquee, setSel, setNodes, setZones, setEdges, setConnect, setGhost, setEditing,
+    setGuides,
     toWorld, snapshot, uid, rectOf,
   } = deps;
 
@@ -81,13 +82,46 @@ export function useDragController(deps) {
     viewportRef.current.setPointerCapture(e.pointerId);
   };
 
-  const startConnect = (e, id) => {
+  /* `port` ({side, t}) records which connection point the drag started from;
+     zones pass none and keep their single auto-anchored port. */
+  const startConnect = (e, id, port) => {
     beginGesture(e);
     e.stopPropagation();
     const w = toWorld(e.clientX, e.clientY);
-    dragRef.current = { mode: "connect", from: id };
+    dragRef.current = { mode: "connect", from: id, ...(port ? { sa: port } : {}) };
     viewportRef.current.setPointerCapture(e.pointerId);
-    setConnect({ from: id, cx: w.x, cy: w.y });
+    setConnect({ from: id, ...(port ? { sa: port } : {}), cx: w.x, cy: w.y });
+  };
+
+  /* Pick up one end of an existing edge (`end` is "s" or "e") to drop it on a
+     different connection point — or a different node. The rubber band draws
+     from the end that stays put, so what the user sees is the line they will
+     get. */
+  const startReconnect = (e, edgeId, end) => {
+    beginGesture(e);
+    e.stopPropagation();
+    const ed = edges.find((x) => x.id === edgeId);
+    if (!ed) return;
+    const w = toWorld(e.clientX, e.clientY);
+    const fixedId = end === "s" ? ed.e : ed.s;
+    const fixedAnchor = end === "s" ? ed.ea : ed.sa;
+    dragRef.current = { mode: "reconnect", edgeId, end };
+    viewportRef.current.setPointerCapture(e.pointerId);
+    setConnect({ from: fixedId, ...(fixedAnchor ? { sa: fixedAnchor } : {}), cx: w.x, cy: w.y });
+  };
+
+  /* What a connection drop landed on: a node (with its nearest connection
+     point), else the topmost zone, else nothing. */
+  const dropTarget = (w) => {
+    const hitNode = nodes.find((n) => {
+      const r = rectOf(n);
+      return w.x >= r.x && w.x <= r.x + r.w && w.y >= r.y && w.y <= r.y + r.h;
+    });
+    const hitZone = !hitNode && [...zones].reverse().find((z) =>
+      w.x >= z.x && w.x <= z.x + z.w && w.y >= z.y && w.y <= z.y + z.h);
+    const port = hitNode ? nearestPort(rectOf(hitNode), w) : null;
+    return { id: hitNode ? hitNode.id : hitZone ? hitZone.id : null,
+             anchor: port ? { side: port.side, t: port.t } : null };
   };
 
   /* Start dragging a connector waypoint. When `insertAt` is given a new
@@ -189,8 +223,19 @@ export function useDragController(deps) {
       lazySnap();
       const w = toWorld(e.clientX, e.clientY);
       const dx = w.x - d.px, dy = w.y - d.py;
+      /* The lead node follows the pointer; a live alignment guide beats the
+         grid on its axis, and the whole selection shifts by the lead's delta
+         so a guided group stays rigid. */
+      const id0 = d.ids[0];
+      const s0 = d.starts[id0];
+      const lead = { ...rectOf(nodeById[id0]), x: s0.x + dx, y: s0.y + dy };
+      const hit = alignmentGuides(lead, nodes.filter((n) => !d.starts[n.id]).map(rectOf));
+      const fdx = (hit.x !== undefined ? hit.x : snap(lead.x)) - s0.x;
+      const fdy = (hit.y !== undefined ? hit.y : snap(lead.y)) - s0.y;
+      d.lastDx = fdx; d.lastDy = fdy;
+      setGuides(hit.guides.length ? hit.guides : null);
       setNodes((ns) => ns.map((n) => d.starts[n.id]
-        ? { ...n, x: snap(d.starts[n.id].x + dx), y: snap(d.starts[n.id].y + dy) } : n));
+        ? { ...n, x: d.starts[n.id].x + fdx, y: d.starts[n.id].y + fdy } : n));
     } else if (d.mode === "resize") {
       lazySnap();
       const w = toWorld(e.clientX, e.clientY);
@@ -210,7 +255,7 @@ export function useDragController(deps) {
       const nw = Math.max(160, Math.min(2400, snap(d.w + (w.x - d.px))));
       const nh = Math.max(120, Math.min(1600, snap(d.h + (w.y - d.py))));
       setZones((zs) => zs.map((z) => (z.id === d.id ? { ...z, w: nw, h: nh } : z)));
-    } else if (d.mode === "connect") {
+    } else if (d.mode === "connect" || d.mode === "reconnect") {
       const w = toWorld(e.clientX, e.clientY);
       setConnect((c) => (c ? { ...c, cx: w.x, cy: w.y } : c));
     } else if (d.mode === "edgept") {
@@ -230,9 +275,10 @@ export function useDragController(deps) {
       const w = toWorld(e.clientX, e.clientY);
       const rawDx = w.x - d.px, rawDy = w.y - d.py;
       if (d.mode === "move") {
-        const id0 = d.ids[0];
-        const dx = snap(d.starts[id0].x + rawDx) - d.starts[id0].x;
-        const dy = snap(d.starts[id0].y + rawDy) - d.starts[id0].y;
+        setGuides(null);
+        // the delta the nodes actually took, guide corrections included
+        const dx = d.lastDx || 0;
+        const dy = d.lastDy || 0;
         if (dx || dy) setEdges((es) => translateEdgePts(es, d.ids, dx, dy));
       } else {
         const dx = snap(d.zx + rawDx) - d.zx;
@@ -245,18 +291,36 @@ export function useDragController(deps) {
       }
     }
     if (d.mode === "connect") {
-      const w = toWorld(e.clientX, e.clientY);
-      const hitNode = nodes.find((n) => {
-        const r = rectOf(n);
-        return w.x >= r.x && w.x <= r.x + r.w && w.y >= r.y && w.y <= r.y + r.h;
-      });
-      // fall back to the topmost zone under the pointer (connect to a zone)
-      const hitZone = !hitNode && [...zones].reverse().find((z) => w.x >= z.x && w.x <= z.x + z.w && w.y >= z.y && w.y <= z.y + z.h);
-      const target = hitNode ? hitNode.id : hitZone ? hitZone.id : null;
+      // dropping on a node attaches at its connection point nearest the pointer
+      const { id: target, anchor: ea } = dropTarget(toWorld(e.clientX, e.clientY));
+      const sameAnchor = (p, q) => (p?.side || "") === (q?.side || "") && (p?.t ?? 0.5) === (q?.t ?? 0.5);
+      // a second line between the same pair is fine as long as it lands on
+      // different connection points; an exact duplicate is not
       if (target && target !== d.from &&
-          !edges.some((ed) => ed.s === d.from && ed.e === target)) {
+          !edges.some((ed) => ed.s === d.from && ed.e === target
+                              && sameAnchor(ed.sa, d.sa) && sameAnchor(ed.ea, ea))) {
         snapshot();
-        setEdges((es) => [...es, { id: uid("e"), s: d.from, e: target }]);
+        setEdges((es) => [...es, { id: uid("e"), s: d.from, e: target,
+                                   ...(d.sa ? { sa: d.sa } : {}), ...(ea ? { ea } : {}) }]);
+      }
+      setConnect(null);
+    } else if (d.mode === "reconnect") {
+      const { id: target, anchor } = dropTarget(toWorld(e.clientX, e.clientY));
+      const ed = edges.find((x) => x.id === d.edgeId);
+      const fixedId = ed && (d.end === "s" ? ed.e : ed.s);
+      // a miss (or a self-loop) leaves the connection exactly as it was
+      if (ed && target && target !== fixedId) {
+        snapshot();
+        setEdges((es) => es.map((x) => {
+          if (x.id !== d.edgeId) return x;
+          const anchorKey = d.end === "s" ? "sa" : "ea";
+          const { [anchorKey]: _oldAnchor, ...rest } = x;
+          const moved = { ...rest, [d.end]: target, ...(anchor ? { [anchorKey]: anchor } : {}) };
+          // hand-placed bends were shaped around the old endpoint; landing on
+          // a different node makes them stale, re-anchoring on the same one doesn't
+          if (target !== x[d.end]) delete moved.pts;
+          return moved;
+        }));
       }
       setConnect(null);
     } else if (d.mode === "marquee") {
@@ -284,7 +348,7 @@ export function useDragController(deps) {
   };
 
   return {
-    startPan, startMove, startResize, startConnect, startZoneMove, startZoneResize,
+    startPan, startMove, startResize, startConnect, startReconnect, startZoneMove, startZoneResize,
     startPalette, startEdgePoint, onMove, onUp,
   };
 }

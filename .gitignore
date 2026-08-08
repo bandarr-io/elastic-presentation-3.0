@@ -74,4 +74,6 @@ REVIEW.md
 .claude/
 .playwright-mcp/
 review-*.png
+# hive-mind install.sh symlinks its skills in here; the submodule is the source
+.agents/
 

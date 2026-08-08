@@ -27,6 +27,16 @@ import {
   scenarioYearCount,
   toNumber,
 } from '../utils/pricing'
+import { RU_LIST_PRICE } from '../utils/whiteboardSizing'
+
+const licenseRow = () => ({
+  ...BLANK_ROW,
+  sku: 'Enterprise Resource Unit - 64GB US Based Support',
+  descLead: 'Software Licensing:',
+  description: 'Daily Ingestion + Retention',
+  quantity: '50',
+  unitPrice: String(RU_LIST_PRICE),
+})
 
 const TEMPLATES = [
   {
@@ -37,18 +47,7 @@ const TEMPLATES = [
   {
     id: 'license',
     label: 'Single License Line',
-    patch: () => ({
-      rows: [
-        {
-          ...BLANK_ROW,
-          sku: 'Enterprise Resource Unit - 64GB US Based Support',
-          descLead: 'Software Licensing:',
-          description: 'Daily Ingestion + Retention',
-          quantity: '50',
-          unitPrice: '13400',
-        },
-      ],
-    }),
+    patch: () => ({ rows: [licenseRow()] }),
   },
   {
     id: 'ramp3',
@@ -57,16 +56,7 @@ const TEMPLATES = [
       yearLabels: ['Year 1', 'Year 2', 'Year 3'],
       escalatorPct: '5',
       rampPct: '10',
-      rows: [
-        {
-          ...BLANK_ROW,
-          sku: 'Enterprise Resource Unit - 64GB US Based Support',
-          descLead: 'Software Licensing:',
-          description: 'Daily Ingestion + Retention',
-          quantity: '50',
-          unitPrice: '13400',
-        },
-      ],
+      rows: [licenseRow()],
     }),
   },
 ]
@@ -390,7 +380,7 @@ export default function PricingRomBuilder({ meta, onChange, onClose }) {
               {showPaste && (
                 <div className={`rounded-xl border p-3 space-y-2 ${surface}`}>
                   <p className={`text-[11px] ${muted}`}>Paste rows from Excel/Sheets. Columns: <b>SKU · Description · Qty · Unit Price · Discount% · Bold label</b> (tab or comma separated; the 6th column is optional).</p>
-                  <textarea rows={4} value={pasteText} onChange={(e) => setPasteText(e.target.value)} className={`${cell} font-mono`} placeholder={'ERU 64GB\t20TB Ingest\t85\t13400\t\tSoftware Licensing:\nFlex Consulting\tServices\t90\t3300'} />
+                  <textarea rows={4} value={pasteText} onChange={(e) => setPasteText(e.target.value)} className={`${cell} font-mono`} placeholder={`ERU 64GB\t20TB Ingest\t85\t${RU_LIST_PRICE}\t\tSoftware Licensing:\nFlex Consulting\tServices\t90\t3300`} />
                   <div className="flex gap-2">
                     <button onClick={() => applyPaste('append')} className={`${chipBtn} ${isDark ? 'text-elastic-teal border-elastic-teal/40' : 'text-elastic-blue border-elastic-blue/40'}`}>Append</button>
                     <button onClick={() => applyPaste('replace')} className={chipBtn}>Replace all</button>

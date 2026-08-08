@@ -39,4 +39,10 @@ export default defineConfig({
   // e.g., base: '/presentation-app/' for https://example.com/presentation-app/
   // Use './' for relative paths (works anywhere)
   base: './',
+  test: {
+    // The FontAwesome React wrapper imports its peer's package.json for a
+    // version string, which Node's ESM loader rejects unless the dependency is
+    // processed by Vite. Anything importing a scene pulls it in.
+    server: { deps: { inline: [/@fortawesome/] } },
+  },
 })

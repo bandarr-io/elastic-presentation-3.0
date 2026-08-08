@@ -33,6 +33,9 @@ export const nodeChips = (type, props) => {
   for (const f of TYPES[type]?.fields || []) {
     const v = props && props[f.key] !== undefined ? props[f.key] : f.def;
     if (v === undefined || v === "" || v === false) continue;
+    /* Set-valued fields (node roles) read as one chip each rather than a
+       single run-on chip, so a multi-role node stays scannable. */
+    if (Array.isArray(v)) { out.push(...v); continue; }
     out.push(f.kind === "toggle" ? f.label : (f.pre || "") + v + (f.unit ? " " + f.unit : ""));
   }
   return out;

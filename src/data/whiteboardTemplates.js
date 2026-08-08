@@ -343,19 +343,23 @@ function relaxStacks(nodes) {
 /* Instantiate one template at an origin, returning absolute nodes/edges, a zone
    (unless the template is zone-less), and a key->id map for edge resolution.
    `propsByKey` lands node props (counts, hardware…) before layout is final, so
-   stacks and the zone box grow around the content they'll actually show. */
-export function instantiateTemplate(templateId, fill = {}, origin = { x: 0, y: 0 }, sectionId, propsByKey) {
+   stacks and the zone box grow around the content they'll actually show.
+   `step` tags the whole block with a build step, so a section can be held back
+   until that point in a staged reveal. */
+export function instantiateTemplate(templateId, fill = {}, origin = { x: 0, y: 0 }, sectionId, propsByKey,
+                                    { step } = {}) {
   const tpl = TEMPLATES[templateId];
   if (!tpl) return null;
   const built = tpl.build(fill || {});
   const pfx = sectionId || `${templateId}${nextSeq()}`;
   const nid = (key) => `${pfx}__${key}`;
+  const reveal = +step > 0 ? { step: Math.round(+step) } : {};
   const nodes = built.nodes.map((n) => {
     const props = (n.props || propsByKey?.[n.key])
       ? { ...(n.props || {}), ...(propsByKey?.[n.key] || {}) } : undefined;
     return {
       id: nid(n.key), type: n.type, x: origin.x + n.x, y: origin.y + n.y,
-      ...(n.title ? { title: n.title } : {}), ...(props ? { props } : {}),
+      ...(n.title ? { title: n.title } : {}), ...(props ? { props } : {}), ...reveal,
     };
   });
   relaxStacks(nodes);
@@ -391,7 +395,8 @@ export function instantiateTemplate(templateId, fill = {}, origin = { x: 0, y: 0
   if (!built.noZone) {
     const members = nodes.filter((_, i) => !built.nodes[i].outsideZone);
     const rect = zoneRect(members, built.zonePad);
-    if (rect) zone = { id: `${pfx}__zone`, x: rect.x, y: rect.y, w: rect.w, h: rect.h, label: built.label, color: built.color };
+    if (rect) zone = { id: `${pfx}__zone`, x: rect.x, y: rect.y, w: rect.w, h: rect.h,
+                       label: built.label, color: built.color, ...reveal };
   }
   const bbox = (() => {
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -430,7 +435,7 @@ export function placeSections(sections = []) {
   const LANE_GAP = 150, STACK_GAP = 90, ROW_GAP = 80, TOP = 60, BELOW_GAP = 120;
   let laneX = 60;
   const place = (s, x, y) => {
-    const inst = instantiateTemplate(s.template, s.fill, { x, y }, s.id, s.props);
+    const inst = instantiateTemplate(s.template, s.fill, { x, y }, s.id, s.props, { step: s.step });
     if (!inst) return null;
     out.nodes.push(...inst.nodes);
     out.edges.push(...inst.edges);
@@ -467,7 +472,7 @@ export function placeSections(sections = []) {
      origin is derived from where the frame has to end up. */
   for (const s of stacked) {
     const host = out.placed[s.below];
-    const probe = host && instantiateTemplate(s.template, s.fill, { x: 0, y: 0 }, s.id, s.props);
+    const probe = host && instantiateTemplate(s.template, s.fill, { x: 0, y: 0 }, s.id, s.props, { step: s.step });
     if (!probe) continue;
     const hf = host.zone || host.bbox, sf = probe.zone || probe.bbox;
     place(s, hf.x - sf.x, hf.y + hf.h + BELOW_GAP - sf.y);
@@ -496,9 +501,9 @@ export function sectionEndpoint(ref, dir, metaById) {
 }
 
 /* Build a whole board from sections + cross-section flows. Returns the board
-   plus `meta` (sectionId -> { template, fill, props, keys, zoneId }) for
-   incremental editing later. `props` rides along so a re-sent section keeps the
-   node counts/hardware it was built with. */
+   plus `meta` (sectionId -> { template, fill, props, step, keys, zoneId }) for
+   incremental editing later. `props` and `step` ride along so a re-sent section
+   keeps the node counts/hardware and the reveal order it was built with. */
 export function buildFromSections(sections = [], crossEdges = []) {
   const withIds = sections.map((s, i) => ({ ...s, id: s.id || `${s.template}${i}` }));
   const { nodes, edges, zones, placed } = placeSections(withIds);
@@ -506,7 +511,8 @@ export function buildFromSections(sections = [], crossEdges = []) {
   for (const s of withIds) {
     const inst = placed[s.id];
     if (inst) meta[s.id] = { template: s.template, fill: s.fill || {},
-      ...(s.props ? { props: s.props } : {}), keys: inst.keys, zoneId: inst.zone ? inst.zone.id : null };
+      ...(s.props ? { props: s.props } : {}), ...(s.step ? { step: s.step } : {}),
+      keys: inst.keys, zoneId: inst.zone ? inst.zone.id : null };
   }
   const cross = [];
   /* `sourceZone` / `targetZone` pin that end of the edge to the section's

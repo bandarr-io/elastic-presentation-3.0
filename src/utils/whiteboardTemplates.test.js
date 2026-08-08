@@ -275,4 +275,20 @@ describe("buildFromSections", () => {
     // unknown section -> null
     expect(sectionEndpoint("nope", "in", board.meta)).toBe(null);
   });
+
+  it("tags a section's nodes, zone and edges with its build step", () => {
+    const board = buildFromSections([
+      { id: "cl", template: "cluster", fill: { tiers: ["hot"], master: true } },
+      { id: "ui", template: "userSpace", fill: { consumers: ["kibana"] }, step: 2 },
+    ], [{ from: "cl", to: "ui" }]);
+    const held = board.nodes.filter((n) => n.id.startsWith("ui__"));
+    expect(held.length).toBeGreaterThan(0);
+    expect(held.every((n) => n.step === 2)).toBe(true);
+    expect(board.zones.find((z) => z.id === "ui__zone").step).toBe(2);
+    // the first section stays unstepped, so it shows from the start
+    expect(board.nodes.filter((n) => n.id.startsWith("cl__")).every((n) => n.step === undefined)).toBe(true);
+    // and the step rides along in meta, so a re-sent section keeps its place in the reveal
+    expect(board.meta.ui.step).toBe(2);
+    expect(board.meta.cl.step).toBeUndefined();
+  });
 });

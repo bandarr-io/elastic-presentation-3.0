@@ -53,7 +53,7 @@ const STORAGE_KEY = 'presentation-scene-config'
 // Bump whenever the canonical default scene order / enabled set changes. On a
 // version mismatch we adopt the new order + enabled defaults while preserving
 // the user's own durations and scene metadata.
-const ORDER_VERSION = 7
+const ORDER_VERSION = 8
 
 function buildDefaultConfig(initialScenes) {
   const allIds = initialScenes.map(s => s.id)

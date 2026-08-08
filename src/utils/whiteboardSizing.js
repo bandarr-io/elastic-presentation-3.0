@@ -92,7 +92,9 @@ export const SIZING_DEFAULTS = {
      are concurrent Kibana users; zero leaves that piece off the drawing. */
   agents: 100,
   users: 50,
-  logstash: true,
+  /* Off unless asked for: most modern designs ship agent-direct, so Logstash
+     in a default drawing raises questions instead of answering them. */
+  logstash: false,
   masters: true,
   /* Dedicated ML nodes are off unless asked for: not every cluster runs
      inference or anomaly detection, so they'd otherwise oversize the drawing. */
@@ -350,65 +352,127 @@ export function recommendHardware(result) {
 
 /* ---------------- backward: board -> quote lines ---------------- */
 
-/* Elastic licenses self-managed and ECE capacity in 64 GB resource units. */
+/* Elastic prices the two deployment models on entirely different meters, so a
+   quote line takes one shape or the other:
+
+   - ERU (self-managed, ECE, ECK). An Enterprise subscription licenses capacity:
+     total GB of RAM addressable by the software, divided by 64, remainder
+     rounded up. The agreement decouples it from node count deliberately — the
+     same units buy one 64 GB node or sixty-four 1 GB ones — so the quantity
+     comes from memory, and the remainder is rounded once against the total
+     rather than per tier.
+   - ECU (Elastic Cloud Hosted). Cloud is metered consumption, not licensed
+     capacity: usage across RAM-hours, data transfer, and snapshot storage is
+     converted into Elastic Consumption Units at a fixed 1 ECU = $1.00. The
+     figure comes from the Cloud pricing calculator, so the SA enters it and the
+     unit price is the fixed exchange rate. */
+export const LICENSE_ERU = "eru";
+export const LICENSE_ECU = "ecu";
+
 export const RU_GB = 64;
 export const RU_SKU = "Enterprise Resource Unit - 64GB US Based Support";
+
+export const ECU_SKU = "Elastic Cloud — Elastic Consumption Units";
+export const ECU_LEAD = "Elastic Cloud:";
+/* Fixed by Elastic: the nominal value of one ECU is $1.00. Discounts are
+   negotiated against the credit purchase, not this rate. */
+export const ECU_LIST_PRICE = 1;
+
+/* Which meter a provider bills on. Everything that isn't self-managed is a
+   Cloud deployment, so it consumes ECUs. */
+export const licenseModelFor = (provider) =>
+  (provider === "selfmanaged" ? LICENSE_ERU : LICENSE_ECU);
 
 /* The bold label the ROM builder renders before each description. Matching the
    builder's own "Software Licensing:" templates makes a whiteboard-originated
    row indistinguishable from one the builder made itself. */
 export const RU_LEAD = "Software Licensing:";
 
-/* Turn a capacity rollup into Pricing / ROM line items, one per tier so the
-   quote shows where the memory goes. Everything that isn't a data tier
-   (master, ML, ingest, coordinating) rolls into a single line.
+/* Licences are quoted on an annual term. */
+export const RU_TERM = "12";
 
-   Each row also carries the detail the flat text format drops — per-tier RAM,
-   node count, storage — so a programmatic handoff can be lossless even though a
-   pasted copy can't. Unit price is deliberately left blank: list price varies
-   by agreement and the SA fills it in. */
-export function romRows(totals = {}, { ruGB = RU_GB } = {}) {
+/* Current list price per resource unit. It only seeds the field in the capacity
+   panel — real list price moves with the agreement, so the SA edits it before
+   sending. */
+export const RU_LIST_PRICE = 14100;
+
+/* Turn a capacity rollup into the single line a ROM slide shows — one quantity
+   for the whole deployment rather than a line per tier, on whichever meter the
+   deployment bills against (see LICENSE_ERU / LICENSE_ECU above).
+
+   The row keeps the detail behind the number — memory, nodes, storage — so a
+   programmatic handoff can be richer than the flat text paste. */
+export function romRows(totals = {}, { model = LICENSE_ERU, ruGB = RU_GB,
+                                       unitPrice = "", discount = "", ecuTotal = "" } = {}) {
+  const mem = positive(totals.mem);
+  const logstashMem = positive(totals.logstashMem);
+  const licensedMem = Math.max(0, mem - logstashMem);
+  const cloud = model === LICENSE_ECU;
+  const units = cloud ? positive(ecuTotal) : licensedMem;
+  if (!units) return [];
+
   const tiers = totals.tiers || [];
-  const rows = [];
-  const line = (description, mem, extra = {}) => {
-    if (!mem) return;
-    rows.push({ sku: RU_SKU, descLead: RU_LEAD, description, quantity: ceil(mem / ruGB), ramGB: mem, ...extra });
-  };
+  const sum = (key) => tiers.reduce((total, t) => total + (t[key] || 0), 0);
+  const nodes = totals.count || sum("count");
+  const storageTB = totals.storageTB || sum("storageTB");
 
-  for (const t of tiers) {
-    const detail = [`${t.count} node${t.count === 1 ? "" : "s"}`];
-    if (t.storageTB) detail.push(`${formatTB(t.storageTB)} storage`);
-    line(`${t.label} tier — ${detail.join(", ")}`, t.mem || 0, { nodes: t.count, storageTB: t.storageTB });
-  }
+  /* Say what the deployment is, since the line no longer shows the tiers
+     separately. On ERU the memory figure is also where the quantity came
+     from. */
+  const detail = [];
+  if (licensedMem) detail.push(`${licensedMem.toLocaleString("en-US")} GB memory`);
+  if (nodes) detail.push(`${nodes} node${nodes === 1 ? "" : "s"}`);
+  if (storageTB) detail.push(`${formatTB(storageTB)} storage`);
+  const named = tiers.filter((t) => t.mem).map((t) => t.label);
+  const shape = `${detail.join(", ")}${named.length ? ` (${named.join(", ")})` : ""}`;
 
-  const tierMem = tiers.reduce((total, t) => total + (t.mem || 0), 0);
-  line("Supporting nodes (masters, ML, Logstash, Kibana)", Math.max(0, (totals.mem || 0) - tierMem));
+  const note = cloud
+    ? "Metered consumption from the Elastic Cloud pricing calculator."
+    : logstashMem
+      ? `Excludes ${logstashMem.toLocaleString("en-US")} GB on Logstash, which Elastic counts for information only.`
+      : "";
 
-  return rows;
+  return [{
+    sku: cloud ? ECU_SKU : RU_SKU,
+    descLead: cloud ? ECU_LEAD : RU_LEAD,
+    description: shape || "Elastic Cloud deployment",
+    descNote: note,
+    term: RU_TERM,
+    quantity: cloud ? Math.round(units) : ceil(units / ruGB),
+    unitPrice: cloud ? String(ECU_LIST_PRICE)
+                     : (unitPrice === "" || unitPrice == null ? "" : String(unitPrice)),
+    discount: discount === "" || discount == null ? "" : String(discount),
+    ramGB: licensedMem,
+    nodes,
+    storageTB,
+  }];
 }
 
 /* Tab-delimited so it pastes straight into the ROM builder's importer, which
    reads SKU | Description | Quantity | Unit Price | Discount% | Bold label.
-   Price and discount are blank; the 6th column carries the bold lead so a
-   pasted row keeps the label the builder's own rows show. */
+   The 6th column carries the bold lead so a pasted row keeps the label the
+   builder's own rows show. Term isn't a paste column — the builder defaults it
+   to the same annual term. The line total is the builder's own calculation
+   (quantity x unit price, less the discount), so it isn't sent. */
 export function romTSV(rows = []) {
-  return rows.map((r) => [r.sku, r.description, r.quantity, "", "", r.descLead || ""].join("\t")).join("\n");
+  return rows
+    .map((r) => [r.sku, r.description, r.quantity, r.unitPrice || "", r.discount || "", r.descLead || ""].join("\t"))
+    .join("\n");
 }
 
-/* The same quote lines as a ready-made ROM scenario, for the direct handoff
-   that skips the clipboard. Rows are full builder rows (bold lead, term,
-   blank unit price for the SA to fill) and keep the per-tier RAM / node /
-   storage detail alongside, so the handoff loses nothing the board knew. */
-export function romScenario(totals = {}, { label = "Whiteboard sizing", ruGB = RU_GB } = {}) {
-  const rows = romRows(totals, { ruGB }).map((r) => ({
+/* The same quote line as a ready-made ROM scenario, for the direct handoff
+   that skips the clipboard. Rows are full builder rows and keep the RAM / node
+   / storage detail alongside, so the handoff loses nothing the board knew. */
+export function romScenario(totals = {}, { label = "Whiteboard sizing", ...terms } = {}) {
+  const rows = romRows(totals, terms).map((r) => ({
     sku: r.sku,
     descLead: r.descLead || "",
     description: r.description,
-    descNote: "",
-    term: "12",
+    descNote: r.descNote || "",
+    term: r.term,
     quantity: String(r.quantity),
-    unitPrice: "",
-    discount: "",
+    unitPrice: r.unitPrice,
+    discount: r.discount,
     marker: "",
     overrides: {},
     ramGB: r.ramGB,

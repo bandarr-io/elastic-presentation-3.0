@@ -21,27 +21,58 @@ export function autoSides(ra, rb) {
   return dy >= 0 ? ["b", "t"] : ["t", "b"];
 }
 
-/* Simple two/three-segment elbow between two rects (fallback routing). */
-export function edgePolyline(ra, rb) {
-  const [sS, eS] = autoSides(ra, rb);
-  const A = anchor(ra, sS), B = anchor(rb, eS);
+/* Connection points around a rect: three per side, at the quarter points and
+   the midpoint. An anchor is stored on an edge as {side, t}, so geometry stays
+   correct when the node is later moved or resized. */
+export const PORT_TS = [0.25, 0.5, 0.75];
+export const nodePorts = (r) => {
+  const ports = [];
+  for (const side of ["l", "r", "t", "b"])
+    for (const t of PORT_TS) ports.push({ side, t, ...anchor(r, side, t) });
+  return ports;
+};
+
+/* The connection point nearest a world coordinate — how a drop decides where
+   an edge attaches on its target. */
+export function nearestPort(r, p) {
+  let best = null, bestDist = Infinity;
+  for (const port of nodePorts(r)) {
+    const d = (port.x - p.x) ** 2 + (port.y - p.y) ** 2;
+    if (d < bestDist) { bestDist = d; best = port; }
+  }
+  return best;
+}
+
+/* Simple two/three-segment elbow between two rects (fallback routing).
+   `sa`/`ea` ({side, t}) pin either end to a chosen connection point; ends
+   without one fall back to the facing side's midpoint. */
+export function edgePolyline(ra, rb, sa, ea) {
+  const [autoS, autoE] = autoSides(ra, rb);
+  const sS = sa?.side || autoS, eS = ea?.side || autoE;
+  const A = anchor(ra, sS, sa?.t), B = anchor(rb, eS, ea?.t);
   const hOut = sS === "l" || sS === "r";
-  if (hOut) {
+  const hIn = eS === "l" || eS === "r";
+  if (hOut && hIn) {
     if (Math.abs(A.y - B.y) < 14) return [A, B];
     const mx = (A.x + B.x) / 2;
     return [A, { x: mx, y: A.y }, { x: mx, y: B.y }, B];
   }
-  if (Math.abs(A.x - B.x) < 14) return [A, B];
-  const my = (A.y + B.y) / 2;
-  return [A, { x: A.x, y: my }, { x: B.x, y: my }, B];
+  if (!hOut && !hIn) {
+    if (Math.abs(A.x - B.x) < 14) return [A, B];
+    const my = (A.y + B.y) / 2;
+    return [A, { x: A.x, y: my }, { x: B.x, y: my }, B];
+  }
+  // mixed axes: one corner leaves A along its side and arrives at B along its
+  return hOut ? [A, { x: B.x, y: A.y }, B] : [A, { x: A.x, y: B.y }, B];
 }
 
 /* Orthogonal polyline between two rects. With manual waypoints (`pts`) the line
    is anchored toward the first/last waypoint and squared off through each one;
-   without them it falls back to a simple auto elbow. */
-export function elbowPath(ra, rb, pts) {
+   without them it falls back to a simple auto elbow. `sa`/`ea` pin the ends to
+   specific connection points either way. */
+export function elbowPath(ra, rb, pts, sa, ea) {
   if (!ra || !rb) return [];
-  if (!Array.isArray(pts) || !pts.length) return edgePolyline(ra, rb);
+  if (!Array.isArray(pts) || !pts.length) return edgePolyline(ra, rb, sa, ea);
   const ac = { x: ra.x + ra.w / 2, y: ra.y + ra.h / 2 };
   const bc = { x: rb.x + rb.w / 2, y: rb.y + rb.h / 2 };
   const sideTo = (c, p) => {
@@ -49,8 +80,8 @@ export function elbowPath(ra, rb, pts) {
     if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? "r" : "l";
     return dy >= 0 ? "b" : "t";
   };
-  const A = anchor(ra, sideTo(ac, pts[0]));
-  const B = anchor(rb, sideTo(bc, pts[pts.length - 1]));
+  const A = sa?.side ? anchor(ra, sa.side, sa.t) : anchor(ra, sideTo(ac, pts[0]));
+  const B = ea?.side ? anchor(rb, ea.side, ea.t) : anchor(rb, sideTo(bc, pts[pts.length - 1]));
   const spine = [A, ...pts, B];
   const out = [spine[0]];
   for (let i = 0; i < spine.length - 1; i++) {
@@ -102,6 +133,26 @@ export function plMid(pl) {
 
 /* Snap a world coordinate to the 8px grid. */
 export const snap = (v) => Math.round(v / 8) * 8;
+
+/* Live alignment for a drag: when the moving rect's centre comes within `tol`
+   of another rect's row or column centre line, snap onto it. Centre-based to
+   match the Straighten tidy — a guide here is an alignment Straighten would
+   keep. Returns the corrected top-left per axis (absent when nothing matched)
+   and the centre lines to draw: { x?, y?, guides: [{ axis: "v"|"h", at }] }. */
+export function alignmentGuides(moving, others, tol = 6) {
+  const cx = moving.x + moving.w / 2, cy = moving.y + moving.h / 2;
+  let v = null, h = null;
+  for (const r of others) {
+    const dv = Math.abs(r.x + r.w / 2 - cx);
+    const dh = Math.abs(r.y + r.h / 2 - cy);
+    if (dv <= tol && (!v || dv < v.d)) v = { at: r.x + r.w / 2, d: dv };
+    if (dh <= tol && (!h || dh < h.d)) h = { at: r.y + r.h / 2, d: dh };
+  }
+  const out = { guides: [] };
+  if (v) { out.x = v.at - moving.w / 2; out.guides.push({ axis: "v", at: v.at }); }
+  if (h) { out.y = h.at - moving.h / 2; out.guides.push({ axis: "h", at: h.at }); }
+  return out;
+}
 
 /* Translate manual edge waypoints when a gesture moves endpoints. By default
    both endpoints must be in movedIds (matches paste/shift semantics); zoneFrameOnly

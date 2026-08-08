@@ -8,7 +8,7 @@ polished animated scenes — all running locally in the browser with no backend.
 
 - Single-page React 18 + Vite app, hash-routed (`/#/<scene-id>`), no server or database.
 - A presentation is an ordered, enabled subset of **52 registered scenes** (`src/data/sceneRegistry.jsx`).
-- **Deck presets** (`src/data/deckPresets.js`) are out-of-the-box flows: New Prospect (default), Technical Deep-Dive, Observability, Security, All Scenes, No Scenes.
+- **Deck presets** (`src/data/deckPresets.js`) are out-of-the-box flows: New Prospect (default), Technical Deep-Dive, Whiteboard, Observability, Security, Search, All Scenes, No Scenes.
 - Scenes can have internal animation steps ("**beats**" via the `useSceneMotion` hook, or lifted "**stages**" managed in `App.jsx`).
 - A **presenter view** (`/#/presenter`) opens in a second tab and drives the audience tab over `BroadcastChannel`, with speaker notes and live previews.
 - An **architecture whiteboard** scene (`/#/whiteboard`) provides a live drag-and-drop canvas for Elastic deployment diagrams.
@@ -92,8 +92,10 @@ content edits are preserved when switching presets. The default preset is
 |---|---|---|
 | **New Prospect** *(default)* | `new-prospect` | Net-new pitch — market context first, no existing-footprint assumptions. 16 scenes ending in pricing, services, and next steps. |
 | **Technical Deep-Dive** | `technical` | Architecture and platform internals for architects and platform teams — planes, node types, tiering, schema, cross-cluster, ES\|QL, deployment models, through a full reference deployment. |
+| **Whiteboard** | `whiteboard-session` | A live working session — platform grounding and the reference architecture, then draw theirs on the live board. |
 | **Observability** | `observability` | The Observability story — from efficient datastore to the autonomous AI SRE (Nightshift). Uses the 14 `obs-*` / `nightshift-*` scenes. |
 | **Security** | `security` | Modern threat landscape → AI-driven SecOps → tool consolidation, governance, and commercials. |
+| **Search** | `search` | The Search story — platform grounding, AI capabilities, and ES\|QL. A skeleton flow that dedicated search scenes slot into as they land. |
 | **All Scenes** | `all-scenes` | Everything enabled in registration order — the full library. Newly added scenes are always included. |
 | **No Scenes** | `no-scenes` | Blank slate — only Hero. Build a custom flow from scratch. |
 
@@ -101,7 +103,7 @@ content edits are preserved when switching presets. The default preset is
 
 ## Scene Library
 
-All 52 scenes, grouped as they appear in `src/data/sceneRegistry.jsx`. "Default"
+All 57 scenes, grouped as they appear in `src/data/sceneRegistry.jsx`. "Default"
 indicates whether the scene ships enabled before any preset/customization is
 applied (the New Prospect preset governs the actual default flow).
 
@@ -221,8 +223,11 @@ sketching Elastic deployment architectures live — and for presenting them.
 blocks (cluster tiers, ingestion, user space), zones, styled connections
 (per-edge color; solid/dashed/dotted/long-dash/dash-dot; thin/normal/thick),
 sticky notes and text labels, clipboard copy/paste of whole subsystems,
-arrow-key nudging, and a **Tidy** button that lays everything out in
-left-to-right data-flow lanes. Nodes keep a fixed width per type but grow in
+arrow-key nudging, live **alignment guides** that snap a dragged node onto
+another's row or column centre line, and a **Tidy** menu that either
+straightens near-rows and near-columns in place or rebuilds the board into
+left-to-right data-flow lanes. A corner **minimap** keeps the whole board in
+view — click or drag it to move the camera. Nodes keep a fixed width per type but grow in
 height to fit whatever they're showing — titles, sub-lines, and spec chips —
 and template stacks and zones re-open around the taller boxes. Data Source
 nodes carry an integration picked from the Elastic Agent catalog (384 GA
@@ -233,7 +238,7 @@ figure.
 keep one per customer. Built-in architecture presets remain available in the
 Architectures menu.
 
-**Sizing.** *Size…* turns ingest per day, retention per tier, and agent/user
+**Sizing.** *Build…* turns ingest per day, retention per tier, and agent/user
 counts into a whole deployment: data tiers, a three-node master quorum (added
 automatically once the data tiers reach six nodes), Logstash sized from
 throughput, Kibana sized from concurrent users, optional dedicated ML nodes for
@@ -261,19 +266,31 @@ replicas don't multiply their storage.
 
 **Analysis.** A `Σ` panel rolls up nodes, vCPU, RAM, and per-tier storage, and
 runs advisory best-practice checks (master quorum, frozen tier without object
-storage, single data node, orphans). It emits 64 GB resource-unit quote lines
-in the tab-delimited shape the Pricing / ROM builder's paste importer already
-parses (including a bold-label column so pasted rows look like the builder's
-own), so a drawn architecture becomes a priced estimate without retyping it.
-**Send to Pricing** does the same in one click without the clipboard, landing
-the rows as a new scenario in the ROM builder — with the per-tier memory, node
-counts, and storage that the text paste can't carry — and never overwriting a
-quote already in progress. Imported rows arrive with a blank unit price shown
-as a neutral "awaiting price" to-do rather than a broken $0.
+storage, single data node, orphans). It totals the whole deployment into a
+single quote line on whichever meter the deal bills against — self-managed
+licenses 64 GB resource units derived from total memory (Logstash excluded,
+since Elastic counts it for information only), while Cloud Hosted meters
+consumption, so the panel takes the ECU figure from Elastic's pricing
+calculator at the fixed $1.00 rate. Drawing a cluster picks the model from its
+provider. Either way the line carries the list price and discount set in the
+panel, in the tab-delimited shape the Pricing / ROM builder's paste importer
+already parses (including a bold-label column so pasted rows look like the
+builder's own), so a drawn architecture becomes a priced estimate without
+retyping it. **Send to Pricing** does the same in one click without the
+clipboard, landing the line as a new scenario in the ROM builder — with the
+memory, node counts, and storage that the text paste can't carry — and never
+overwriting a quote already in progress. A row left unpriced shows as a neutral
+"awaiting price" to-do rather than a broken $0.
 
 **Real data.** Paste `GET _cat/nodes?v`, `_nodes`, or `_cluster/stats` output
-and the board draws the customer's actual topology into a new board. Parsing is
-entirely local. **Compare** any two boards to get the migration delta: what the
+and the board draws the customer's actual topology into a new board, wired the
+way the Elastic Cluster pattern wires one. Up to twelve nodes each instance is
+its own box, titled with its real name and carrying the roles it reports;
+beyond that the board groups by tier and role, with the instance names as a
+subtitle. Every cluster node type has a **Roles** field, so the small-cluster
+shape where one node is master + data + ingest is drawn as it actually is —
+and a master-eligible data node counts toward quorum in the review panel.
+Parsing is entirely local. **Compare** any two boards to get the migration delta: what the
 target adds, drops, and resizes, and how the rollups move.
 
 **Presenting.** *Present* hides the editing chrome; click a component to
@@ -281,19 +298,73 @@ spotlight it and its connections. Tag components with **build steps** to reveal
 the architecture piece by piece — those steps are published through
 `useSceneMotion`, so the [presenter view](#presenter-view) drives them like any
 other multi-step scene, complete with beat pills and per-beat speaker notes.
-*Flow* walks the data through the diagram one hop at a time for narrating the
-path. A pen and arrow tool annotate over the top, with strokes tied to the step
-they were drawn on.
+**Saved views** are named camera positions per board: frame the ingest path
+once, then number keys 1–9 fly there mid-conversation, and the present bar
+steps through them while arrows stay with the reveal. A pen and arrow tool
+annotate over the top, with strokes tied to the step they were drawn on.
 
 **Sharing.** Export JSON, SVG, or PNG (2x/4x) with an optional title block and
 category legend, copy the image straight to the clipboard, or copy a share link
-that packs the whole board into a compressed URL. *✦ Write it up* drafts the
-follow-up note from the diagram, the rollups, and the review findings.
+that packs the whole board into a compressed URL. *✦ Write it up* drafts what
+follows the session from the diagram, the rollups, and the review findings.
+The **Follow-up package** goes further: one click renders the board, has the
+model write a customer-ready recap (what was walked through, decided, and
+still open, from the board facts and the chat transcript), and produces a
+single self-contained HTML file — or the same package as markdown — with the
+capacity numbers and review findings attached. Without AI credentials it still
+builds from the deterministic parts.
 
-**AI.** The *✦ AI* chat builds or edits the board from natural language, and
-*✦ Write it up* drafts prose — both run on **Amazon Bedrock** (Converse API)
-with SigV4-signed requests sent straight from the browser. Bring an IAM key
+**Customer details.** Each board can carry who it's for — account,
+opportunity, stakeholders, install base, deal review, support health — typed
+in or pasted from an `edm` CLI `--json` run, one paste per command,
+accumulating. The AI reads it when designing and reviewing; the canvas,
+Present mode, and the follow-up package's body never show it (the follow-up
+header carries only the account and opportunity names).
+
+**AI.** The *✦ AI* panel is a conversation about the architecture: it answers
+questions from what's on the board, builds and edits it from natural language,
+and calls the deterministic sizing engine when the numbers come up, so
+"size this for 500 GB/day held for a year" returns the figures the calculator
+would rather than invented ones. It sees its own review findings, can tag
+sections with build steps for a staged reveal, and turns an imported cluster
+into a review or a sized target state held against it. Ask for alternatives —
+"build me two architectures, one hot-only and one fully tiered" — and it draws
+each on its own board in a single turn, ready to flip between or compare from
+the boards menu. Every change it proposes to the board on screen is staged for
+**Apply** or **Discard** first, so nothing is redrawn out from under a room
+that's looking at the diagram. *✦ Write it up* asks which artifact you
+want first — an internal note, a customer email, the open questions, the risks,
+or an SOW skeleton — then drafts it from the same board facts. Both run on **Amazon Bedrock** (Converse
+API) with SigV4-signed requests sent straight from the browser. Bring an IAM key
 pair with `bedrock:InvokeModel`; no proxy or backend involved.
+
+**Grounded.** The model decides and narrates; deterministic code and retrieved
+passages supply the facts. Six tools sit between the question and the answer —
+`edit_whiteboard`, `size_deployment`, `search_knowledge`, `review_board`,
+`lookup_integrations`, and `quote_deployment` — each one a wrapper over an
+engine the app already trusts, so the chat and the panels can never quote
+different numbers. Retrieval draws on a **curated Elastic corpus** versioned in
+the repo (`src/data/knowledge/` — sizing rules, tier and ILM guidance,
+reference architectures, the reasoning behind each review check, the two
+metering models) and on the **customer's own documents** attached to the board
+through *◫ Context*: paste or upload the RFP — as text, PDF, Word, Excel, or
+even a screenshot — and it will design to it, then check the board back
+against it. Binary documents are parsed by the configured Elastic deployment's
+attachment processor (nothing indexed), by lazy-loaded browser parsers when
+Elastic isn't there, or by Jina's vision model for images. While a turn runs the chat streams the
+agent's steps live — which tool is in flight, on what query — and every reply
+then carries the sources it used and a trail of what ran to produce it.
+
+**Elastic, optionally.** Point it at a Kibana endpoint and an API key and
+`search_knowledge` runs through **Agent Builder** against a `semantic_text`
+index instead — browser-direct, no proxy, keys in `localStorage` beside the
+Bedrock ones. If Kibana is unreachable the same question falls back to the repo
+corpus and the reply says so, and customer documents never leave the browser
+unless explicitly pushed. A **Check AI** pre-flight reports both providers and
+separates a bad key from a bad agent id from a blocked CORS preflight — which it
+answers with the exact settings block for this deployment's own origin. See the
+[whiteboard README](src/components/whiteboard/README.md#connecting-elastic-optional)
+for the one-time CORS setup.
 
 See the [whiteboard README](src/components/whiteboard/README.md) for the full
 feature tour, interaction cheat sheet, document schema, and code map.
@@ -408,8 +479,9 @@ elastic-presentation-3.0/
 │   │   ├── deckPresets.js         # Out-of-the-box flows (New Prospect, Technical, Obs, Security, …)
 │   │   ├── agendaDefaults.js      # Agenda slide defaults
 │   │   ├── iconOptions.js         # Icon picker catalog for scene editors
+│   │   ├── knowledge/             # The curated Elastic corpus the AI retrieves from and cites
 │   │   └── whiteboardTypes.js / whiteboardTemplates.js  # Whiteboard component catalog & patterns
-│   ├── scenes/                    # All 52 scene components (+ _backup/ archive)
+│   ├── scenes/                    # All 57 scene components (+ _backup/ archive)
 │   ├── presenter/                 # Presenter view: cross-tab sync, previews, notes, click forwarding
 │   ├── components/
 │   │   ├── SceneSettings.jsx      # Settings panel + useSceneConfiguration hook + preset logic
@@ -422,7 +494,7 @@ elastic-presentation-3.0/
 │   ├── context/                   # Theme, Team, SceneMotion, SceneMotionFollow contexts
 │   ├── hooks/                     # useSceneMotion, useAnimationTimeline, useReducedMotion, …
 │   ├── animations/                # Reusable animation utilities
-│   └── utils/                     # Whiteboard geometry/AI/analysis/import/share, pricing, layout helpers
+│   └── utils/                     # Whiteboard geometry/AI/knowledge/Elastic/analysis/import/share, pricing, layout helpers
 ├── tailwind.config.js
 └── vite.config.js
 ```
@@ -440,14 +512,21 @@ Vitest covers the parts where a regression would be silent:
 | Suite | What it covers |
 |---|---|
 | `src/presenter/presenterSync.test.js` | Presenter command handling (next/prev, beats, scene actions) |
-| `src/utils/whiteboardTemplates.test.js` | Pattern block instantiation and layout, props landing, zone-level cross edges |
+| `src/utils/whiteboardTemplates.test.js` | Pattern block instantiation and layout, props landing, build-step tagging, zone-level cross edges |
 | `src/utils/nodeMetrics.test.js` | Content-driven node heights and chip formatting |
-| `src/utils/whiteboardAnalysis.test.js` | Tidy lane layout, flow hops, architecture validation rules, capacity math |
+| `src/utils/whiteboardAnalysis.test.js` | Tidy lane layout, architecture validation rules, capacity math |
 | `src/utils/whiteboardSizing.test.js` | Ingest → node counts, and the Pricing/ROM quote lines |
 | `src/utils/pricing.test.js` | Paste delimiter detection, the bold-label column, priced-vs-unpriced rows, and the whiteboard → quote-line round trip |
 | `src/utils/whiteboardDiff.test.js` | Matching components across boards and the reported delta |
 | `src/utils/whiteboardImport.test.js` | Parsing `_cat/nodes` / `_nodes` / `_cluster/stats` into a board |
 | `src/utils/whiteboardShare.test.js` | Share-link round-tripping and hash param handling |
-| `src/utils/whiteboardAI.test.js` | The `edit_whiteboard` tool schema, component catalog, board snapshot, cluster guidance, and the summary prompt |
+| `src/utils/whiteboardAI.test.js` | All six tool schemas, component catalog, board snapshot with review findings, cluster guidance, the bounded tool loop, prompt caching, the summary genres, and the follow-up prompt |
+| `src/utils/whiteboardFollowup.test.js` | The follow-up package: the self-contained HTML file and its markdown twin |
+| `src/utils/whiteboardCustomer.test.js` | Recognising each `edm` command's rows, merging successive pastes, and the prompt text the AI reads |
+| `src/utils/whiteboardKnowledge.test.js` | Tokenizing, chunking a document into passages, and the ranking that decides what gets cited |
+| `src/data/knowledge/corpus.test.js` | That every curated passage carries a source, and that representative questions retrieve the right ones |
+| `src/utils/whiteboardElastic.test.js` | Agent Builder `converse`, space-aware paths, the `semantic_text` index and bulk push, health checks, and each failure mode mapped to its own message |
 | `src/utils/whiteboardPresenting.test.js` | Text wrapping, ink paths, build-step visibility |
-| `src/components/whiteboard/ElasticWhiteboard.smoke.test.jsx` | Mounts the whiteboard in jsdom: boards, presenting, ink, steps, sizing, comparison, the written summary, cluster import |
+| `src/data/deckPresets.test.js` | That every preset names registered scenes, enables exactly them, and keeps the full scene order |
+| `src/components/whiteboard/ChatMarkdown.test.jsx` | The Markdown subset AI replies render in: blocks, inline marks, unpaired markers, and that markup can't be injected |
+| `src/components/whiteboard/ElasticWhiteboard.smoke.test.jsx` | Mounts the whiteboard in jsdom: boards, presenting, ink, steps, sizing, comparison, the written summary, cluster import, board context, customer details, the follow-up package, alignment guides, saved views, the minimap, the Elastic connection and pre-flight, and the AI chat against mocked Bedrock and Kibana |

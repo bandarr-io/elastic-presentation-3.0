@@ -1,29 +1,45 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { renderToStaticMarkup } from "react-dom/server";
 import { useTheme } from "../context/ThemeContext";
-import { buildCatalog, describeDoc, describeSections, buildTool, systemPrompt, runLLM,
-         SUMMARY_SYSTEM, summaryPrompt, BEDROCK_DEFAULT_MODEL, BEDROCK_DEFAULT_REGION } from "../utils/whiteboardAI";
+import { buildCatalog, describeDoc, describeSections, buildTool, chatSystem, runLLM,
+         SUMMARY_PROMPTS, SUMMARY_DEFAULT, summarySystem, summaryPrompt,
+         FOLLOWUP_SYSTEM, followupPrompt,
+         BEDROCK_DEFAULT_MODEL, BEDROCK_DEFAULT_REGION } from "../utils/whiteboardAI";
+import { buildFollowupHtml, followupMarkdown } from "../utils/whiteboardFollowup";
 import { parseAwsCredentials, usableProfiles } from "../utils/awsCredentials";
 import { buildFromSections, instantiateTemplate, sectionEndpoint, TEMPLATE_MENU, TEMPLATE_CONFIG, defaultFill } from "../data/whiteboardTemplates";
 import { STAGE_PALETTES, SURFACES, CATS, CAT_COLORS, TYPES, tagOf, SEEDS,
          NODE_W, NODE_H } from "../data/whiteboardTypes";
 import { encodeBoard, decodeBoard, boardParamFromHash, shareUrl } from "../utils/whiteboardShare";
-import { tidyLayout, flowHops, validateBoard, capacityTotals, formatTB } from "../utils/whiteboardAnalysis";
+import { tidyLayout, alignLayout, validateBoard, capacityTotals, formatTB } from "../utils/whiteboardAnalysis";
 import { parseClusterInput, summarizeCluster, clusterToBoard } from "../utils/whiteboardImport";
-import { sizeCluster, romRows, romTSV, romScenario, RU_GB, SIZING_TIERS, SIZING_DEFAULTS,
-         SIZING_PROVIDERS, recommendHardware } from "../utils/whiteboardSizing";
+import { sizeCluster, romRows, romTSV, romScenario, RU_GB, RU_LIST_PRICE, SIZING_TIERS,
+         SIZING_DEFAULTS, SIZING_PROVIDERS, recommendHardware,
+         LICENSE_ERU, LICENSE_ECU, licenseModelFor } from "../utils/whiteboardSizing";
 import { sendScenarioToPricing } from "../utils/pricingHandoff";
+import { projectCell, formatCurrency } from "../utils/pricing";
 import { echProfiles, ECH_REGIONS } from "../data/echInstanceConfigs";
 import { diffBoards, diffMarks } from "../utils/whiteboardDiff";
 import { INK_COLORS, INK_WIDTH, INK_MIN_STEP, inkPath, stepCountOf,
          visibleAtStep, wrapText } from "../utils/whiteboardPresenting";
 import { useSceneMotion } from "../hooks/useSceneMotion";
-import { useReducedMotion } from "../hooks/useReducedMotion";
 import { useSceneMotionFollow } from "../context/SceneMotionFollowContext";
-import { anchor, elbowPath, roundedPath, plMid, snap, translateEdgePts } from "../utils/whiteboardGeometry";
+import { anchor, nodePorts, elbowPath, roundedPath, plMid, snap, translateEdgePts } from "../utils/whiteboardGeometry";
 import { nodeAutoHeight, nodeChips } from "../utils/nodeMetrics";
-import { INTEGRATION_TITLES } from "../data/elasticIntegrations";
+import { INTEGRATIONS, INTEGRATION_TITLES } from "../data/elasticIntegrations";
+import { buildIndex, searchPassages, renderPassages, citedSources,
+         chunkDocument } from "../utils/whiteboardKnowledge";
+import { parseDocument } from "../utils/whiteboardParse";
+import { parseEdmRows, mergeCustomer, describeCustomer, hasCustomer,
+         EMPTY_CUSTOMER } from "../utils/whiteboardCustomer";
+import { ELASTIC_CORPUS, elasticIndex, SCOPE_CUSTOMER, KNOWLEDGE_VERSION } from "../data/knowledge";
+import { askAgent, elasticConfigured, ensureIndex, bulkPassages, checkAgent, checkIndex,
+         ELASTIC_DEFAULT_AGENT, ELASTIC_DEFAULT_INDEX } from "../utils/whiteboardElastic";
 import { useHistory } from "./whiteboard/useHistory";
 import { useDragController } from "./whiteboard/useDragController";
+import ChatMarkdown from "./whiteboard/ChatMarkdown";
+import Minimap from "./whiteboard/Minimap";
 
 /* ============================================================
    ElasticWhiteboard
@@ -36,9 +52,10 @@ import { useDragController } from "./whiteboard/useDragController";
                 grip resizes · double-click renames · shift-click
                 multi-selects · shift-drag marquee-selects ·
                 ⌘/Ctrl+D duplicates · arrows nudge · Del removes
-   Connections: hover a node, drag a ring onto another node ·
-                click a line to select (label / style / width /
-                reverse / delete)
+   Connections: hover a node, drag one of its twelve ports onto
+                another node — the line keeps both attachment
+                points · click a line to select (label / style /
+                width / reverse / delete)
    Zones:       + Zone adds a labeled container · drag its pill to
                 move it with its contents (alt-drag moves the frame
                 alone) · grip resizes
@@ -202,13 +219,22 @@ const readJSON = (key) => { try { const raw = localStorage.getItem(key); return 
 const writeJSON = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* quota / disabled */ } };
 const dropKey = (key) => { try { localStorage.removeItem(key); } catch { /* disabled */ } };
 
+/* Attached documents ride the board's autosave, and localStorage gives an
+   origin a few megabytes for everything: every board, every seed preset, the
+   lot. These caps keep one pasted RFP from spending the budget — and a
+   document past them is one nobody meant to attach whole. */
+const DOC_MAX_CHARS = 120_000;
+const DOC_TOTAL_MAX_CHARS = 400_000;
+
 const DEFAULT_VIEW = { x: 30, y: 20, k: 0.85 };
 const uniqueId = (p) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 /* Seed edges are stored as compact tuples or objects; materialize either. */
 const hydrateEdge = (ed, i) => (Array.isArray(ed)
   ? { id: `e${i}`, s: ed[0], e: ed[1], lbl: ed[2] }
   : { id: `e${i}`, s: ed.s, e: ed.e, lbl: ed.lbl, ...(ed.pts ? { pts: ed.pts } : {}),
+      ...(ed.sa ? { sa: ed.sa } : {}), ...(ed.ea ? { ea: ed.ea } : {}),
       ...(ed.bi ? { bi: true } : {}), ...(ed.color ? { color: ed.color } : {}) });
+const DEFAULT_QUOTE = { model: LICENSE_ERU, price: String(RU_LIST_PRICE), discount: "", ecu: "" };
 const emptyBoard = () => ({ nodes: [], edges: [], zones: [], view: { ...DEFAULT_VIEW }, sections: {} });
 const referenceBoard = () => ({
   nodes: JSON.parse(JSON.stringify(SEEDS.reference.nodes)),
@@ -254,7 +280,7 @@ const seedNodeStr = (n) => {
 };
 const seedEdgeStr = (e) => {
   const hasPts = e.pts && e.pts.length;
-  if (hasPts || e.bi || e.color) return `      { s: ${JSON.stringify(e.s)}, e: ${JSON.stringify(e.e)}${e.lbl ? `, lbl: ${JSON.stringify(e.lbl)}` : ""}${e.bi ? ", bi: true" : ""}${e.color ? `, color: ${JSON.stringify(e.color)}` : ""}${hasPts ? `, pts: ${JSON.stringify(e.pts)}` : ""} },`;
+  if (hasPts || e.bi || e.color || e.sa || e.ea) return `      { s: ${JSON.stringify(e.s)}, e: ${JSON.stringify(e.e)}${e.lbl ? `, lbl: ${JSON.stringify(e.lbl)}` : ""}${e.bi ? ", bi: true" : ""}${e.color ? `, color: ${JSON.stringify(e.color)}` : ""}${e.sa ? `, sa: ${JSON.stringify(e.sa)}` : ""}${e.ea ? `, ea: ${JSON.stringify(e.ea)}` : ""}${hasPts ? `, pts: ${JSON.stringify(e.pts)}` : ""} },`;
   return e.lbl
     ? `      [${JSON.stringify(e.s)}, ${JSON.stringify(e.e)}, ${JSON.stringify(e.lbl)}],`
     : `      [${JSON.stringify(e.s)}, ${JSON.stringify(e.e)}],`;
@@ -273,7 +299,6 @@ const toSeedCode = (nodes, edges, zones) => [
 
 export default function ElasticWhiteboard({ height = "100%" }) {
   const { theme } = useTheme();
-  const { prefersReducedMotion } = useReducedMotion();
   /* A follower is a read-only mirror (the presenter view's live preview). It
      shares the same stored board, so it must never write back over the tab the
      presenter is actually driving. */
@@ -308,6 +333,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const [ghost, setGhost] = useState(null);      // palette drag {type,cx,cy} client coords
   const [editing, setEditing] = useState(null);  // node id being renamed
   const [marquee, setMarquee] = useState(null);  // {x0,y0,x1,y1} world coords
+  const [guides, setGuides] = useState(null);    // live drag snap lines [{axis:'v'|'h', at}]
   const [q, setQ] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(true);
   const [styleClip, setStyleClip] = useState(null); // copied node style {color,w,h}
@@ -315,9 +341,43 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const [patternCfg, setPatternCfg] = useState(null); // { id, fill } while configuring a Patterns block
   const [seedMenu, setSeedMenu] = useState(false);    // preset save/reset dropdown open
   const [fileMenu, setFileMenu] = useState(false);    // export/import dropdown open
+  const [tidyMenu, setTidyMenu] = useState(false);    // straighten / re-lay-out dropdown open
+  const [presentMenu, setPresentMenu] = useState(false); // present / annotate dropdown open
+  const [aiMenu, setAiMenu] = useState(false);        // AI chat / context dropdown open
   const [exportChrome, setExportChrome] = useState(true); // title block + legend on exports
   const [reviewOpen, setReviewOpen] = useState(false);    // capacity + validation panel
+  /* Terms for the line the capacity panel hands to Pricing / ROM. They belong
+     to the deal rather than the session, so they're saved with the board.
+     Drawing a cluster sets the model from its provider; the ERU list price is
+     seeded so a self-managed line carries a total straight away. */
+  const [quote, setQuote] = useState({ ...DEFAULT_QUOTE });
+  const setQuoteField = (patch) => setQuote((q) => ({ ...q, ...patch }));
   const [importOpen, setImportOpen] = useState(false);    // paste-a-real-cluster dialog
+  /* Set on a board built by importing a real cluster ({ total, source, … }),
+     which is what offers the review / target-state actions. */
+  const [imported, setImported] = useState(() => boot.imported || null);
+  /* What the customer actually asked for: their RFP, requirements sheet, or
+     meeting notes, pasted or uploaded and attached to this board. Stored with
+     the board and deliberately kept out of the share link — a prospect's
+     requirements document is not something to hand around in a URL. */
+  const [documents, setDocuments] = useState(() => boot.documents || []);
+  const [contextOpen, setContextOpen] = useState(false);  // the attach-a-document panel
+  /* Who the board is for: account / opportunity / stakeholders, imported from
+     the edm CLI's output or typed in. Rides the board document like documents
+     do, informs the AI, and stays off the canvas — deal value on screen during
+     a customer call would be a liability. */
+  const [customer, setCustomer] = useState(() => boot.customer || null);
+  /* Saved camera positions — a guided tour of the board, saved with it.
+     `viewIdx` is the last one recalled (transient, for the present-bar stepper). */
+  const [views, setViews] = useState(() => boot.views || []);
+  const [viewsMenu, setViewsMenu] = useState(false);
+  const [renamingView, setRenamingView] = useState(null);
+  const [viewIdx, setViewIdx] = useState(-1);
+  const flyRef = useRef(null);                            // in-flight camera tween
+  /* Minimap: a persisted preference, plus the viewport's measured size so the
+     map can draw the camera rectangle without touching the DOM itself. */
+  const [minimap, setMinimap] = useState(() => localStorage.getItem("ew-minimap") !== "0");
+  const [vpSize, setVpSize] = useState({ w: 0, h: 0 });
   const [sizeOpen, setSizeOpen] = useState(false);        // ingest -> node count calculator
   const [seedNote, setSeedNote] = useState("");       // transient "saved" confirmation
   /* ---------- AI chat ---------- */
@@ -325,7 +385,21 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const [chatMsgs, setChatMsgs] = useState([]);   // {role:'user'|'ai'|'error', text}
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
+  /* The turn in progress, step by step — what the agent is doing right now,
+     streamed from the tool loop so the wait is legible. Cleared when the
+     reply lands: the trail under the reply is the permanent record. */
+  const [chatSteps, setChatSteps] = useState([]);
   const [showChatSettings, setShowChatSettings] = useState(false);
+  /* Which settings block is expanded — "bedrock", "elastic", or none. One at a
+     time: together the two are taller than the panel, which put Check AI below
+     a fold with nothing to scroll. */
+  const [settingsPane, setSettingsPane] = useState(null);
+  /* A board change the model has proposed, waiting on Apply — { label, lines,
+     commit }. Undo already covers a change that lands; this is about not
+     redrawing a diagram out from under a room that's looking at it. */
+  const [pendingApply, setPendingApply] = useState(null);
+  const [chatUsage, setChatUsage] = useState(null);   // token usage of the last turn
+  const [askQueue, setAskQueue] = useState(null);     // a canned turn to send once the board settles
   /* Bedrock credentials: an IAM key pair (plus session token for temporary
      STS credentials) and the region + model to converse with. */
   const [awsRegion, setAwsRegion] = useState(() => localStorage.getItem("ew-aws-region") || BEDROCK_DEFAULT_REGION);
@@ -337,6 +411,21 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const [awsProfileName, setAwsProfileName] = useState("");
   const [credsNote, setCredsNote] = useState("");
   const credsFileRef = useRef(null);
+  /* The Elastic connection, browser-direct and bring-your-own-key: Kibana for
+     the Agent Builder agent, Elasticsearch for the index behind it. Stored the
+     same way the Bedrock credentials are, which is to say in this browser
+     only — see whiteboardElastic.js for why there is no proxy. */
+  const [kibanaUrl, setKibanaUrl] = useState(() => localStorage.getItem("ew-elastic-url") || "");
+  const [esUrl, setEsUrl] = useState(() => localStorage.getItem("ew-es-url") || "");
+  const [elasticKey, setElasticKey] = useState(() => localStorage.getItem("ew-elastic-key") || "");
+  const [elasticAgent, setElasticAgent] = useState(() => localStorage.getItem("ew-elastic-agent") || ELASTIC_DEFAULT_AGENT);
+  const [elasticSpace, setElasticSpace] = useState(() => localStorage.getItem("ew-elastic-space") || "");
+  const [elasticIndexName, setElasticIndexName] = useState(() => localStorage.getItem("ew-elastic-index") || ELASTIC_DEFAULT_INDEX);
+  /* Jina, for reading images attached as context — Tika (and so Elastic's
+     attachment processor) doesn't read pixels, a vision model does. */
+  const [jinaKey, setJinaKey] = useState(() => localStorage.getItem("ew-jina-key") || "");
+  const [preflight, setPreflight] = useState(null);   // { busy, bedrock, agent, index }
+  const [pushState, setPushState] = useState(null);   // { busy, note, error, help }
   const chatLogRef = useRef(null);
   const viewportRef = useRef(null);
   const fileRef = useRef(null);
@@ -377,17 +466,19 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   useEffect(() => {
     if (following) return undefined;
     const t = setTimeout(
-      () => writeJSON(boardKey(activeBoardId), { nodes, edges, zones, ink, view, sections: sectionsRef.current }),
+      () => writeJSON(boardKey(activeBoardId),
+                      { nodes, edges, zones, ink, view, views, sections: sectionsRef.current, quote, imported, documents, customer }),
       300);
     return () => clearTimeout(t);
-  }, [nodes, edges, zones, ink, view, activeBoardId, following]);
+  }, [nodes, edges, zones, ink, view, views, quote, imported, documents, customer, activeBoardId, following]);
 
   const saveIndex = (next) => { setBoardIndex(next); if (!following) writeJSON(BOARDS_KEY, next); };
   /* Write the in-memory board straight to storage — used before switching away,
      where the debounced autosave would otherwise lose the last edits. */
   const flushActiveBoard = () => {
     if (following) return;
-    writeJSON(boardKey(activeBoardId), { nodes, edges, zones, ink, view, sections: sectionsRef.current });
+    writeJSON(boardKey(activeBoardId),
+              { nodes, edges, zones, ink, view, views, sections: sectionsRef.current, quote, imported, documents, customer });
   };
 
   /* Swap the whole document in. Shared by open / create / delete. */
@@ -397,9 +488,16 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     setZones(data.zones || []);
     setInk(data.ink || []);
     setView(data.view || { ...DEFAULT_VIEW });
+    setViews(data.views || []);
+    setViewIdx(-1);
+    setQuote({ ...DEFAULT_QUOTE, ...(data.quote || {}) });
+    setImported(data.imported || null);
+    setDocuments(data.documents || []);
+    setCustomer(data.customer || null);
     sectionsRef.current = data.sections || {};
     setSel(null);
     setSpotlight(null);
+    setPendingApply(null);
     resetHistory();
   };
 
@@ -420,6 +518,26 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     saveIndex({ boards: [...boardIndex.boards, { id, name }], activeId: id });
     setBoardMenu(false);
     flashSeedNote(`Created "${name}"`);
+  };
+
+  /* A board added beside the active one, without switching the view — how the
+     AI draws alternatives. Goes through a ref mirror of the index because the
+     model can draw several boards in one turn, and state updates wouldn't land
+     between those synchronous calls. The name is uniquified, never reused: a
+     collision with a board the user already has must not overwrite it. */
+  const boardIndexRef = useRef(boardIndex);
+  boardIndexRef.current = boardIndex;
+  const addBoardAside = (name, data) => {
+    const idx = boardIndexRef.current;
+    const taken = new Set(idx.boards.map((b) => b.name));
+    let finalName = name;
+    for (let n = 2; taken.has(finalName); n++) finalName = `${name} ${n}`;
+    const id = uniqueId("b");
+    writeJSON(boardKey(id), data);
+    const next = { ...idx, boards: [...idx.boards, { id, name: finalName }] };
+    boardIndexRef.current = next;
+    saveIndex(next);
+    return finalName;
   };
 
   const nextBoardName = (base) => {
@@ -480,12 +598,19 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return document.activeElement.blur();
         if (tool) return setTool(null);
         if (present) return exitPresent();
-        setSel(null); setConnect(null); setEditing(null); setMarquee(null); dragRef.current = null;
+        setSel(null); setConnect(null); setEditing(null); setMarquee(null); setGuides(null);
+        dragRef.current = null;
         return;
       }
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
       /* While presenting there's nothing to nudge, so the arrow keys (and
          space) walk the build steps instead. */
+      /* Number keys fly to saved views in either mode; arrows stay with the
+         build steps so the two kinds of stepping never fight. */
+      if (/^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey && views[+e.key - 1]) {
+        e.preventDefault(); goToView(+e.key - 1);
+        return;
+      }
       if (present) {
         if (!revealing) return;
         if (e.key === "ArrowRight" || e.key === "ArrowDown" || e.key === " ") {
@@ -771,11 +896,30 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   useEffect(() => { localStorage.setItem("ew-aws-secret", awsSecret); }, [awsSecret]);
   useEffect(() => { localStorage.setItem("ew-aws-session", awsSession); }, [awsSession]);
   useEffect(() => { localStorage.setItem("ew-bedrock-model", model); }, [model]);
+  useEffect(() => { localStorage.setItem("ew-elastic-url", kibanaUrl); }, [kibanaUrl]);
+  useEffect(() => { localStorage.setItem("ew-es-url", esUrl); }, [esUrl]);
+  useEffect(() => { localStorage.setItem("ew-elastic-key", elasticKey); }, [elasticKey]);
+  useEffect(() => { localStorage.setItem("ew-elastic-agent", elasticAgent); }, [elasticAgent]);
+  useEffect(() => { localStorage.setItem("ew-elastic-space", elasticSpace); }, [elasticSpace]);
+  useEffect(() => { localStorage.setItem("ew-elastic-index", elasticIndexName); }, [elasticIndexName]);
+  useEffect(() => { localStorage.setItem("ew-jina-key", jinaKey); }, [jinaKey]);
+  useEffect(() => { localStorage.setItem("ew-minimap", minimap ? "1" : "0"); }, [minimap]);
+
+  /* Track the viewport's size for the minimap's camera rectangle. */
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return undefined;
+    const measure = () => setVpSize({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [present]);
 
   useEffect(() => {
     const el = chatLogRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [chatMsgs, chatBusy]);
+  }, [chatMsgs, chatBusy, chatSteps]);
 
   /* Push a fully-built board + its section metadata into state (one undoable
      step). Used by both the first (from-scratch) AI build and manual inserts. */
@@ -811,28 +955,65 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     };
   };
 
-  /* Interpret the edit_whiteboard tool payload. On an empty board this lays out
-     the whole design deterministically. On an existing board it edits
-     incrementally: unchanged sections stay exactly where the user put them
-     (drags + waypoints preserved), changed sections re-render in place, new
-     sections are placed alongside, and cross-section flows are rebuilt. */
-  const applyAI = (res) => {
-    if (!res || typeof res !== "object") return null;
-    const incoming = (Array.isArray(res.sections) ? res.sections : [])
-      .filter((s) => s && s.template && TEMPLATES_OK.has(s.template))
-      .map((s, i) => ({ id: s.id || `${s.template}${i}`, template: s.template,
-                        ...(s.row ? { row: true } : {}), ...(s.below ? { below: s.below } : {}),
-                        ...(s.props ? { props: s.props } : {}),
-                        fill: { ...(s.fill || {}), ...(s.label ? { label: s.label } : {}) } }));
-    const removeIds = new Set(res.remove || []);
-    if (!incoming.length && !removeIds.size) return null;
+  /* The sections a tool payload asks for, normalised: unknown templates
+     dropped, an id assigned if the model forgot one, and the label folded into
+     the fill the templates read. */
+  const aiSections = (res) => (Array.isArray(res?.sections) ? res.sections : [])
+    .filter((s) => s && s.template && TEMPLATES_OK.has(s.template))
+    .map((s, i) => ({ id: s.id || `${s.template}${i}`, template: s.template,
+                      ...(s.row ? { row: true } : {}), ...(s.below ? { below: s.below } : {}),
+                      ...(s.props ? { props: s.props } : {}),
+                      ...(+s.step > 0 ? { step: Math.round(+s.step) } : {}),
+                      fill: { ...(s.fill || {}), ...(s.label ? { label: s.label } : {}) } }));
 
-    // prune tracked sections that no longer exist on the board (undo / manual delete)
+  /* Tracked sections that are still on the board — an undo or a manual delete
+     can take a section's nodes away without the metadata noticing. */
+  const trackedSections = () => {
     const present = new Set([...docRef.current.nodes.map((n) => n.id), ...docRef.current.zones.map((z) => z.id)]);
     const secs = {};
     for (const [sid, m] of Object.entries(sectionsRef.current)) {
       if (Object.values(m.keys).some((id) => present.has(id)) || (m.zoneId && present.has(m.zoneId))) secs[sid] = m;
     }
+    return secs;
+  };
+
+  const sectionLabel = (s) => s?.fill?.label || TEMPLATE_CONFIG[s?.template]?.label || s?.template;
+  const sameJSON = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  /* What an edit_whiteboard payload would do to the board, without doing it:
+     the sections it adds, rebuilds, and removes, plus the commit that performs
+     the whole thing. Nothing is read at commit time from here — applyAI works
+     from the live board — so the plan can sit in front of the user while they
+     keep moving things around. */
+  const planAI = (res) => {
+    const incoming = aiSections(res);
+    const secs = trackedSections();
+    const removeIds = (res?.remove || []).filter((id) => secs[id]);
+    if (!incoming.length && !removeIds.length) return null;
+    const changed = (s) => !(s.template === secs[s.id].template && sameJSON(s.fill, secs[s.id].fill)
+      && sameJSON(s.props, secs[s.id].props) && (s.step || 0) === (secs[s.id].step || 0));
+    return {
+      added: incoming.filter((s) => !secs[s.id] && !removeIds.includes(s.id)).map(sectionLabel),
+      rebuilt: incoming.filter((s) => secs[s.id] && changed(s)).map(sectionLabel),
+      removed: removeIds.map((id) => sectionLabel(secs[id])),
+      commit: () => applyAI(res),
+    };
+  };
+
+  /* Interpret the edit_whiteboard tool payload. On an empty board this lays out
+     the whole design deterministically. On an existing board it edits
+     incrementally: unchanged sections stay exactly where the user put them
+     (drags + waypoints preserved), changed sections re-render in place, new
+     sections are placed alongside, and cross-section flows are rebuilt.
+     Omitting `edges` keeps the flows already on the board, which is how a
+     sizing update resizes a cluster without redrawing the diagram around it. */
+  const applyAI = (res) => {
+    if (!res || typeof res !== "object") return null;
+    const incoming = aiSections(res);
+    const removeIds = new Set(res.remove || []);
+    if (!incoming.length && !removeIds.size) return null;
+
+    const secs = trackedSections();
 
     snapshot();
 
@@ -845,14 +1026,14 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
     // ---- incremental edit ----
     const incomingById = new Map(incoming.map((s) => [s.id, s]));
-    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     const rebuild = new Set(), keep = new Set();
     for (const sid of Object.keys(secs)) {
       if (removeIds.has(sid)) continue;
       const inc = incomingById.get(sid);
       if (!inc) { keep.add(sid); continue; }
-      // props changes (node counts, hardware) rebuild the section too
-      if (inc.template === secs[sid].template && same(inc.fill, secs[sid].fill) && same(inc.props, secs[sid].props)) keep.add(sid);
+      // props and step changes (node counts, hardware, reveal order) rebuild too
+      if (inc.template === secs[sid].template && sameJSON(inc.fill, secs[sid].fill)
+          && sameJSON(inc.props, secs[sid].props) && (inc.step || 0) === (secs[sid].step || 0)) keep.add(sid);
       else rebuild.add(sid);
     }
     const news = incoming.filter((s) => !secs[s.id] && !removeIds.has(s.id));
@@ -862,27 +1043,43 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     const cur = docRef.current;
     let nodes = cur.nodes.filter((n) => !goneOwns(n.id));
     let zones = cur.zones.filter((z) => !goneOwns(z.id));
-    const oldCrossPts = {}; // preserve user-shaped bends on rebuilt AI flows
+    /* Cross-section flows are rebuilt from the payload, so the ones on the
+       board are dropped — but their user-shaped bends are kept and re-applied
+       to the same pairing. A payload with no `edges` at all isn't rewiring
+       anything, so those flows stay exactly as they are, which is how a sizing
+       update resizes a cluster in place. Everything else survives: a rebuilt
+       section's own internal edges come back with it, and slots keep their ids,
+       so a hand-drawn connection into a resized cluster still lands. Anything
+       left pointing at a slot the rebuild dropped is pruned at the end. */
+    const recross = Array.isArray(res.edges);
+    const oldCrossPts = {};
     let edges = cur.edges.filter((ed) => {
-      if (String(ed.id).startsWith("x")) { if (ed.pts) oldCrossPts[`${ed.s}|${ed.e}`] = ed.pts; return false; }
-      return !goneOwns(ed.s) && !goneOwns(ed.e);
+      if (recross && String(ed.id).startsWith("x")) {
+        if (ed.pts) oldCrossPts[`${ed.s}|${ed.e}`] = ed.pts;
+        return false;
+      }
+      return !goneOwns(ed.id);
     });
 
     const meta = {};
     for (const sid of keep) meta[sid] = secs[sid];
 
+    const metaOf = (s, inst) => ({ template: s.template, fill: s.fill,
+      ...(s.props ? { props: s.props } : {}), ...(s.step ? { step: s.step } : {}),
+      keys: inst.keys, zoneId: inst.zone ? inst.zone.id : null });
+
     // rebuild changed sections anchored to their current top-left node
     for (const sid of rebuild) {
       const inc = incomingById.get(sid);
-      const fresh = instantiateTemplate(inc.template, inc.fill, { x: 0, y: 0 }, sid, inc.props);
+      const at = (origin) => instantiateTemplate(inc.template, inc.fill, origin, sid, inc.props, { step: inc.step });
+      const fresh = at({ x: 0, y: 0 });
       if (!fresh || !fresh.nodes.length) continue;
       const lmx = Math.min(...fresh.nodes.map((n) => n.x)), lmy = Math.min(...fresh.nodes.map((n) => n.y));
       const old = cur.nodes.filter((n) => n.id.startsWith(`${sid}__`));
       const cmx = Math.min(...old.map((n) => n.x)), cmy = Math.min(...old.map((n) => n.y));
-      const inst = instantiateTemplate(inc.template, inc.fill, { x: cmx - lmx, y: cmy - lmy }, sid, inc.props);
+      const inst = at({ x: cmx - lmx, y: cmy - lmy });
       nodes.push(...inst.nodes); edges.push(...inst.edges); if (inst.zone) zones.push(inst.zone);
-      meta[sid] = { template: inc.template, fill: inc.fill, ...(inc.props ? { props: inc.props } : {}),
-        keys: inst.keys, zoneId: inst.zone ? inst.zone.id : null };
+      meta[sid] = metaOf(inc, inst);
     }
 
     // place new sections in a fresh column to the right of existing content
@@ -890,12 +1087,11 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     let curY = box ? box.y0 : 80;
     const rightX = box ? box.x1 + 160 : 80;
     for (const s of news) {
-      const inst0 = instantiateTemplate(s.template, s.fill, { x: 0, y: 0 }, s.id, s.props);
+      const inst0 = instantiateTemplate(s.template, s.fill, { x: 0, y: 0 }, s.id, s.props, { step: s.step });
       if (!inst0 || !inst0.nodes.length) continue;
       const p = shiftInst(inst0, rightX, curY);
       nodes.push(...p.nodes); edges.push(...p.edges); if (p.zone) zones.push(p.zone);
-      meta[s.id] = { template: s.template, fill: s.fill, ...(s.props ? { props: s.props } : {}),
-        keys: p.keys, zoneId: p.zone ? p.zone.id : null };
+      meta[s.id] = metaOf(s, p);
       curY = p.bbox.y + p.bbox.h + 90;
     }
 
@@ -912,7 +1108,10 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       edges.push({ id: uid("x"), s, e: t, ...(e.label ? { lbl: e.label } : {}), ...(pts ? { pts } : {}) });
     });
 
-    const board = { nodes, edges, zones };
+    // a rebuild can drop a slot (a tier the design no longer has), so anything
+    // still pointing at one goes with it
+    const live = new Set([...nodes.map((n) => n.id), ...zones.map((z) => z.id)]);
+    const board = { nodes, zones, edges: edges.filter((ed) => live.has(ed.s) && live.has(ed.e)) };
     commitBoard(board, meta);
     return board;
   };
@@ -963,6 +1162,13 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
   /* One credentials object for every model call; missing keys open settings. */
   const hasAwsCreds = !!(awsKeyId && awsSecret);
+  /* Opening the panel expands whatever needs attention: the Bedrock block when
+     there's no key yet, otherwise nothing, so Check AI is the first thing in
+     reach for someone running through the pre-flight before presenting. */
+  const toggleChatSettings = () => {
+    if (!showChatSettings) setSettingsPane(hasAwsCreds ? null : "bedrock");
+    setShowChatSettings((s) => !s);
+  };
   const bedrockCfg = () => ({
     region: awsRegion, model,
     accessKeyId: awsKeyId, secretAccessKey: awsSecret, sessionToken: awsSession,
@@ -1003,30 +1209,418 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     if (file) file.text().then((text) => takeAwsCredsText(text, file.name));
   };
 
-  const sendChat = async () => {
-    const text = chatInput.trim();
+  /* ---------- the customer's own documents ---------- */
+
+  /* Attach what they actually asked for, so the design can be built to it and
+     checked against it. Text only and parsed here in the browser — nothing is
+     uploaded anywhere by attaching it. */
+  const attachDocument = ({ name, text }) => {
+    const body = String(text || "").trim();
+    if (!body) return "There's nothing in that.";
+    if (body.length > DOC_MAX_CHARS)
+      return `That's ${Math.round(body.length / 1000)}k characters — trim it to about ${DOC_MAX_CHARS / 1000}k, or attach the section that matters.`;
+    const used = documents.reduce((sum, d) => sum + d.text.length, 0);
+    if (used + body.length > DOC_TOTAL_MAX_CHARS)
+      return "This board is holding about as much text as it can. Remove a document before adding another.";
+
+    setDocuments((docs) => [...docs, {
+      id: `doc${Date.now().toString(36)}`,
+      name: String(name || "").trim() || `Pasted text ${docs.length + 1}`,
+      text: body,
+      addedAt: Date.now(),
+    }]);
+    return "";
+  };
+
+  const removeDocument = (id) => setDocuments((docs) => docs.filter((d) => d.id !== id));
+
+  /* ---------- AI chat ----------
+     A turn either answers a question or calls a tool. Tools don't touch the
+     board directly: they stage the change and hand the model the plan, which it
+     then describes, so the room sees what is about to happen before it does. */
+
+  const toolFailed = (error) => ({ ok: false, error });
+
+  /* Each tool in the words someone watching would use. The trail under a reply
+     is the only place the architecture is visible while presenting: without it
+     a grounded answer and a guessed one look identical. */
+  const TOOL_TRAIL = {
+    edit_whiteboard: "drew the diagram",
+    size_deployment: "ran the sizing engine",
+    search_knowledge: "searched the knowledge base",
+    review_board: "ran the design review",
+    lookup_integrations: "searched the integration catalog",
+    quote_deployment: "priced it at list",
+  };
+
+  /* The same tools mid-flight, for the live feed while the turn runs. */
+  const TOOL_DOING = {
+    edit_whiteboard: "drawing the diagram",
+    size_deployment: "running the sizing engine",
+    search_knowledge: "searching the knowledge base",
+    review_board: "running the design review",
+    lookup_integrations: "searching the integration catalog",
+    quote_deployment: "pricing it at list",
+  };
+
+  /* Fold the loop's step events into the live feed: tools append a line, and
+     the result that follows settles that line rather than adding another. */
+  const noteStep = (step) => setChatSteps((steps) => {
+    if (step.kind !== "result") return [...steps, step];
+    const open = steps.findLastIndex((s) => s.kind === "tool" && s.name === step.name && s.ok === undefined);
+    return open < 0 ? steps : steps.map((s, i) => (i === open ? { ...s, ok: step.ok } : s));
+  });
+
+  /* What a staged edit says it will do, in the order the panel lists it. */
+  const planLines = (plan) => [
+    plan.added.length && `Adds ${plan.added.join(", ")}`,
+    plan.rebuilt.length && `Rebuilds ${plan.rebuilt.join(", ")}`,
+    plan.removed.length && `Removes ${plan.removed.join(", ")}`,
+  ].filter(Boolean);
+
+  /* An edit_whiteboard payload aimed at a named side board: built from scratch
+     with the same deterministic layout and written straight into a new board.
+     It isn't the diagram the room is looking at, so there is nothing for the
+     Apply gate to protect — and alternatives land in one turn, ready to flip
+     between or compare from the boards menu. */
+  const drawSideBoard = (name, res) => {
+    const incoming = aiSections(res);
+    if (!incoming.length) return toolFailed("Drawing a board needs at least one section.");
+    const built = buildFromSections(incoming, res.edges || []);
+    const finalName = addBoardAside(name, {
+      nodes: built.nodes, edges: built.edges, zones: built.zones,
+      view: { ...DEFAULT_VIEW }, sections: built.meta,
+    });
+    flashSeedNote(`Drew "${finalName}"`);
+    return { ok: true, board: finalName, created: true,
+             note: "Drawn on its own board. The user opens it from the boards menu, which also compares any two boards side by side. To change it later they open it first." };
+  };
+
+  const runEditTool = (input) => {
+    const boardName = String(input.board || "").trim();
+    if (boardName && boardName !== activeBoard.name) return drawSideBoard(boardName, input);
+    const plan = planAI(input);
+    if (!plan) return toolFailed("Nothing to do: no known sections to add or change, and nothing on the board matching `remove`.");
+    const lines = planLines(plan);
+    setPendingApply({ label: input.message || "Edit the diagram", lines, commit: plan.commit });
+    return { ok: true, staged: "waiting for the user to Apply it", added: plan.added,
+             rebuilt: plan.rebuilt, removed: plan.removed };
+  };
+
+  /* Run the deterministic sizing engine for the model, then stage what it would
+     draw: a resize of the cluster already on the board (which keeps the diagram
+     around it intact), or a whole architecture on a board that has no cluster
+     yet. */
+  const runSizingTool = (input) => {
+    const result = sizeCluster(input);
+    if (!result.tiers.length)
+      return toolFailed("Nothing to size — that needs an ingest volume and at least one tier's retention.");
+    const hardware = recommendHardware(result);
+    const cluster = sizedClusterSection(result, hardware);
+    const secs = trackedSections();
+    const sid = Object.keys(secs).find((id) => secs[id].template === "cluster");
+    const facts = sizingFacts(result, cluster.hardwareByKey);
+
+    if (sid) {
+      const payload = { sections: [{ id: sid, template: "cluster", fill: cluster.fill, props: cluster.props }] };
+      setPendingApply({
+        label: `Resize ${sectionLabel(secs[sid])} to ${result.nodes} nodes`,
+        lines: sizingLines(result), commit: () => applyAI(payload),
+      });
+      return { ok: true, staged: "waiting for the user to Apply it", resized: sid, ...facts };
+    }
+    setPendingApply({
+      label: `Draw a ${result.nodes}-node deployment`,
+      lines: sizingLines(result),
+      commit: () => { drawSizing(result, hardware); return true; },
+    });
+    return { ok: true, staged: "waiting for the user to Apply it", drew: "a new architecture", ...facts };
+  };
+
+  /* Everything the model is allowed to cite: Elastic's curated guidance, which
+     is the same every session, plus whatever is attached to this board. The
+     corpus index is built once and reused; adding a document rebuilds over
+     both, because a term's weight should be judged against the whole corpus
+     rather than each half separately. */
+  const docPassages = useMemo(
+    () => documents.flatMap((d) => chunkDocument(d.text, {
+      id: d.id, title: d.name, source: d.name, tags: [SCOPE_CUSTOMER],
+    })),
+    [documents]);
+
+  const knowledgeIndex = useMemo(
+    () => (docPassages.length ? buildIndex([...ELASTIC_CORPUS, ...docPassages]) : elasticIndex()),
+    [docPassages]);
+
+  const elasticCfg = () => ({
+    kibanaUrl, esUrl, apiKey: elasticKey, agentId: elasticAgent,
+    space: elasticSpace, index: elasticIndexName,
+    origin: typeof window === "undefined" ? "" : window.location.origin,
+  });
+  const hasElastic = elasticConfigured({ kibanaUrl, apiKey: elasticKey });
+
+  /* Local retrieval: the repo corpus and this board's documents, scored here
+     in the browser. It needs no network and no deployment, which is what
+     makes it the floor the Elastic path can fall back to. */
+  const searchLocal = (query, scope) => {
+    let hits = searchPassages(knowledgeIndex, query, { scope });
+    let note;
+    /* A query over the customer's documents that shares no words with them
+       still has to answer — they're a handful of passages someone chose to
+       attach, so handing them over beats "nothing matched". The common case
+       is an image: "what do you see?" shares nothing with what the vision
+       model wrote about it. */
+    if (!hits.length && scope === SCOPE_CUSTOMER && docPassages.length) {
+      hits = docPassages.slice(0, 6);
+      note = "Nothing matched the query's words, so this is the attached documents' own content, from the top.";
+    }
+    return {
+      ok: true,
+      provider: "the repo corpus",
+      found: hits.length,
+      results: renderPassages(hits),
+      sources: citedSources(hits),
+      ...(note ? { note } : {}),
+    };
+  };
+
+  /* Retrieval, through Elastic's own agent when one is configured and local
+     otherwise. Returns the passages as text for the model and the sources
+     separately, so the interface can show what the answer rests on without
+     depending on the model to repeat them faithfully.
+
+     Customer documents never go to the agent: they live on this board and
+     nowhere else unless the user deliberately pushes them to the index. */
+  const runKnowledgeTool = async (input) => {
+    const query = String(input.query || "").trim();
+    if (!query) return toolFailed("Searching needs a query.");
+    const scope = input.scope && input.scope !== "all" ? input.scope : undefined;
+    if (scope === SCOPE_CUSTOMER && !docPassages.length)
+      return toolFailed("No documents are attached to this board, so there is nothing the customer has said to search. Answer from Elastic's guidance instead, or ask them to attach the document.");
+
+    if (!hasElastic || scope === SCOPE_CUSTOMER) return searchLocal(query, scope);
+
+    try {
+      const { text, steps } = await askAgent({ ...elasticCfg(), input: query });
+      if (!text) return searchLocal(query, scope);
+      return {
+        ok: true,
+        provider: "an Elastic Agent Builder agent",
+        results: text,
+        sources: [`Elastic Agent Builder — ${elasticAgent}`],
+        ...(steps.length ? { agentTools: steps } : {}),
+      };
+    } catch (err) {
+      /* The whole reason the local corpus exists: Kibana being unreachable
+         mid-demo degrades the answer rather than losing it. */
+      const local = searchLocal(query, scope);
+      return { ...local, note: `Agent Builder was unreachable (${err.message}), so this came from the repo corpus instead.` };
+    }
+  };
+
+  /* The same review the Σ panel shows, run on demand. Deliberately over the
+     board as it stands rather than over a staged change: the user is looking
+     at the board, and a review of a diagram nobody has seen yet would be
+     answering a different question. */
+  const runReviewTool = () => {
+    const findings = validateBoard(docRef.current.nodes, docRef.current.edges, docRef.current.zones);
+    return {
+      ok: true,
+      findings: findings.map(({ id, level, title, detail }) => ({ id, level, title, detail })),
+      clean: findings.length === 0,
+      ...(pendingApply ? { note: "A change is staged but not applied, so this describes the board without it." } : {}),
+    };
+  };
+
+  const runIntegrationsTool = (input) => {
+    const query = String(input.query || "").trim().toLowerCase();
+    if (!query) return toolFailed("Searching the catalog needs something to search for.");
+    const category = String(input.category || "").trim().toLowerCase();
+    const terms = query.split(/\s+/).filter(Boolean);
+    const matches = INTEGRATIONS
+      .filter(([title, cat]) => (!category || cat === category)
+        && terms.every((t) => title.toLowerCase().includes(t)))
+      .slice(0, 25);
+    return matches.length
+      ? { ok: true, found: matches.length, integrations: matches.map(([title, cat]) => ({ title, category: cat })) }
+      : { ok: true, found: 0, integrations: [],
+          note: `No integration matches "${input.query}". Say so rather than inventing one — the data source can still be drawn with a plain title and no integration.` };
+  };
+
+  /* List pricing through the engine that feeds the ROM builder, so the chat
+     and the capacity panel can never quote different numbers. */
+  const runQuoteTool = (input) => {
+    const model = input.model || quote.model;
+    const cloud = model === LICENSE_ECU;
+    const ecuTotal = input.ecuTotal ?? quote.ecu;
+    if (cloud && !Number(ecuTotal))
+      return toolFailed("Elastic Cloud is metered, so the ECU figure has to come from the Cloud pricing calculator — it can't be derived from the diagram. Ask for it, or quote on resource units instead.");
+
+    const rows = romRows(totals, {
+      model,
+      unitPrice: input.unitPrice ?? quote.price,
+      discount: input.discount ?? quote.discount,
+      ecuTotal,
+    });
+    if (!rows.length)
+      return toolFailed("Nothing to price: the board carries no memory figures yet. Set node counts and RAM on the tiers, or size it from ingest first.");
+
+    const [row] = rows;
+    const cell = projectCell(row, 0, {});
+    return {
+      ok: true,
+      meter: cloud ? "Elastic Consumption Units" : `${RU_GB} GB Enterprise Resource Units`,
+      quantity: row.quantity,
+      derivedFrom: cloud ? "the ECU figure supplied" : `${row.ramGB} GB of licensed memory`,
+      description: row.description,
+      ...(row.descNote ? { note: row.descNote } : {}),
+      unitPrice: cell.priced ? formatCurrency(cell.unitPrice) : "not set on the board",
+      ...(cell.hasDiscount ? { discountPct: cell.discountPct } : {}),
+      annualTotal: cell.priced
+        ? formatCurrency(cell.lineTotal)
+        : "unpriced — no unit price is set on the board, so say the quantity and leave the money out",
+      caveat: "List price on an annual term. A rough order of magnitude, not a quote.",
+    };
+  };
+
+  const dispatchTool = (use) => {
+    const input = use.input || {};
+    if (use.name === "edit_whiteboard") return runEditTool(input);
+    if (use.name === "size_deployment") return runSizingTool(input);
+    if (use.name === "search_knowledge") return runKnowledgeTool(input);
+    if (use.name === "review_board") return runReviewTool();
+    if (use.name === "lookup_integrations") return runIntegrationsTool(input);
+    if (use.name === "quote_deployment") return runQuoteTool(input);
+    return toolFailed(`There is no ${use.name} tool.`);
+  };
+
+  const applyPending = () => {
+    if (!pendingApply) return;
+    const done = pendingApply.commit();
+    setPendingApply(null);
+    if (done) flashSeedNote("Applied the AI's change — ⌘Z undoes it");
+    else setChatMsgs((m) => [...m, { role: "error", text: "The board moved on — that change no longer fits, so nothing was applied." }]);
+  };
+
+  const sendChat = async (canned) => {
+    const text = String(canned ?? chatInput).trim();
     if (!text || chatBusy) return;
-    if (!hasAwsCreds) { setShowChatSettings(true); return; }
-    setChatInput("");
+    if (!hasAwsCreds) { setChatOpen(true); setShowChatSettings(true); setSettingsPane("bedrock"); return; }
+    if (canned === undefined) setChatInput("");
+    setPendingApply(null);
     const history = [...chatMsgs, { role: "user", text }];
     setChatMsgs(history);
     setChatBusy(true);
+    setChatSteps([]);
     try {
-      const cfg = bedrockCfg();
       const convo = history
         .filter((m) => m.role === "user" || m.role === "ai")
         .map((m) => ({ role: m.role === "ai" ? "assistant" : "user", content: m.text }));
-
-      const sys = systemPrompt(WB_CATALOG, describeDoc(docRef.current, TYPES) + describeSections(sectionsRef.current));
-      const out = await runLLM(cfg, { system: sys, messages: convo, tools: WB_TOOL });
-      const board = applyAI(out);
-      if (!board) throw new Error("The model didn't return any sections to build.");
-      setChatMsgs((m) => [...m, { role: "ai", text: out.message || "Done." }]);
+      const board = describeDoc(docRef.current, TYPES) + describeSections(sectionsRef.current);
+      const out = await runLLM(
+        bedrockCfg(),
+        { system: chatSystem(WB_CATALOG, board, warnings, describeCustomer(customer)), messages: convo,
+          tools: WB_TOOL, onToolUse: dispatchTool, onStep: noteStep },
+        { loop: true });
+      setChatUsage(out.usage);
+      const failed = out.calls.find((c) => c.result.ok === false);
+      const staged = out.calls.some((c) => c.result.staged);
+      const fallback = failed ? failed.result.error
+        : staged ? "Staged that change — Apply it when you're ready." : "Done.";
+      /* What the reply rests on, taken from the tool results rather than from
+         the prose, so the line is right even when the model forgets to cite. */
+      const sources = [...new Set(out.calls.flatMap((c) => c.result?.sources || []))];
+      const trail = out.calls.map((c) => ({
+        did: TOOL_TRAIL[c.name] || c.name,
+        ok: c.result.ok !== false,
+      }));
+      setChatMsgs((m) => [...m, {
+        role: failed && !out.text ? "error" : "ai",
+        text: out.text || fallback,
+        ...(sources.length ? { sources } : {}),
+        ...(trail.length ? { trail } : {}),
+      }]);
     } catch (err) {
       setChatMsgs((m) => [...m, { role: "error", text: err.message || String(err) }]);
     } finally {
       setChatBusy(false);
     }
+  };
+
+  /* Open the chat on a canned turn — the review panel's Fix the findings, and
+     the post-import actions, all arrive this way. */
+  const askAI = (text) => {
+    setChatOpen(true);
+    sendChat(text);
+  };
+
+  /* The findings are already in the system prompt, so this only has to ask. */
+  const fixFindings = () => askAI(
+    "Fix the review findings on this board. Change only what a finding calls for, "
+    + "leave the rest of the design alone, and say which findings your change addresses "
+    + "and which ones need a decision from us instead.");
+
+  /* A turn that has to wait for a board switch to land: docRef is only current
+     as of the last render, so the snapshot would otherwise describe the board
+     the user just left. */
+  useEffect(() => {
+    if (!askQueue) return;
+    setAskQueue(null);
+    askAI(askQueue);
+  }, [askQueue]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ---------- Elastic, browser-direct ---------- */
+
+  /* Push the repo corpus into the semantic_text index the agent searches, and
+     optionally this board's documents with it. Re-runnable on purpose: the
+     repo stays the source of truth, so correcting a passage in git and
+     pushing again is the workflow. Documents are opt-in every time — sending
+     a prospect's RFP to a shared index should never be the default. */
+  const pushToIndex = async (includeDocuments) => {
+    if (!esUrl.trim()) return setPushState({ error: "Set the Elasticsearch endpoint first — it's a different host from Kibana on Elastic Cloud." });
+    setPushState({ busy: true });
+    const passages = [...ELASTIC_CORPUS, ...(includeDocuments ? docPassages : [])];
+    try {
+      const cfg = elasticCfg();
+      const { created } = await ensureIndex(cfg);
+      const { indexed, errors } = await bulkPassages({ ...cfg, passages, version: KNOWLEDGE_VERSION });
+      setPushState({
+        note: `${indexed} passage${indexed === 1 ? "" : "s"} into ${elasticIndexName}`
+          + `${created ? ", which was created" : ""}`
+          + `${includeDocuments && docPassages.length ? `, including ${docPassages.length} from this board's documents` : ""}.`,
+        errors,
+      });
+    } catch (err) {
+      setPushState({ error: err.message, help: err.help });
+    }
+  };
+
+  /* Does the whole path work, right now, before anyone is watching? Each leg
+     reports how it failed, not just that it did — a 403 on the key, a 400 on
+     the agent id, and a blocked preflight need three different fixes. */
+  const runPreflight = async () => {
+    setPreflight({ busy: true });
+    const result = {};
+
+    if (!hasAwsCreds) {
+      result.bedrock = { ok: false, error: "No AWS key and secret set." };
+    } else {
+      const started = Date.now();
+      try {
+        await runLLM(bedrockCfg(),
+          { system: "Reply with the single word: ready.", messages: [{ role: "user", content: "ready?" }] },
+          { text: true });
+        result.bedrock = { ok: true, ms: Date.now() - started, detail: `${model} in ${awsRegion}` };
+      } catch (err) {
+        result.bedrock = { ok: false, ms: Date.now() - started, error: err.message };
+      }
+    }
+
+    if (hasElastic) {
+      result.agent = await checkAgent(elasticCfg());
+      if (esUrl.trim()) result.index = await checkIndex(elasticCfg());
+    }
+    setPreflight(result);
   };
 
   /* ---------- presentation mode ---------- */
@@ -1045,8 +1639,6 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     setSpotlight(null);
     setTool(null);
   };
-  /* `hop` is declared with the rest of the flow trace, below the presenting
-     controls; exiting also stops it, via the effect that watches `present`. */
 
   /* ---------- annotation layer (pen / arrow) ---------- */
 
@@ -1084,11 +1676,12 @@ export default function ElasticWhiteboard({ height = "100%" }) {
 
   /* ---------- gestures ---------- */
 
-  const { startPan, startMove, startResize, startConnect, startZoneMove, startZoneResize,
+  const { startPan, startMove, startResize, startConnect, startReconnect, startZoneMove, startZoneResize,
           startPalette, startEdgePoint, onMove, onUp } = useDragController({
     dragRef, viewportRef, lastClickRef,
     view, sel, nodes, edges, zones, nodeById,
     setView, setMarquee, setSel, setNodes, setZones, setEdges, setConnect, setGhost, setEditing,
+    setGuides,
     toWorld, snapshot, uid, rectOf,
   });
 
@@ -1180,13 +1773,16 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   };
 
   const exportJSON = () => {
-    // Edges with a label, a hand-shaped path, or a zone endpoint are serialized
-    // as objects; plain node-to-node edges stay compact [s, e] tuples.
-    const serEdge = ({ s, e, lbl, pts }) =>
-      (pts || zoneIdSet.has(s) || zoneIdSet.has(e))
-        ? { s, e, ...(lbl ? { lbl } : {}), ...(pts ? { pts } : {}) }
+    // Edges with a label, a hand-shaped path, pinned connection points, or a
+    // zone endpoint are serialized as objects; plain node-to-node edges stay
+    // compact [s, e] tuples.
+    const serEdge = ({ s, e, lbl, pts, sa, ea }) =>
+      (pts || sa || ea || zoneIdSet.has(s) || zoneIdSet.has(e))
+        ? { s, e, ...(lbl ? { lbl } : {}), ...(pts ? { pts } : {}),
+            ...(sa ? { sa } : {}), ...(ea ? { ea } : {}) }
         : (lbl ? [s, e, lbl] : [s, e]);
-    dl(new Blob([JSON.stringify({ nodes, edges: edges.map(serEdge), zones }, null, 2)],
+    dl(new Blob([JSON.stringify({ nodes, edges: edges.map(serEdge), zones,
+                                  ...(views.length ? { views } : {}) }, null, 2)],
        { type: "application/json" }), `${fileSlug()}.json`);
   };
 
@@ -1240,10 +1836,9 @@ export default function ElasticWhiteboard({ height = "100%" }) {
         if (!Array.isArray(data.nodes) || !Array.isArray(data.edges)) throw new Error("bad shape");
         snapshot();
         setNodes(data.nodes.filter((n) => TYPES[n.type]));
-        setEdges(data.edges.map((ed, i) => Array.isArray(ed)
-          ? { id: `e${i}`, s: ed[0], e: ed[1], lbl: ed[2] }
-          : { id: `e${i}`, s: ed.s, e: ed.e, lbl: ed.lbl, ...(ed.pts ? { pts: ed.pts } : {}), ...(ed.bi ? { bi: true } : {}), ...(ed.color ? { color: ed.color } : {}) }));
+        setEdges(data.edges.map(hydrateEdge));
         setZones(Array.isArray(data.zones) ? data.zones : []);
+        if (Array.isArray(data.views)) setViews(data.views);
         sectionsRef.current = {};
         setSel(null);
       } catch { /* ignore malformed files */ }
@@ -1279,6 +1874,48 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                  y: (el.clientHeight - (bb.y1 - bb.y0) * k) / 2 - bb.y0 * k });
   };
   const fit = () => fitTo(bbox());
+
+  /* ---------- saved views ---------- */
+
+  /* Glide the camera to a target view — a cut is disorienting mid-presentation,
+     a short pan reads as "we are moving over there". Reduced motion just cuts. */
+  const flyTo = (target) => {
+    if (flyRef.current) cancelAnimationFrame(flyRef.current);
+    const to = { x: target.x, y: target.y, k: target.k };
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) return setView(to);
+    const from = { ...view };
+    const t0 = performance.now();
+    const D = 450;
+    const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
+    /* Clock our own elapsed time — the rAF timestamp's origin varies by
+       environment and a mismatched one would send the camera flying. */
+    const frame = () => {
+      const f = ease(Math.min(1, Math.max(0, (performance.now() - t0) / D)));
+      setView({ x: from.x + (to.x - from.x) * f,
+                y: from.y + (to.y - from.y) * f,
+                k: from.k + (to.k - from.k) * f });
+      flyRef.current = f < 1 ? requestAnimationFrame(frame) : null;
+    };
+    flyRef.current = requestAnimationFrame(frame);
+  };
+
+  useEffect(() => () => cancelAnimationFrame(flyRef.current), []);
+
+  const goToView = (i) => {
+    const v = views[i];
+    if (!v) return;
+    setViewIdx(i);
+    flyTo(v);
+  };
+  const saveCurrentView = () => {
+    setViews((vs) => [...vs, { id: uniqueId("v"), name: `View ${vs.length + 1}`, ...view }]);
+  };
+  const renameView = (id, name) =>
+    setViews((vs) => vs.map((v) => (v.id === id && name.trim() ? { ...v, name: name.trim() } : v)));
+  const deleteView = (id) => {
+    setViews((vs) => vs.filter((v) => v.id !== id));
+    setViewIdx(-1);
+  };
 
   /* ---------- image export ---------- */
 
@@ -1435,7 +2072,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     .filter((ed) => endpointRect(ed.s) && endpointRect(ed.e))
     .map((ed) => {
       const a = nodeById[ed.s], b = nodeById[ed.e];
-      const pl = elbowPath(endpointRect(ed.s), endpointRect(ed.e), ed.pts);
+      const pl = elbowPath(endpointRect(ed.s), endpointRect(ed.e), ed.pts, ed.sa, ed.ea);
       const mid = plMid(pl);
       const src = a || b;                          // colour from whichever end is a node
       const autoDashed = (a && TYPES[a.type].ops) || (b && TYPES[b.type].ops) || false;
@@ -1504,38 +2141,6 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     return (first && first.step) || 0;
   })();
 
-  /* ---------- flow trace ----------
-     Walks data through the architecture one leg at a time so a presenter can
-     narrate the path instead of pointing at a static picture. Only the
-     currently revealed connections take part. */
-  const hops = useMemo(
-    () => flowHops(edges.filter((e) => visibleNodeIds.has(e.s) && visibleNodeIds.has(e.e))),
-    [edges, visibleNodeIds]);
-  const [hop, setHop] = useState(null);   // index into hops, or null when not tracing
-  const trace = useMemo(() => {
-    if (hop === null || !hops.length) return null;
-    const lit = new Set(hops[hop % hops.length]);
-    const ends = new Set();
-    for (const e of edges) if (lit.has(e.id)) { ends.add(e.s); ends.add(e.e); }
-    return { edges: lit, nodes: ends };
-  }, [hop, hops, edges]);
-  const tracing = !!trace;
-
-  const stopTrace = () => setHop(null);
-  const startTrace = () => { setSpotlight(null); setHop(0); };
-  const stepTrace = () => setHop((h) => (h === null ? 0 : (h + 1) % hops.length));
-
-  /* Auto-advance, unless the viewer would rather things held still — then the
-     button steps a hop per press. */
-  useEffect(() => {
-    if (!tracing || prefersReducedMotion) return;
-    const t = setTimeout(() => setHop((h) => (h + 1) % hops.length), 1500);
-    return () => clearTimeout(t);
-  }, [tracing, hop, hops.length, prefersReducedMotion]);
-
-  /* A trace only makes sense over the board being presented. */
-  useEffect(() => { if (!present) setHop(null); }, [present]);
-
   /* ---------- comparison ----------
      Hold this board against another one — the current-state sketch, or the
      cluster imported from a customer's diagnostics — and show the delta. */
@@ -1552,8 +2157,15 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const startCompare = (id) => { flushActiveBoard(); setCompareId(id); setBoardMenu(false); };
   const stopCompare = () => { setCompareId(null); setBoardMenu(false); };
   /* Comparing against a board you've just switched to or deleted makes no
-     sense, so the pairing drops when either side moves. */
-  useEffect(() => { setCompareId(null); }, [activeBoardId]);
+     sense, so the pairing drops when either side moves — unless the board being
+     opened was created to be compared against the one being left, which is how
+     a proposed target state lands already held against the import. */
+  const queuedCompareRef = useRef(null);
+  useEffect(() => {
+    const queued = queuedCompareRef.current;
+    queuedCompareRef.current = null;
+    setCompareId(queued && queued !== activeBoardId ? queued : null);
+  }, [activeBoardId]);
 
   const totals = useMemo(() => capacityTotals(nodes), [nodes]);
   /* Data Source nodes carrying a raw-ingest volume; the sizing dialog can sum
@@ -1573,16 +2185,69 @@ export default function ElasticWhiteboard({ height = "100%" }) {
   const warnCount = warnings.filter((w) => w.level === "warn").length;
   const hasTotals = totals.count > 0 || totals.cpu > 0 || totals.mem > 0 || warnings.length > 0;
 
+  /* What the chat offers on an empty conversation. An empty board wants
+     designing, an unsized one wants sizing, a flagged one wants fixing, and a
+     freshly imported one wants reading — so the openings follow the board
+     rather than being three fixed strings. */
+  const chatChips = useMemo(() => {
+    const chips = [];
+    if (!nodes.length) {
+      chips.push("Design a SIEM log ingest pipeline",
+                 "Build an air-gapped Elastic deployment",
+                 "Draw a multi-tenant observability platform");
+    } else {
+      if (imported) chips.push("Review this cluster and tell me what stands out");
+      if (!totals.count) chips.push("Size this for 500 GB/day held for a year");
+      if (warnings.length) chips.push("Fix the review findings");
+      chips.push("What would you change about this design?",
+                 "Add a Kafka buffer before Elasticsearch",
+                 "Build this up in four steps for an exec walkthrough");
+    }
+    return chips.slice(0, 3);
+  }, [nodes.length, imported, totals.count, warnings.length]);
+
   /* Turn a parsed cluster into a fresh named board. Importing never overwrites
-     what's on screen — a discovery paste shouldn't cost you your sketch. */
+     what's on screen — a discovery paste shouldn't cost you your sketch. The
+     summary is saved with the board, so the post-import actions are still there
+     after a refresh or a trip to another board. */
   const importCluster = (parsed) => {
     const built = clusterToBoard(parsed, { nodeW: NODE_W, nodeH: NODE_H });
     if (!built) return;
     setImportOpen(false);
     createBoard(nextBoardName(built.summary.clusterName || "Imported cluster"),
-                { ...built.board, view: { ...DEFAULT_VIEW }, sections: {} });
+                { ...built.board, view: { ...DEFAULT_VIEW }, sections: {}, imported: built.summary });
     fitTo(boxOf(built.board.nodes, built.board.zones));
     flashSeedNote(`Imported ${built.summary.total} nodes from ${built.summary.source}`);
+  };
+
+  /* ---------- an imported cluster as the start of a migration story ----------
+     Import gives the current state, the sizing engine gives a target, and the
+     board comparison gives the delta between them. */
+
+  /* Read the cluster as it stands. The board snapshot and the review findings
+     are already in the system prompt, so this only has to say what kind of
+     reading is wanted. */
+  const reviewImported = () => askAI(
+    "Review this imported cluster as it stands. Work only from what is on the board: "
+    + "the tier ratios and whether the shape matches the retention it implies, the master quorum, "
+    + "per-node sizing against the data each node holds, and anything the roles or versions suggest. "
+    + "Say what you'd want to check next. Don't change the board.");
+
+  /* Design the target state on a board of its own, held against the import.
+     The comparison is queued because opening a board clears the pairing. */
+  const proposeTarget = () => {
+    const from = activeBoardId;
+    const facts = describeDoc({ nodes, edges, zones }, TYPES);
+    queuedCompareRef.current = from;
+    createBoard(nextBoardName(`${activeBoard.name} — target`), emptyBoard());
+    setAskQueue(
+      "Propose a target state for a cluster we've just imported, and build it on this empty board. "
+      + "Size it with the size_deployment tool rather than carrying the old node counts across, "
+      + "and say what you changed and why. The current state is:\n\n"
+      + facts
+      + (warnings.length
+        ? `\n\nThe design review of the current state says:\n${warnings.map((w) => `  [${w.level}] ${w.title}: ${w.detail}`).join("\n")}`
+        : ""));
   };
 
   /* Draw the output of the sizing calculator as a whole architecture, built
@@ -1619,11 +2284,14 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     flashSeedNote(`Added ${drafts.length} data source${drafts.length === 1 ? "" : "s"}`);
   };
 
-  const drawSizing = (result, hardware, opts = {}) => {
-    if (!result.tiers.length) return;
-    /* Sized from the board's own Data Source nodes: skip the generic sources
-       zone and wire those very nodes into the new architecture instead. */
-    const fromBoard = !!opts.fromBoardSources;
+  /* The cluster block a sizing result describes, shared by the Build dialog and
+     the AI's size_deployment tool so both land the same thing: the block the
+     Patterns sidebar inserts, with only what sizing actually decides overridden
+     (which tiers exist, whether the quorum needs dedicated masters, whether
+     dedicated ML nodes are on, whether there's an object store for the frozen
+     tier to snapshot into), and the derived numbers on each slot. Ingest and
+     coordinating nodes stay off, as they are in the sidebar default. */
+  const sizedClusterSection = (result, hardware) => {
     const { stack, input } = result;
     /* Per-component hardware (instance / cpu / mem / disk): the dialog passes
        its possibly-edited rows; recommendations fill any gap. */
@@ -1632,6 +2300,87 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       const row = hw[key];
       return row ? { instance: row.instance, cpu: row.cpu, mem: row.mem, disk: row.disk } : {};
     };
+
+    /* Derived numbers land on the template slots up front (keyed by each
+       template's local slot names) so layout can size nodes around them. */
+    const props = {};
+    for (const t of result.tiers)
+      props[t.key] = { nodes: t.nodes, capacity: formatTB(t.perNodeTB), ...hwProps(t.key) };
+    if (stack.masters) props.master = { nodes: stack.masters, ...hwProps("master") };
+    if (stack.ml) props.ml = { nodes: stack.ml, ...hwProps("ml") };
+    if (result.objectStoreTB) props.objstore = { capacity: formatTB(result.objectStoreTB) };
+
+    /* The cluster zone label names where it runs, then what it holds. */
+    const isECH = input.provider !== "selfmanaged";
+    const providerLabel = (SIZING_PROVIDERS.find(([key]) => key === input.provider) || [])[1]
+      || input.provider;
+    const regionLabel = isECH && input.region
+      ? ((ECH_REGIONS[input.provider] || []).find(([id]) => id === input.region)?.[1] || input.region)
+      : null;
+    const profileLabel = isECH
+      ? (input.profile || echProfiles(input.provider, input.region)[0])
+      : null;
+    const label = [
+      providerLabel, regionLabel, profileLabel,
+      `${input.dailyGB} GB/day`, `${result.retentionDays} day retention`,
+    ].filter(Boolean).join(" · ");
+
+    return {
+      hardwareByKey: hw,
+      hwProps,
+      props,
+      fill: { ...defaultFill("cluster"), label,
+              tiers: result.tiers.map((t) => t.key),
+              master: stack.masters > 0,
+              ml: stack.ml > 0,
+              objectStorage: result.objectStoreTB > 0 },
+    };
+  };
+
+  /* A sizing result as the plain lines the apply panel shows. */
+  const sizingLines = (result) => [
+    ...result.tiers.map((t) => `${t.label}: ${t.nodes} × ${formatTB(t.perNodeTB)} over ${t.days} days`),
+    ...(result.stack.masters ? [`${result.stack.masters} dedicated masters`] : []),
+    ...(result.stack.ml ? [`${result.stack.ml} ML nodes`] : []),
+    ...(result.stack.logstash ? [`${result.stack.logstash} Logstash instances`] : []),
+    ...(result.stack.kibana ? [`${result.stack.kibana} Kibana instances`] : []),
+    `${result.nodes} nodes · ${formatTB(result.dataTB)} on disk · ${result.ramGB} GB RAM`,
+  ];
+
+  /* The same result as facts for the model, including the inputs the engine
+     filled in from its defaults — an assumption it can't see is one it can't
+     state. */
+  const sizingFacts = (result, hw) => {
+    const { input, stack } = result;
+    return {
+      effectiveInput: {
+        dailyGB: input.dailyGB, days: input.days, provider: input.provider,
+        region: input.region || "any", replicas: input.replicas, overhead: input.overhead,
+        agents: input.agents, users: input.users,
+        logstash: !!input.logstash, ml: !!input.ml, masters: !!input.masters,
+        monitoring: !!input.monitoring,
+      },
+      tiers: result.tiers.map((t) => ({ tier: t.key, days: t.days, nodes: t.nodes,
+        ramPerNodeGB: t.ram, perNodeTB: +t.perNodeTB.toFixed(2), instance: hw[t.key]?.instance })),
+      masters: stack.masters, mlNodes: stack.ml, logstash: stack.logstash,
+      kibana: stack.kibana, agents: stack.agents, monitoring: stack.monitoring,
+      totalNodes: result.nodes, totalRamGB: result.ramGB,
+      dataTB: +result.dataTB.toFixed(1), objectStoreTB: +result.objectStoreTB.toFixed(1),
+      retentionDays: result.retentionDays,
+    };
+  };
+
+  const drawSizing = (result, hardware, opts = {}) => {
+    if (!result.tiers.length) return;
+    /* Sized from the board's own Data Source nodes: skip the generic sources
+       zone and wire those very nodes into the new architecture instead. */
+    const fromBoard = !!opts.fromBoardSources;
+    const { stack, input } = result;
+    /* The provider decides which meter the deal bills on, so the quote panel
+       follows the drawing rather than making the SA remember to switch it. */
+    setQuoteField({ model: licenseModelFor(input.provider) });
+    const cluster = sizedClusterSection(result, hardware);
+    const { hwProps } = cluster;
     const sid = { src: uid("sec"), ing: uid("sec"), cluster: uid("sec"), user: uid("sec"), mon: uid("sec") };
 
     /* Agents live in the Ingestion zone (they're collectors, not sources),
@@ -1644,53 +2393,17 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       ...(stack.logstash > 0 ? ["logstash"] : []),
     ];
 
-    /* Derived numbers land on the template slots up front (keyed by each
-       template's local slot names) so layout can size nodes around them. */
-    const clusterProps = {};
-    for (const t of result.tiers)
-      clusterProps[t.key] = { nodes: t.nodes, capacity: formatTB(t.perNodeTB), ...hwProps(t.key) };
-    if (stack.masters) clusterProps.master = { nodes: stack.masters, ...hwProps("master") };
-    if (stack.ml) clusterProps.ml = { nodes: stack.ml, ...hwProps("ml") };
-    if (result.objectStoreTB) clusterProps.objstore = { capacity: formatTB(result.objectStoreTB) };
     const ingProps = {};
     if (stack.agents) ingProps.tool0 = { count: stack.agents };
     if (stack.logstash)
       ingProps[stack.agents > 0 ? "tool1" : "tool0"] = { instances: stack.logstash, ...hwProps("logstash") };
-
-    /* The cluster zone label names where it runs, then what it holds. */
-    const isECH = input.provider !== "selfmanaged";
-    const providerLabel = (SIZING_PROVIDERS.find(([key]) => key === input.provider) || [])[1]
-      || input.provider;
-    const regionLabel = isECH && input.region
-      ? ((ECH_REGIONS[input.provider] || []).find(([id]) => id === input.region)?.[1] || input.region)
-      : null;
-    const profileLabel = isECH
-      ? (input.profile || echProfiles(input.provider, input.region)[0])
-      : null;
-    const clusterLabel = [
-      providerLabel, regionLabel, profileLabel,
-      `${input.dailyGB} GB/day`, `${result.retentionDays} day retention`,
-    ].filter(Boolean).join(" · ");
 
     const sections = [
       stack.agents > 0 && !fromBoard && { id: sid.src, template: "dataZone",
         fill: { label: "Data sources", sources: ["source"], collectors: [] } },
       hasIngestion && { id: sid.ing, template: "sharedIngestion",
         fill: { label: "Ingestion", tools: ingTools }, props: ingProps },
-      { id: sid.cluster, template: "cluster",
-        /* The block the Patterns sidebar inserts, with only what sizing
-           actually decides overridden: which tiers exist, whether the quorum
-           needs dedicated masters, whether dedicated ML nodes are on, and
-           whether there's an object store for the frozen tier to snapshot into.
-           Ingest and coordinating nodes stay off, as they are in the sidebar
-           default. */
-        fill: { ...defaultFill("cluster"),
-                label: clusterLabel,
-                tiers: result.tiers.map((t) => t.key),
-                master: stack.masters > 0,
-                ml: stack.ml > 0,
-                objectStorage: result.objectStoreTB > 0 },
-        props: clusterProps },
+      { id: sid.cluster, template: "cluster", fill: cluster.fill, props: cluster.props },
       stack.kibana > 0 && { id: sid.user, template: "userSpace",
         fill: { consumers: ["kibana", "users"], idp: false },
         props: { kibana: { instances: stack.kibana, ...hwProps("kibana") },
@@ -1775,17 +2488,19 @@ export default function ElasticWhiteboard({ height = "100%" }) {
       () => flashSeedNote(ok),
       () => flashSeedNote("Couldn't reach the clipboard"));
   };
-  /* Write up the board as the note that follows the session. The model is
-     given the diagram, the rollups, and the review findings, and asked to
-     describe them rather than design anything. */
-  const [summary, setSummary] = useState(null);   // { busy } | { text } | { error }
-  const writeSummary = async () => {
-    setSummary({ busy: true });
+  /* Write the board up. The model is given the diagram, the rollups, and the
+     review findings, and asked to describe them rather than design anything;
+     the genre decides what shape that takes, over the same facts. Which genre is
+     asked first — a note and an SoW outline are different enough that guessing
+     wrong costs a call and a wait. */
+  const [summary, setSummary] = useState(null);   // { choosing } | { genre, busy | text | error }
+  const writeSummary = async (genre = SUMMARY_DEFAULT) => {
+    setSummary({ genre, busy: true });
     try {
       const text = await runLLM(
         bedrockCfg(),
         {
-          system: SUMMARY_SYSTEM,
+          system: summarySystem(genre),
           messages: [{ role: "user", content: summaryPrompt({
             boardName: activeBoard.name,
             board: describeDoc({ nodes, edges, zones }, TYPES),
@@ -1794,51 +2509,159 @@ export default function ElasticWhiteboard({ height = "100%" }) {
           }) }],
         },
         { text: true });
-      setSummary({ text });
+      setSummary({ genre, text });
     } catch (e) {
-      setSummary({ error: e.message });
+      setSummary({ genre, error: e.message });
     }
   };
+
+  /* ---------- follow-up package ---------- */
+
+  /* Like renderPNG but it answers with a data URL and never falls back to a
+     download — a failed rasterization inside the follow-up flow should
+     degrade the artifact, not surprise the user with an SVG file. */
+  const capturePNG = () => new Promise((resolve) => {
+    let settled = false;
+    const settle = (v, url) => {
+      if (settled) return;
+      settled = true;
+      if (url) URL.revokeObjectURL(url);
+      resolve(v);
+    };
+    try {
+      const svg = buildSVG();
+      if (!svg) return settle("");
+      const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const c = document.createElement("canvas");
+          c.width = img.width * 2; c.height = img.height * 2;
+          const g = c.getContext("2d");
+          g.scale(2, 2); g.drawImage(img, 0, 0);
+          settle(c.toDataURL("image/png"), url);
+        } catch { settle("", url); }
+      };
+      img.onerror = () => settle("", url);
+      setTimeout(() => settle("", url), 1500);
+      img.src = url;
+    } catch { settle(""); }
+  });
+
+  /* One click packages the session: the board as an image, the AI's recap of
+     what was shown and decided, and the deterministic numbers, in a single
+     self-contained HTML file (or markdown). Missing credentials degrade it
+     rather than block it — the image and the numbers are exact either way. */
+  const [followup, setFollowup] = useState(null);  // { busy } | { png, md, error, noCreds }
+  const buildFollowup = async (existingPng) => {
+    setFileMenu(false);
+    setFollowup({ busy: true });
+    const png = existingPng ?? await capturePNG();
+    const haveCreds = !!(awsKeyId && awsSecret);
+    let md = "", error = "";
+    if (haveCreds) {
+      try {
+        md = await runLLM(bedrockCfg(), {
+          system: FOLLOWUP_SYSTEM,
+          messages: [{ role: "user", content: followupPrompt({
+            boardName: activeBoard.name,
+            board: describeDoc({ nodes, edges, zones }, TYPES) + describeSections(sectionsRef.current),
+            totals, warnings,
+            transcript: chatMsgs.filter((m) => m.role === "user" || m.role === "ai"),
+            customer: customer
+              ? { account: customer.account, opportunity: customer.opportunity }
+              : undefined,
+          }) }],
+        }, { text: true });
+      } catch (e) { error = e.message; }
+    }
+    setFollowup({ png, md, error, noCreds: !haveCreds });
+  };
+
+  /* Only the account and opportunity names travel — deal value, MEDDPICC, and
+     support history inform the narrative upstream but never appear here. */
+  const followupParts = () => ({
+    title: activeBoard.name,
+    dateStr: new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }),
+    account: customer?.account || "",
+    opportunity: customer?.opportunity || "",
+    capacity: totals,
+    warnings,
+  });
+  const downloadFollowup = (f, md) => {
+    const bodyHtml = md
+      ? renderToStaticMarkup(<ChatMarkdown text={md} />)
+      : `<p><em>${f.noCreds
+          ? "Packaged without AI credentials — the image and numbers are exact; the recap is yours to write."
+          : "The recap failed to generate — the image and numbers are exact."}</em></p>`;
+    const html = buildFollowupHtml({ ...followupParts(), pngDataUrl: f.png, bodyHtml });
+    dl(new Blob([html], { type: "text/html" }), `${fileSlug()}-follow-up.html`);
+  };
+  const copyFollowup = (md) =>
+    copyToClipboard(followupMarkdown({ ...followupParts(), bodyMd: md }),
+                    "Follow-up markdown copied");
 
   const copySizing = () =>
     copyToClipboard(sizingSummary(), "Sizing summary copied",
                     "Set node counts and capacities first");
-  /* Quote lines the ROM builder's paste importer understands, so a drawn
-     architecture lands in the pricing scene as real rows. */
-  const copyRom = () =>
-    copyToClipboard(romTSV(romRows(totals)),
-                    "Quote lines copied — paste into Pricing / ROM",
-                    "Set Memory on the nodes first — resource units are priced per 64 GB");
+  /* The whole deployment as one line, priced from the panel's own terms so what
+     leaves here is a finished quote row. */
+  const cloudQuote = quote.model === LICENSE_ECU;
+  const quoteTerms = { model: quote.model, unitPrice: quote.price,
+                       discount: quote.discount, ecuTotal: quote.ecu };
+  const quoteLine = romRows(totals, quoteTerms)[0];
+  const quoteCell = quoteLine && projectCell(quoteLine, 0, {});
+  const noQuote = cloudQuote
+    ? "Enter the ECU total from the Elastic Cloud pricing calculator first"
+    : "Set Memory on the nodes first — resource units are priced per 64 GB";
 
-  /* Push the same quote lines straight into the Pricing / ROM builder — no
-     paste step in front of the customer. Lands as a new, clearly-labelled
-     scenario so nothing already in the builder is overwritten, and carries the
-     per-tier RAM / node / storage the flat text paste would drop. */
+  const copyRom = () =>
+    copyToClipboard(romTSV(romRows(totals, quoteTerms)),
+                    "Quote line copied — paste into Pricing / ROM", noQuote);
+
+  /* Push the same line straight into the Pricing / ROM builder — no paste step
+     in front of the customer. Lands as a new, clearly-labelled scenario so
+     nothing already in the builder is overwritten, and carries the RAM / node
+     / storage detail the flat text paste would drop. */
   const sendRom = () => {
-    const rows = romRows(totals);
-    if (!rows.length)
-      return flashSeedNote("Set Memory on the nodes first — resource units are priced per 64 GB");
-    const ok = sendScenarioToPricing(romScenario(totals, { label: `Whiteboard — ${activeBoard.name}` }));
-    flashSeedNote(ok
-      ? `Sent ${rows.length} line${rows.length === 1 ? "" : "s"} to Pricing / ROM`
-      : "Couldn't reach the Pricing / ROM builder");
+    if (!quoteLine) return flashSeedNote(noQuote);
+    const ok = sendScenarioToPricing(
+      romScenario(totals, { label: `Whiteboard — ${activeBoard.name}`, ...quoteTerms }));
+    flashSeedNote(ok ? "Sent the quote line to Pricing / ROM"
+                     : "Couldn't reach the Pricing / ROM builder");
   };
 
-  /* Lay every component out in left-to-right data-flow lanes. Zones are left
-     alone: they'd need re-fitting around content that has moved, and the user
-     usually wants to redraw them anyway. */
+  /* Lay every component out in left-to-right data-flow lanes. A zone moves as
+     a unit — its members are tidied inside it and the frame is refitted around
+     them — so grouping survives the cleanup. */
   const tidyBoard = () => {
-    const pos = tidyLayout(nodes, rectOf);
-    if (!Object.keys(pos).length) return;
+    setTidyMenu(false);
+    const tidy = tidyLayout(nodes, zones, rectOf);
+    if (!Object.keys(tidy.nodes).length) return;
     snapshot();
-    const next = nodes.map((n) => (pos[n.id] ? { ...n, ...pos[n.id] } : n));
-    setNodes(next);
+    const nextNodes = nodes.map((n) => (tidy.nodes[n.id] ? { ...n, ...tidy.nodes[n.id] } : n));
+    const nextZones = zones.map((z) => (tidy.zones[z.id] ? { ...z, ...tidy.zones[z.id] } : z));
+    setNodes(nextNodes);
+    setZones(nextZones);
     setSel(null);
-    fitTo(boxOf(next, []));
+    fitTo(boxOf(nextNodes, nextZones));
+  };
+
+  /* Straighten in place: near-rows and near-columns snap to shared centre
+     lines, and that's all. The arrangement stays the user's — no view jump,
+     nothing moves far enough to need one. */
+  const straightenBoard = () => {
+    setTidyMenu(false);
+    const fix = alignLayout(nodes, zones, rectOf);
+    if (!Object.keys(fix.nodes).length && !Object.keys(fix.zones).length) return;
+    snapshot();
+    setNodes((ns) => ns.map((n) => (fix.nodes[n.id] ? { ...n, ...fix.nodes[n.id] } : n)));
+    setZones((zs) => zs.map((z) => (fix.zones[z.id] ? { ...z, ...fix.zones[z.id] } : z)));
   };
 
   const tempLine = connect && endpointRect(connect.from) ? (() => {
-    const A = anchor(endpointRect(connect.from), "r");
+    const r = endpointRect(connect.from);
+    const A = connect.sa ? anchor(r, connect.sa.side, connect.sa.t) : anchor(r, "r");
     return `M ${A.x} ${A.y} L ${connect.cx} ${connect.cy}`;
   })() : null;
 
@@ -1854,10 +2677,16 @@ export default function ElasticWhiteboard({ height = "100%" }) {
     }));
   };
 
-  /* Clear all manual waypoints on an edge (Reset shape). */
+  /* Clear all manual routing on an edge (Reset shape): the hand-placed
+     waypoints and the pinned connection points both go, so the auto router
+     takes over again. */
   const resetEdgeShape = (edgeId) => {
     snapshot();
-    setEdges((es) => es.map((x) => { if (x.id !== edgeId) return x; const { pts: _drop, ...rest } = x; return rest; }));
+    setEdges((es) => es.map((x) => {
+      if (x.id !== edgeId) return x;
+      const { pts: _pts, sa: _sa, ea: _ea, ...rest } = x;
+      return rest;
+    }));
   };
 
   const selNodeIds = sel && (sel.kind === "nodes" || sel.kind === "mixed") ? sel.ids : [];
@@ -1878,26 +2707,24 @@ export default function ElasticWhiteboard({ height = "100%" }) {
               <button disabled={step >= stepCount} onClick={() => goToStep(step + 1)}>›</button>
             </span>
           )}
+          {views.length > 0 && (
+            <span className="ew-steps" title="Saved views — number keys jump straight to one">
+              <button disabled={viewIdx <= 0} onClick={() => goToView(viewIdx - 1)}>‹</button>
+              <b>{viewIdx >= 0 ? views[viewIdx].name : "Views"}</b>
+              <button disabled={viewIdx >= views.length - 1} onClick={() => goToView(viewIdx + 1)}>›</button>
+            </span>
+          )}
           <span className="ew-gap" />
           <InkTools tool={tool} setTool={setTool} color={inkColor} setColor={setInkColor}
                     onClear={clearInk} hasInk={ink.length > 0} />
           <span className="ew-gap" />
           <button onClick={fit}>Fit</button>
-          {hops.length > 0 && (
-            <span className="ew-steps">
-              <button className={"ew-btn" + (tracing ? " act" : "")}
-                      onClick={tracing ? (prefersReducedMotion ? stepTrace : stopTrace) : startTrace}
-                      title="Walk data through the architecture one hop at a time">
-                Flow
-              </button>
-              {tracing && <b>{(hop % hops.length) + 1} / {hops.length}</b>}
-              {tracing && prefersReducedMotion && <button onClick={stopTrace}>■</button>}
-            </span>
-          )}
           <button disabled={!spotlight} onClick={() => setSpotlight(null)}
                   title="Clear the pinned highlight">Unfocus</button>
           <span className="ew-hint">
-            {revealing ? "arrows or space to step · " : ""}click a component to spotlight it · Esc to exit
+            {revealing ? "arrows or space to step · " : ""}
+            {views.length > 0 ? "1–9 for saved views · " : ""}
+            click a component to spotlight it · Esc to exit
           </span>
         </div>
       ) : (
@@ -1934,6 +2761,8 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                   Duplicate this board
                 </button>
                 <button onClick={() => { setBoardMenu(false); setRenaming(true); }}>Rename this board…</button>
+                <button onClick={() => { setBoardMenu(false); clearAll(); }}
+                        title="Remove every node, edge, and zone — undo brings it back">Clear this board</button>
                 <button disabled={boardIndex.boards.length < 2}
                         onClick={() => deleteBoard(activeBoardId)}>Delete this board</button>
                 {boardIndex.boards.length > 1 && (
@@ -1974,6 +2803,9 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 <div className="ew-menu-h">Share</div>
                 <button onClick={copyPNG}>Copy image to clipboard</button>
                 <button onClick={copyShareLink}>Copy share link</button>
+                <button onClick={() => buildFollowup()}
+                        title="One self-contained HTML file: the board image, an AI recap of the session, capacity, and review findings">
+                  Follow-up package…</button>
                 <div className="ew-menu-sep" />
                 <div className="ew-menu-h">Import</div>
                 <button onClick={() => { fileRef.current.click(); setFileMenu(false); }}>Import JSON…</button>
@@ -2010,27 +2842,133 @@ export default function ElasticWhiteboard({ height = "100%" }) {
             </>
           )}
         </span>
-        <button onClick={clearAll}>Clear</button>
         {seedNote && <span className="ew-seednote">✓ {seedNote}</span>}
-        <span className="ew-gap" />
+        <span className="ew-sep" />
         <button onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">↺</button>
         <button onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">↻</button>
         <input ref={fileRef} type="file" accept="application/json" style={{ display: "none" }} onChange={importJSON} />
-        <span className="ew-gap" />
-        <button onClick={() => zoomBy(1 / 1.2)}>−</button>
-        <span className="ew-zoom">{Math.round(view.k * 100)}%</span>
-        <button onClick={() => zoomBy(1.2)}>+</button>
-        <button onClick={fit}>Fit</button>
-        <button onClick={tidyBoard} title="Lay components out in data-flow lanes">Tidy</button>
+        <span className="ew-sep" />
+        <span className="ew-zoomgrp">
+          <button onClick={() => zoomBy(1 / 1.2)} title="Zoom out">−</button>
+          <button className="ew-zoom" onClick={() => zoomBy(1 / view.k)}
+                  title="Reset zoom to 100%">{Math.round(view.k * 100)}%</button>
+          <button onClick={() => zoomBy(1.2)} title="Zoom in">+</button>
+          <button onClick={fit} title="Frame everything on the board">Fit</button>
+        </span>
+        <span className="ew-menuwrap">
+          <button onClick={() => setViewsMenu((v) => !v)}
+                  title="Saved camera positions — number keys 1–9 jump to them">Views ▾</button>
+          {viewsMenu && (
+            <>
+              <div className="ew-menu-backdrop" onClick={() => { setViewsMenu(false); setRenamingView(null); }} />
+              <div className="ew-menu">
+                <div className="ew-menu-h">Saved views</div>
+                {views.map((v, i) => renamingView === v.id ? (
+                  <input key={v.id} className="ew-boardname" autoFocus defaultValue={v.name}
+                         onBlur={(e) => { renameView(v.id, e.target.value); setRenamingView(null); }}
+                         onKeyDown={(e) => {
+                           if (e.key === "Enter") e.target.blur();
+                           if (e.key === "Escape") { e.target.value = v.name; e.target.blur(); }
+                         }} />
+                ) : (
+                  <div key={v.id} className="ew-menu-row">
+                    <button onClick={() => { goToView(i); setViewsMenu(false); }}>
+                      {i < 9 ? `${i + 1} · ` : "\u00A0\u00A0\u00A0"}{v.name}
+                    </button>
+                    <button className="ew-menu-x" title="Rename this view"
+                            onClick={() => setRenamingView(v.id)}>✎</button>
+                    <button className="ew-menu-x" title="Delete this view"
+                            onClick={() => deleteView(v.id)}>✕</button>
+                  </div>
+                ))}
+                {!views.length && (
+                  <div className="ew-menu-note">Frame a spot worth returning to, then save it.
+                    Number keys jump between saved views — even while presenting.</div>
+                )}
+                <div className="ew-menu-sep" />
+                <button onClick={() => { saveCurrentView(); setViewsMenu(false); }}>+ Save current view</button>
+                <div className="ew-menu-sep" />
+                <label className="ew-menu-check">
+                  <input type="checkbox" checked={minimap}
+                         onChange={(e) => setMinimap(e.target.checked)} />
+                  Show the minimap
+                </label>
+              </div>
+            </>
+          )}
+        </span>
+        <span className="ew-menuwrap">
+          <button onClick={() => setTidyMenu((v) => !v)} title="Straighten or re-lay-out the board">Tidy ▾</button>
+          {tidyMenu && (
+            <>
+              <div className="ew-menu-backdrop" onClick={() => setTidyMenu(false)} />
+              <div className="ew-menu">
+                <button onClick={straightenBoard}
+                        title="Snap near-rows and near-columns into exact alignment — your arrangement stays put">
+                  Straighten rows &amp; columns</button>
+                <button onClick={tidyBoard}
+                        title="Re-lay the whole board out left-to-right by data-flow stage">
+                  Rebuild into flow lanes</button>
+              </div>
+            </>
+          )}
+        </span>
         <button onClick={() => setSizeOpen(true)}
-                title="Work out node counts from ingest volume and retention">Size…</button>
-        <span className="ew-gap" />
-        <InkTools tool={tool} setTool={setTool} color={inkColor} setColor={setInkColor}
-                  onClear={clearInk} hasInk={ink.length > 0} />
-        <button onClick={enterPresent} title="Hide the editing chrome and present this board">Present</button>
-        <span className="ew-gap" />
-        <button className={"ew-ai-toggle" + (chatOpen ? " on" : "")}
-                onClick={() => setChatOpen((o) => !o)} title="Build with AI">✦ AI</button>
+                title="Draw a cluster sized from ingest volume and retention">Build…</button>
+        <span className="ew-sep" />
+        <span className="ew-menuwrap">
+          <button className={tool ? "on" : ""} onClick={() => setPresentMenu((v) => !v)}
+                  title="Present this board, or annotate it with pen and arrow">
+            {tool === "pen" ? "✎ " : tool === "arrow" ? "↗ " : ""}Present ▾</button>
+          {presentMenu && (
+            <>
+              <div className="ew-menu-backdrop" onClick={() => setPresentMenu(false)} />
+              <div className="ew-menu">
+                <button onClick={() => { setPresentMenu(false); enterPresent(); }}
+                        title="Hide the editing chrome and present this board (Esc to exit)">Start presenting</button>
+                <div className="ew-menu-sep" />
+                <div className="ew-menu-h">Annotate</div>
+                <button className={tool === "pen" ? "act" : ""} title="Draw freehand (Esc to stop)"
+                        onClick={() => { setTool(tool === "pen" ? null : "pen"); setPresentMenu(false); }}>
+                  ✎ Pen</button>
+                <button className={tool === "arrow" ? "act" : ""} title="Drag a straight arrow"
+                        onClick={() => { setTool(tool === "arrow" ? null : "arrow"); setPresentMenu(false); }}>
+                  ↗ Arrow</button>
+                <div className="ew-menu-inkrow" title="Ink colour">
+                  {INK_COLORS.map((c) => (
+                    <button key={c.value} className={"ew-inkswatch" + (inkColor === c.value ? " act" : "")}
+                            style={{ "--sw": c.value }} title={c.label}
+                            onClick={() => setInkColor(c.value)} />
+                  ))}
+                </div>
+                {ink.length > 0 && (
+                  <button onClick={() => { clearInk(); setPresentMenu(false); }}
+                          title="Remove every stroke">Clear ink</button>
+                )}
+              </div>
+            </>
+          )}
+        </span>
+        <span className="ew-sep" />
+        <span className="ew-menuwrap">
+          <button className={"ew-ai-toggle" + (chatOpen || documents.length ? " on" : "")}
+                  onClick={() => setAiMenu((v) => !v)}
+                  title="Build with AI and attach the customer's context">✦ AI ▾</button>
+          {aiMenu && (
+            <>
+              <div className="ew-menu-backdrop" onClick={() => setAiMenu(false)} />
+              <div className="ew-menu">
+                <button className={chatOpen ? "act" : ""}
+                        onClick={() => { setChatOpen((o) => !o); setAiMenu(false); }}
+                        title="Build with AI">AI chat</button>
+                <button onClick={() => { setContextOpen(true); setAiMenu(false); }}
+                        title="Attach what the customer asked for — an RFP, requirements, meeting notes — and design to it">
+                  ◫ Context{documents.length > 0 && <b className="ew-warncount">{documents.length}</b>}
+                </button>
+              </div>
+            </>
+          )}
+        </span>
         {hasTotals && (
           <button className={"ew-totals" + (reviewOpen ? " on" : "")}
                   onClick={() => setReviewOpen((v) => !v)}
@@ -2040,16 +2978,29 @@ export default function ElasticWhiteboard({ height = "100%" }) {
             {warnCount > 0 && <b className="ew-warncount">{warnCount}</b>}
           </button>
         )}
-        <span className="ew-hint">shift-drag select · ⌘C/⌘V copy · ⌘D duplicate · arrows nudge · ⌘Z undo · drag ring to connect</span>
+        <span className="ew-hint">shift-drag select · ⌘C/⌘V copy · ⌘D duplicate · arrows nudge · ⌘Z undo · drag a port to connect</span>
       </div>
       )}
 
+      {contextOpen && (
+        <BoardContext documents={documents} passages={docPassages} onClose={() => setContextOpen(false)}
+                      onAttach={attachDocument} onRemove={removeDocument} onAsk={askAI}
+                      customer={customer} onCustomer={setCustomer}
+                      parseCfg={{ elastic: { esUrl, apiKey: elasticKey }, jinaKey,
+                                  origin: window.location.origin }} />
+      )}
       {importOpen && <ClusterImport onClose={() => setImportOpen(false)} onImport={importCluster} />}
       {sizeOpen && <SizingCalculator onClose={() => setSizeOpen(false)} onDraw={drawSizing}
                                      sources={boardSources} onAddSources={addSourceNodes} />}
+      {followup && (
+        <FollowupModal state={followup} onClose={() => setFollowup(null)}
+                       onRetry={() => buildFollowup(followup.png)}
+                       onDownload={(md) => downloadFollowup(followup, md)}
+                       onCopy={copyFollowup} />
+      )}
       {summary && (
-        <BoardSummary state={summary} onClose={() => setSummary(null)} onRetry={writeSummary}
-                      onCopy={(text) => copyToClipboard(text, "Note copied", "Nothing to copy")} />
+        <BoardSummary state={summary} onClose={() => setSummary(null)} onWrite={writeSummary}
+                      onCopy={(text) => copyToClipboard(text, "Draft copied", "Nothing to copy")} />
       )}
 
       <div className="ew-body">
@@ -2113,6 +3064,122 @@ export default function ElasticWhiteboard({ height = "100%" }) {
           </button>
         )}
 
+        {/* capacity + review, docked to the left edge like the chat on the right */}
+        {reviewOpen && !present && (
+          <div className="ew-review" onPointerDown={(e) => e.stopPropagation()}>
+            <div className="ew-review-h">
+              <b>Capacity &amp; review</b>
+              <button className="ew-x" onClick={() => setReviewOpen(false)}>×</button>
+            </div>
+            <div className="ew-review-body">
+              <div className="ew-review-stats">
+                <span><i>{totals.count || "—"}</i>nodes</span>
+                <span><i>{totals.cpu || "—"}</i>vCPU</span>
+                <span><i>{totals.mem || "—"}</i>GB RAM</span>
+                <span><i>{totals.storageTB ? formatTB(totals.storageTB) : "—"}</i>storage</span>
+              </div>
+              {totals.tiers.length > 0 && (
+                <table className="ew-review-tiers">
+                  <tbody>
+                    {totals.tiers.map((t) => (
+                      <tr key={t.type}>
+                        <td><span className="ew-swatch" style={{ background: TYPES[t.type].color }} />{t.label}</td>
+                        <td>{t.count} node{t.count === 1 ? "" : "s"}</td>
+                        <td>{t.storageTB ? formatTB(t.storageTB) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <p className="ew-ihint">Capacity is per node — set Nodes and Capacity on each tier.</p>
+              <div className="ew-frow"><span className="ew-flabel">Licensing</span>
+                <select value={quote.model}
+                        title="Self-managed licenses 64 GB resource units; Cloud meters consumption in ECUs"
+                        onChange={(e) => setQuoteField({ model: e.target.value })}>
+                  <option value={LICENSE_ERU}>Self-managed (ERU)</option>
+                  <option value={LICENSE_ECU}>Cloud Hosted (ECU)</option>
+                </select></div>
+              {cloudQuote
+                ? <div className="ew-frow"><span className="ew-flabel">ECU total</span>
+                    <input inputMode="numeric" value={quote.ecu} placeholder="0"
+                           title="Annual consumption from the Elastic Cloud pricing calculator"
+                           onChange={(e) => setQuoteField({ ecu: e.target.value })} /></div>
+                : <div className="ew-frow"><span className="ew-flabel">List price</span>
+                    <input inputMode="numeric" value={quote.price} placeholder={String(RU_LIST_PRICE)}
+                           title={`List price per ${RU_GB} GB resource unit`}
+                           onChange={(e) => setQuoteField({ price: e.target.value })} /></div>}
+              <div className="ew-frow"><span className="ew-flabel">Discount %</span>
+                <input inputMode="numeric" value={quote.discount} placeholder="0"
+                       onChange={(e) => setQuoteField({ discount: e.target.value })} /></div>
+              <p className="ew-ihint">
+                {quoteCell
+                  ? <>One line: {quoteLine.quantity.toLocaleString("en-US")}{" "}
+                      {cloudQuote ? "ECUs" : `× ${RU_GB} GB resource units`} at{" "}
+                      {formatCurrency(quoteCell.unitPrice)}
+                      {quoteCell.hasDiscount ? ` less ${quoteCell.discountPct}%` : ""}
+                      {" "}= <b>{formatCurrency(quoteCell.lineTotal)}</b></>
+                  : cloudQuote
+                    ? "Cloud bills metered consumption — enter the ECU total from the pricing calculator."
+                    : "Set Memory on the nodes to price this board."}
+              </p>
+              {!cloudQuote && totals.logstashMem > 0 && (
+                <p className="ew-ihint">
+                  Excludes {totals.logstashMem.toLocaleString("en-US")} GB on Logstash — Elastic counts it
+                  for information only.
+                </p>
+              )}
+              <div className="ew-btnrow">
+                <button className="ew-btn" onClick={copyRom}
+                        title={`Copy the ${RU_GB} GB resource-unit line to paste into the Pricing / ROM builder`}>
+                  Copy quote lines
+                </button>
+                <button className="ew-btn" onClick={sendRom}
+                        title="Send these line items straight into the Pricing / ROM builder as a new option — no paste step">
+                  Send to Pricing
+                </button>
+                <button className="ew-btn" onClick={copySizing}
+                        title="Copy a one-line sizing summary">
+                  Copy summary
+                </button>
+                <button className="ew-btn" onClick={() => setSummary({ choosing: true })}
+                        title="Write this board up — a follow-up note, a customer email, discovery questions, risks, or an SoW outline">
+                  ✦ Write it up
+                </button>
+              </div>
+              {imported && (
+                <div className="ew-btnrow">
+                  <button className="ew-btn" onClick={reviewImported}
+                          title={`Ask for observations on the ${imported.total} nodes imported from ${imported.source}`}>
+                    ✦ Review this cluster
+                  </button>
+                  <button className="ew-btn" onClick={proposeTarget}
+                          title="Design and size a target state on a new board, held against this one">
+                    ✦ Propose a target state
+                  </button>
+                </div>
+              )}
+              <div className="ew-review-checks">
+                {warnings.length === 0
+                  ? <p className="ew-review-ok">✓ No issues found</p>
+                  : warnings.map((w) => (
+                      <div key={w.id} className={"ew-check " + w.level}>
+                        <b>{w.title}</b>
+                        <span>{w.detail}</span>
+                      </div>
+                    ))}
+              </div>
+              {warnings.length > 0 && (
+                <div className="ew-btnrow">
+                  <button className="ew-btn" onClick={fixFindings}
+                          title="Hand these findings to the AI and let it propose the fix">
+                    ✦ Fix the findings
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* canvas */}
         <div className={"ew-viewport" + (tool ? " inking" : "")} ref={viewportRef}
              onPointerDown={(e) => {
@@ -2155,11 +3222,9 @@ export default function ElasticWhiteboard({ height = "100%" }) {
               {edgeGeo.map((ed) => {
                 // a connection shows once both of its endpoints have been revealed
                 if (!visibleNodeIds.has(ed.s) || !visibleNodeIds.has(ed.e)) return null;
-                /* A running trace decides the highlight; otherwise it's the
-                   spotlight/hover neighbourhood. */
-                const lit = trace ? trace.edges.has(ed.id) : null;
-                const on = trace ? lit : connected && (ed.s === focus || ed.e === focus);
-                const dim = trace ? !lit : connected && !on;
+                // the spotlight/hover neighbourhood decides the highlight
+                const on = connected && (ed.s === focus || ed.e === focus);
+                const dim = connected && !on;
                 const isSel = sel && sel.kind === "edge" && sel.id === ed.id;
                 return (
                   <g key={ed.id}>
@@ -2180,11 +3245,11 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                         {ed.lbl}
                       </text>
                     )}
-                    {/* the ambient dot runs everywhere; on the active leg of a
-                        trace it's bigger and quicker, so the eye follows it */}
-                    <circle r={lit ? 5 : 3} fill={ed.color} className={"ew-particle" + (dim ? " dim" : "")}
-                            style={{ filter: `drop-shadow(0 0 ${lit ? 7 : 4}px ${ed.color})` }}>
-                      <animateMotion dur={`${Math.max(lit ? 1 : 3, ed.len / (lit ? 300 : 95)).toFixed(2)}s`}
+                    {/* an ambient dot drifts along every connection, so the
+                        diagram reads as data paths rather than plumbing */}
+                    <circle r={3} fill={ed.color} className={"ew-particle" + (dim ? " dim" : "")}
+                            style={{ filter: `drop-shadow(0 0 4px ${ed.color})` }}>
+                      <animateMotion dur={`${Math.max(3, ed.len / 95).toFixed(2)}s`}
                                      repeatCount="indefinite">
                         <mpath href={`#ew-${ed.id}`} />
                       </animateMotion>
@@ -2204,6 +3269,9 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 const mids = [];
                 for (let i = 0; i < spine.length - 1; i++)
                   mids.push({ x: (spine[i].x + spine[i + 1].x) / 2, y: (spine[i].y + spine[i + 1].y) / 2, at: i });
+                // where the line actually attaches — the grab handles for rewiring
+                const pl = elbowPath(ra, rb, ed.pts, ed.sa, ed.ea);
+                const ends = [{ end: "s", ...pl[0] }, { end: "e", ...pl[pl.length - 1] }];
                 return (
                   <g className="ew-edit">
                     {mids.map((m, i) => (
@@ -2217,6 +3285,13 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                               onPointerDown={(e) => startEdgePoint(e, ed.id, i)}
                               onDoubleClick={(e) => { e.stopPropagation(); removeWaypoint(ed.id, i); }} />
                     ))}
+                    {ends.map((p) => (
+                      <circle key={p.end} cx={p.x} cy={p.y} r="6.5" className="ew-wp-end"
+                              style={{ pointerEvents: "all" }}
+                              onPointerDown={(e) => startReconnect(e, ed.id, p.end)}>
+                        <title>Drag to reattach this end</title>
+                      </circle>
+                    ))}
                   </g>
                 );
               })()}
@@ -2229,7 +3304,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
               const r = rectOf(n);
               if (hiddenNow(n)) return null;
               const isSel = selNodeIds.includes(n.id);
-              const dim = trace ? !trace.nodes.has(n.id) : connected && !connected.has(n.id);
+              const dim = connected && !connected.has(n.id);
               const ann = t.annotation;                 // "note" | "text" | undefined
               const commitText = (v) => {
                 snapGuard("rename:" + n.id);
@@ -2246,7 +3321,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                               "--tag": nodeTag(n, stages),
                               ...(ann === "text" ? { color: n.color || surface.ink } : null) }}
                      onPointerDown={(e) => (present
-                       ? (e.stopPropagation(), stopTrace(),
+                       ? (e.stopPropagation(),
                           setSpotlight((s) => (s === n.id ? null : n.id)))
                        : startMove(e, n.id))}
                      onPointerEnter={() => setHover(n.id)}
@@ -2286,13 +3361,11 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                       </div>
                     </div>
                   )}
-                  {(hover === n.id || isSel) && !editing && !present && ["l", "r", "t", "b"].map((side) => {
-                    const a = anchor({ x: 0, y: 0, w: r.w, h: r.h }, side);
-                    return (
-                      <span key={side} className="ew-port" style={{ left: a.x, top: a.y }}
-                            onPointerDown={(e) => startConnect(e, n.id)} />
-                    );
-                  })}
+                  {(hover === n.id || isSel) && !editing && !present &&
+                    nodePorts({ x: 0, y: 0, w: r.w, h: r.h }).map((p) => (
+                      <span key={`${p.side}${p.t}`} className="ew-port" style={{ left: p.x, top: p.y }}
+                            onPointerDown={(e) => startConnect(e, n.id, { side: p.side, t: p.t })} />
+                    ))}
                   {isSel && selNodeIds.length === 1 && !editing && (
                     <span className="ew-grip" onPointerDown={(e) => startResize(e, n.id)} />
                   )}
@@ -2326,6 +3399,18 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                 left: Math.min(marquee.x0, marquee.x1), top: Math.min(marquee.y0, marquee.y1),
                 width: Math.abs(marquee.x1 - marquee.x0), height: Math.abs(marquee.y1 - marquee.y0) }} />
             )}
+
+            {/* live alignment guides: centre lines the dragged node snapped to,
+                spanning whatever part of the world is on screen */}
+            {guides && (() => {
+              const el = viewportRef.current;
+              if (!el) return null;
+              const vx = -view.x / view.k, vy = -view.y / view.k;
+              const vw = el.clientWidth / view.k, vh = el.clientHeight / view.k;
+              return guides.map((g, i) => g.axis === "v"
+                ? <div key={i} className="ew-guide v" style={{ left: g.at, top: vy, height: vh }} />
+                : <div key={i} className="ew-guide h" style={{ top: g.at, left: vx, width: vw }} />);
+            })()}
           </div>
 
           {comparison && !present && (
@@ -2373,64 +3458,12 @@ export default function ElasticWhiteboard({ height = "100%" }) {
             </div>
           )}
 
-          {reviewOpen && (
-            <div className="ew-review" onPointerDown={(e) => e.stopPropagation()}>
-              <div className="ew-review-h">
-                <b>Capacity &amp; review</b>
-                <button className="ew-x" onClick={() => setReviewOpen(false)}>×</button>
-              </div>
-              <div className="ew-review-body">
-                <div className="ew-review-stats">
-                  <span><i>{totals.count || "—"}</i>nodes</span>
-                  <span><i>{totals.cpu || "—"}</i>vCPU</span>
-                  <span><i>{totals.mem || "—"}</i>GB RAM</span>
-                  <span><i>{totals.storageTB ? formatTB(totals.storageTB) : "—"}</i>storage</span>
-                </div>
-                {totals.tiers.length > 0 && (
-                  <table className="ew-review-tiers">
-                    <tbody>
-                      {totals.tiers.map((t) => (
-                        <tr key={t.type}>
-                          <td><span className="ew-swatch" style={{ background: TYPES[t.type].color }} />{t.label}</td>
-                          <td>{t.count} node{t.count === 1 ? "" : "s"}</td>
-                          <td>{t.storageTB ? formatTB(t.storageTB) : "—"}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-                <p className="ew-ihint">Capacity is per node — set Nodes and Capacity on each tier.</p>
-                <div className="ew-btnrow">
-                  <button className="ew-btn" onClick={copyRom}
-                          title={`Copy ${RU_GB} GB resource-unit line items to paste into the Pricing / ROM builder`}>
-                    Copy quote lines
-                  </button>
-                  <button className="ew-btn" onClick={sendRom}
-                          title="Send these line items straight into the Pricing / ROM builder as a new option — no paste step">
-                    Send to Pricing
-                  </button>
-                  <button className="ew-btn" onClick={copySizing}
-                          title="Copy a one-line sizing summary">
-                    Copy summary
-                  </button>
-                  <button className="ew-btn" onClick={writeSummary}
-                          title="Write up this board as a follow-up note">
-                    ✦ Write it up
-                  </button>
-                </div>
-                <div className="ew-review-checks">
-                  {warnings.length === 0
-                    ? <p className="ew-review-ok">✓ No issues found</p>
-                    : warnings.map((w) => (
-                        <div key={w.id} className={"ew-check " + w.level}>
-                          <b>{w.title}</b>
-                          <span>{w.detail}</span>
-                        </div>
-                      ))}
-                </div>
-              </div>
-            </div>
+          {minimap && !present && (
+            <Minimap nodes={nodes} zones={zones} rectOf={rectOf}
+                     fillOf={(n) => nodeTag(n, stages)}
+                     view={view} viewportSize={vpSize} setView={setView} />
           )}
+
         </div>
 
         {/* docked inspector */}
@@ -2440,7 +3473,7 @@ export default function ElasticWhiteboard({ height = "100%" }) {
             const ed = edges.find((x) => x.id === sel.id);
             if (!ed) return null;
             const a = nodeById[ed.s], b = nodeById[ed.e];
-            const hasShape = Array.isArray(ed.pts) && ed.pts.length > 0;
+            const hasShape = (Array.isArray(ed.pts) && ed.pts.length > 0) || !!(ed.sa || ed.ea);
             const autoColor = a ? nodeTag(a, stages) : (b ? nodeTag(b, stages) : stages.ops);
             const autoStyle = ((a && TYPES[a.type].ops) || (b && TYPES[b.type].ops)) ? "dashed" : "solid";
             const lineStyle = ed.style || autoStyle;
@@ -2491,10 +3524,10 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                           </button>
                         ))}
                       </div></div>
-                    <p className="ew-ihint">Drag the hollow dots on the line to bend it; drag a solid dot to move a bend, double-click it to remove.</p>
+                    <p className="ew-ihint">Drag the hollow dots on the line to bend it; drag a solid dot to move a bend, double-click it to remove. Drag either end dot onto another connection point — or another node — to reattach it.</p>
                     <div className="ew-btnrow">
                       {hasShape && <button className="ew-btn" onClick={() => resetEdgeShape(ed.id)}>Reset shape</button>}
-                      <button className="ew-btn" onClick={() => setEd({ s: ed.e, e: ed.s })}>⇄ Reverse direction</button>
+                      <button className="ew-btn" onClick={() => setEd({ s: ed.e, e: ed.s, sa: ed.ea, ea: ed.sa })}>⇄ Reverse direction</button>
                       <button className="ew-btn danger" onClick={() => {
                         snapshot();
                         setEdges((es) => es.filter((x) => x.id !== ed.id));
@@ -2752,6 +3785,24 @@ export default function ElasticWhiteboard({ height = "100%" }) {
                       else if (f.kind === "search") ctrl = (
                         <SearchSelect value={v} options={f.options}
                                       placeholder={f.placeholder || ""} onChange={setP} />);
+                      /* A set of values needs the full width, so it breaks out
+                         of the label/control row the other kinds share. */
+                      else if (f.kind === "chips") return (
+                        <div className="ew-fcol" key={f.key}>
+                          <span className="ew-flabel">{f.label}</span>
+                          <div className="ew-pconf-checks">
+                            {f.options.map((o) => {
+                              const on = Array.isArray(v) && v.includes(o);
+                              return (
+                                <label key={o} className={"ew-pconf-chip" + (on ? " on" : "")}>
+                                  <input type="checkbox" checked={on}
+                                         onChange={() => setP(f.options.filter(
+                                           (x) => (x === o ? !on : Array.isArray(v) && v.includes(x))))} />
+                                  <span>{o}</span>
+                                </label>);
+                            })}
+                          </div>
+                        </div>);
                       else if (f.kind === "toggle") ctrl = (
                         <input type="checkbox" checked={!!v} onChange={(e) => setP(e.target.checked)} />);
                       else if (f.kind === "number") ctrl = (
@@ -2779,83 +3830,242 @@ export default function ElasticWhiteboard({ height = "100%" }) {
             </div>
           );
         })()}
-      </div>
-
-      {/* AI chat */}
+      {/* AI chat — docked on the right edge of the body row, like the
+          inspector, so the conversation gets the full height under the
+          toolbar instead of a floating box over the canvas */}
       {chatOpen && (
         <div className="ew-chat" onPointerDown={(e) => e.stopPropagation()}>
           <div className="ew-chat-head">
             <b>✦ Build with AI</b>
-            <button className="ew-chat-gear" title="Settings" onClick={() => setShowChatSettings((s) => !s)}>⚙</button>
+            <button className="ew-chat-gear" title="Settings" onClick={toggleChatSettings}>⚙</button>
             <button className="ew-x" onClick={() => setChatOpen(false)}>×</button>
           </div>
 
           {showChatSettings && (
             <div className="ew-chat-settings">
-              <div className="ew-awsload">
-                <button className="ew-btn" onClick={loadAwsCreds}>Load from ~/.aws/credentials</button>
-                {awsProfiles && (
-                  <select className="ew-chat-select" value={awsProfileName} title="AWS profile"
-                          onChange={(e) => applyAwsProfile(awsProfiles.find((p) => p.name === e.target.value))}>
-                    {awsProfiles.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-                  </select>
-                )}
-                <input ref={credsFileRef} type="file" style={{ display: "none" }} onChange={pickAwsCredsFile} />
-              </div>
-              {credsNote && <p className="ew-chat-note">{credsNote}</p>}
+              <SettingsSection label="Amazon Bedrock"
+                               status={hasAwsCreds ? "Key set" : "Needs a key"} ok={hasAwsCreds}
+                               open={settingsPane === "bedrock"}
+                               onToggle={() => setSettingsPane((p) => (p === "bedrock" ? null : "bedrock"))}>
+                <div className="ew-awsload">
+                  <button className="ew-btn" onClick={loadAwsCreds}>Load from ~/.aws/credentials</button>
+                  {awsProfiles && (
+                    <select className="ew-chat-select" value={awsProfileName} title="AWS profile"
+                            onChange={(e) => applyAwsProfile(awsProfiles.find((p) => p.name === e.target.value))}>
+                      {awsProfiles.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+                    </select>
+                  )}
+                  <input ref={credsFileRef} type="file" style={{ display: "none" }} onChange={pickAwsCredsFile} />
+                </div>
+                {credsNote && <p className="ew-chat-note">{credsNote}</p>}
 
-              <label className="ew-flabel">AWS region</label>
-              <input value={awsRegion} placeholder="us-east-1"
-                     onChange={(e) => setAwsRegion(e.target.value.trim())} />
-              <label className="ew-flabel">Access key ID</label>
-              <input value={awsKeyId} placeholder="AKIA…"
-                     onChange={(e) => setAwsKeyId(e.target.value.trim())} />
-              <label className="ew-flabel">Secret access key</label>
-              <input type="password" value={awsSecret} placeholder="wJalr…"
-                     onChange={(e) => setAwsSecret(e.target.value.trim())} />
-              <label className="ew-flabel">Session token (optional)</label>
-              <input type="password" value={awsSession} placeholder="for temporary STS credentials"
-                     onChange={(e) => setAwsSession(e.target.value.trim())} />
-              <label className="ew-flabel">Model / inference profile</label>
-              <input value={model} placeholder={BEDROCK_DEFAULT_MODEL}
-                     onChange={(e) => setModel(e.target.value.trim())} />
-              <p className="ew-chat-note">
-                Requests are SigV4-signed and sent straight to Amazon Bedrock in your region — the
-                IAM identity needs <code>bedrock:InvokeModel</code>. Credentials are stored in this
-                browser (localStorage). Don’t use this on a shared computer.
-              </p>
+                <label className="ew-flabel">AWS region</label>
+                <input value={awsRegion} placeholder="us-east-1"
+                       onChange={(e) => setAwsRegion(e.target.value.trim())} />
+                <label className="ew-flabel">Access key ID</label>
+                <input value={awsKeyId} placeholder="AKIA…"
+                       onChange={(e) => setAwsKeyId(e.target.value.trim())} />
+                <label className="ew-flabel">Secret access key</label>
+                <input type="password" value={awsSecret} placeholder="wJalr…"
+                       onChange={(e) => setAwsSecret(e.target.value.trim())} />
+                <label className="ew-flabel">Session token (optional)</label>
+                <input type="password" value={awsSession} placeholder="for temporary STS credentials"
+                       onChange={(e) => setAwsSession(e.target.value.trim())} />
+                <label className="ew-flabel">Model / inference profile</label>
+                <input value={model} placeholder={BEDROCK_DEFAULT_MODEL}
+                       onChange={(e) => setModel(e.target.value.trim())} />
+                <p className="ew-chat-note">
+                  Requests are SigV4-signed and sent straight to Amazon Bedrock in your region — the
+                  IAM identity needs <code>bedrock:InvokeModel</code>. Credentials are stored in this
+                  browser (localStorage). Don’t use this on a shared computer.
+                </p>
+              </SettingsSection>
+
+              <SettingsSection label="Elastic"
+                               status={hasElastic ? "Endpoint set" : "Off — repo corpus"} ok={hasElastic}
+                               open={settingsPane === "elastic"}
+                               onToggle={() => setSettingsPane((p) => (p === "elastic" ? null : "elastic"))}>
+                <p className="ew-chat-note">
+                  Point this at your own deployment and retrieval goes through an Agent Builder
+                  agent over a <code>semantic_text</code> index instead of the corpus in the repo —
+                  the product on the whiteboard doing the work behind it. Without it everything
+                  still works, locally.
+                </p>
+                <label className="ew-flabel">Kibana endpoint</label>
+                <input value={kibanaUrl} placeholder="https://my-deployment.kb.us-east-1.aws.found.io"
+                       onChange={(e) => setKibanaUrl(e.target.value.trim())} />
+                <label className="ew-flabel">Elasticsearch endpoint</label>
+                <input value={esUrl} placeholder="https://my-deployment.es.us-east-1.aws.found.io"
+                       onChange={(e) => setEsUrl(e.target.value.trim())} />
+                <label className="ew-flabel">API key</label>
+                <input type="password" value={elasticKey} placeholder="base64 encoded key"
+                       onChange={(e) => setElasticKey(e.target.value.trim())} />
+                <label className="ew-flabel">Agent id</label>
+                <input value={elasticAgent} placeholder={ELASTIC_DEFAULT_AGENT}
+                       onChange={(e) => setElasticAgent(e.target.value.trim())} />
+                <label className="ew-flabel">Kibana space (optional)</label>
+                <input value={elasticSpace} placeholder="default"
+                       onChange={(e) => setElasticSpace(e.target.value.trim())} />
+                <label className="ew-flabel">Knowledge index</label>
+                <input value={elasticIndexName} placeholder={ELASTIC_DEFAULT_INDEX}
+                       onChange={(e) => setElasticIndexName(e.target.value.trim())} />
+                <p className="ew-chat-note">
+                  Stored in this browser, like the keys above. A read-only key with{" "}
+                  <code>agentBuilder:read</code> is enough to ask questions; pushing the corpus
+                  needs write on that index, which is worth a second key. Calls go straight from
+                  this page, so the deployment needs CORS enabled for this origin once — Check AI
+                  below prints the exact settings if it doesn’t.
+                </p>
+              </SettingsSection>
+
+              <SettingsSection label="Jina — images"
+                               status={jinaKey.trim() ? "Key set" : "Off — images skip"} ok={!!jinaKey.trim()}
+                               open={settingsPane === "jina"}
+                               onToggle={() => setSettingsPane((p) => (p === "jina" ? null : "jina"))}>
+                <p className="ew-chat-note">
+                  An architecture screenshot or a whiteboard photo attached as context is read by
+                  Jina's vision model — transcribed and described, then chunked like any other
+                  document. PDFs and Office files don't need this; Elastic or this browser parses
+                  those. Free key at <b>jina.ai</b>.
+                </p>
+                <label className="ew-flabel">Jina API key</label>
+                <input type="password" value={jinaKey} placeholder="jina_…"
+                       onChange={(e) => setJinaKey(e.target.value.trim())} />
+              </SettingsSection>
+
+              <div className="ew-btnrow">
+                <button className="ew-btn" disabled={preflight?.busy} onClick={runPreflight}>
+                  {preflight?.busy ? "Checking…" : "Check AI"}
+                </button>
+                {hasElastic && (
+                  <>
+                    <button className="ew-btn" disabled={pushState?.busy}
+                            title="Write the repo's Elastic guidance into the index the agent searches"
+                            onClick={() => pushToIndex(false)}>
+                      {pushState?.busy ? "Pushing…" : "Push corpus"}
+                    </button>
+                    {docPassages.length > 0 && (
+                      <button className="ew-btn" disabled={pushState?.busy}
+                              title="Also push this board's documents — they leave the browser only if you do this"
+                              onClick={() => pushToIndex(true)}>
+                        + this board’s documents
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {pushState?.note && <p className="ew-chat-note">Indexed {pushState.note}</p>}
+              {pushState?.errors?.length > 0 && (
+                <p className="ew-modal-bad">{pushState.errors.length} passage(s) rejected: {pushState.errors[0]}</p>
+              )}
+              {pushState?.error && (
+                <>
+                  <p className="ew-modal-bad">{pushState.error}</p>
+                  {pushState.help && <pre className="ew-cors">{pushState.help}</pre>}
+                </>
+              )}
+
+              {preflight && !preflight.busy && (
+                <div className="ew-preflight">
+                  <PreflightRow label="Bedrock" check={preflight.bedrock} />
+                  {preflight.agent
+                    ? <PreflightRow label="Agent Builder" check={preflight.agent} />
+                    : <p className="ew-ihint">Elastic isn’t configured — retrieval runs on the repo corpus.</p>}
+                  {preflight.index && (
+                    <PreflightRow label="Knowledge index" check={preflight.index}
+                                  detail={`${preflight.index.count} passages`} />
+                  )}
+                </div>
+              )}
             </div>
           )}
 
           <div className="ew-chat-log" ref={chatLogRef}>
             {chatMsgs.length === 0 && !chatBusy && (
               <div className="ew-chat-empty">
-                Describe an architecture and I’ll build it.
+                {nodes.length ? "Ask about this board, or tell me what to change." : "Describe an architecture and I’ll build it."}
                 <div className="ew-chat-chips">
-                  {["Design a SIEM log ingest pipeline",
-                    "Build an air-gapped Elastic deployment",
-                    "Add a Kafka buffer before Elasticsearch"].map((s) => (
+                  {chatChips.map((s) => (
                     <button key={s} onClick={() => setChatInput(s)}>{s}</button>
                   ))}
                 </div>
               </div>
             )}
             {chatMsgs.map((m, i) => (
-              <div key={i} className={"ew-msg " + m.role}>{m.text}</div>
+              <div key={i} className={"ew-msg " + m.role}>
+                {m.trail?.length > 0 && (
+                  <p className="ew-trail" title="What ran to produce this answer">
+                    {m.trail.map((t, j) => (
+                      <em key={j} className={t.ok ? "" : "bad"}>{t.did}</em>
+                    ))}
+                  </p>
+                )}
+                {/* the model answers in Markdown; what the user typed is left as typed */}
+                {m.role === "ai" ? <ChatMarkdown text={m.text} /> : m.text}
+                {m.sources?.length > 0 && (
+                  <p className="ew-cite" title="Retrieved passages this answer was grounded in">
+                    <span>Sources</span>
+                    {m.sources.map((s) => <em key={s}>{s}</em>)}
+                  </p>
+                )}
+              </div>
             ))}
-            {chatBusy && <div className="ew-msg ai ew-thinking">Thinking…</div>}
+            {/* the turn in progress, step by step — in-flight lines pulse,
+                settled ones keep the trail's past-tense words */}
+            {chatBusy && (
+              <div className="ew-msg ai ew-live" title="What the agent is doing right now">
+                {chatSteps.filter((s) => s.kind === "tool" || s.kind === "retry").map((s, i) => (
+                  s.kind === "retry" ? (
+                    <em key={i} className="ew-thinking">
+                      Bedrock pushed back (HTTP {s.status}) — retrying{"\u2026"}
+                    </em>
+                  ) : (
+                    <em key={i} className={(s.ok === false ? "bad" : "") + (s.ok === undefined ? " ew-thinking" : "")}>
+                      {(s.ok === undefined ? TOOL_DOING[s.name] : TOOL_TRAIL[s.name]) || s.name}
+                      {s.input?.query ? ` — \u201c${s.input.query}\u201d` : ""}
+                      {s.ok === undefined ? "\u2026" : ""}
+                    </em>
+                  )
+                ))}
+                {(chatSteps.length === 0 || chatSteps[chatSteps.length - 1].kind === "model") && (
+                  <em className="ew-thinking">Thinking…</em>
+                )}
+              </div>
+            )}
           </div>
+
+          {pendingApply && (
+            <div className="ew-apply">
+              <b>{pendingApply.label}</b>
+              {pendingApply.lines.length > 0 && (
+                <ul>{pendingApply.lines.map((l) => <li key={l}>{l}</li>)}</ul>
+              )}
+              <div className="ew-btnrow">
+                <button className="ew-btn primary" onClick={applyPending}>Apply</button>
+                <button className="ew-btn" onClick={() => setPendingApply(null)}>Discard</button>
+              </div>
+            </div>
+          )}
+
+          {chatUsage && (chatUsage.cacheReadInputTokens > 0 || chatUsage.cacheWriteInputTokens > 0) && (
+            <p className="ew-chat-usage" title="Bedrock served the instructions and catalog from its prompt cache">
+              cache read {chatUsage.cacheReadInputTokens.toLocaleString("en-US")} ·
+              written {chatUsage.cacheWriteInputTokens.toLocaleString("en-US")} tokens
+            </p>
+          )}
 
           <div className="ew-chat-form">
             <textarea className="ew-chat-input" rows={2} value={chatInput}
                       placeholder={hasAwsCreds ? "Describe or edit the diagram…" : "Add AWS credentials (⚙) to begin…"}
                       onChange={(e) => setChatInput(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }} />
-            <button className="ew-chat-send" onClick={sendChat} disabled={chatBusy || !chatInput.trim()}
+            <button className="ew-chat-send" onClick={() => sendChat()} disabled={chatBusy || !chatInput.trim()}
                     title="Send (Enter)">{chatBusy ? "…" : "Send"}</button>
           </div>
         </div>
       )}
+      </div>
 
       {/* palette drag ghost */}
       {ghost && (
@@ -2918,6 +4128,256 @@ function InkTools({ tool, setTool, color, setColor, onClear, hasInk }) {
 
 /* Paste real Elasticsearch output and preview what it would draw before
    committing it to a new board. */
+/* One collapsible block of provider settings. The header carries whether that
+   provider is configured, so the panel answers "am I set up?" while collapsed
+   and only costs its height once you're actually editing it. */
+function SettingsSection({ label, status, ok, open, onToggle, children }) {
+  return (
+    <div className={"ew-sect" + (open ? " open" : "")}>
+      <button type="button" className="ew-sect-h" aria-expanded={open} onClick={onToggle}>
+        <span className="ew-sect-caret">{open ? "▾" : "▸"}</span>
+        <b>{label}</b>
+        <em className={ok ? "ok" : ""}>{status}</em>
+      </button>
+      {open && <div className="ew-sect-body">{children}</div>}
+    </div>
+  );
+}
+
+/* One leg of the pre-flight check. A failure is only useful if it says which
+   failure it was, so a CORS block prints the settings that fix it rather than
+   the browser's own "Failed to fetch", which says nothing. */
+function PreflightRow({ label, check, detail }) {
+  return (
+    <div className={"ew-pf" + (check.ok ? " ok" : " bad")}>
+      <b>{label}</b>
+      <span>
+        {check.ok ? (detail || check.detail || "ready") : check.error}
+        {check.ms != null && check.ok ? ` · ${check.ms} ms` : ""}
+      </span>
+      {check.help && <pre className="ew-cors">{check.help}</pre>}
+    </div>
+  );
+}
+
+/* The documents attached to this board: paste them or pick a file, see what
+   they were chunked into, and hand the design a brief it can be held against.
+
+   Everything here is local. Attaching a document parses it in the browser and
+   stores it with the board — the only thing that ever leaves is a passage the
+   model retrieves during a turn you asked for. */
+/* The customer half of the Board Context modal: paste an `edm … --json` run,
+   or type the account and opportunity by hand when there's no CLI around.
+   Successive pastes accumulate — opp, then stakeholders, then install base. */
+function CustomerSection({ customer, onCustomer }) {
+  const [paste, setPaste] = useState("");
+  const [note, setNote] = useState(null);   // { ok, text } from the last import
+  const jsonRef = useRef(null);
+
+  const importText = (text) => {
+    try {
+      const { kind, patch } = parseEdmRows(text);
+      onCustomer(mergeCustomer(customer, patch));
+      setPaste("");
+      setNote({ ok: true, text: `Imported ${kind}.` });
+    } catch (err) {
+      setNote({ ok: false, text: err.message });
+    }
+  };
+  const pickJson = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) importText(await file.text());
+  };
+  const setField = (field) => (e) =>
+    onCustomer({ ...EMPTY_CUSTOMER, ...(customer || {}), [field]: e.target.value });
+
+  const m = customer?.meddpicc;
+  return (
+    <>
+      <div className="ew-cust-h">
+        <b>Customer</b>
+        {hasCustomer(customer) && (
+          <button className="ew-btn" title="Forget everything imported for this board"
+                  onClick={() => { onCustomer(null); setNote(null); }}>Clear</button>
+        )}
+      </div>
+      <p className="ew-modal-hint">
+        Who this board is for. The AI designs and reviews with it in mind; only the account
+        and opportunity names ever reach anything customer-facing. Paste the JSON from an{" "}
+        <code>edm</code> run — <code>edm opps --json</code>, then <code>stakeholders</code>,{" "}
+        <code>installbase</code>, <code>meddpicc</code>, or <code>health</code> — each paste
+        adds its part.
+      </p>
+
+      <div className="ew-frow">
+        <span className="ew-flabel">Account</span>
+        <input value={customer?.account || ""} placeholder="Acme Corp"
+               onChange={setField("account")} />
+      </div>
+      <div className="ew-frow">
+        <span className="ew-flabel">Opportunity</span>
+        <input value={customer?.opportunity || ""} placeholder="Acme Expansion FY27"
+               onChange={setField("opportunity")} />
+      </div>
+
+      {hasCustomer(customer) && (
+        <div className="ew-cust-panel">
+          {customer.stage && (
+            <div><i>Deal</i>{[customer.stage, customer.value != null && `$${Number(customer.value).toLocaleString()}`,
+              customer.closeDate && `closes ${customer.closeDate}`, customer.ae && `AE ${customer.ae}`]
+              .filter(Boolean).join(" · ")}</div>
+          )}
+          {customer.stakeholders?.length > 0 && (
+            <div><i>People</i>{customer.stakeholders.slice(0, 6)
+              .map((s) => `${s.name}${s.role ? ` (${s.role})` : ""}`).join(", ")}
+              {customer.stakeholders.length > 6 ? ` +${customer.stakeholders.length - 6} more` : ""}</div>
+          )}
+          {customer.installBase?.length > 0 && (
+            <div><i>Install base</i>{customer.installBase.slice(0, 4)
+              .map((s) => [s.product, s.version, s.nodes != null && `${s.nodes} nodes`]
+                .filter(Boolean).join(" ")).join("; ")}</div>
+          )}
+          {m && <div><i>Deal review</i>{[m.score != null && `Altify ${m.score}%`,
+            m.champion && `champion ${m.champion}`, m.eb && `EB ${m.eb}`]
+            .filter(Boolean).join(" · ") || "on file"}</div>}
+          {customer.health?.length > 0 && (
+            <div><i>Support</i>{customer.health.length} open case{customer.health.length === 1 ? "" : "s"}
+              {customer.health.some((h) => h.escalated) ? ", some escalated" : ""}</div>
+          )}
+          {customer.notes && <div><i>Notes</i>on file for the AI</div>}
+        </div>
+      )}
+
+      <textarea className="ew-itext" rows={4} value={paste} spellCheck={false}
+                placeholder={"Paste an edm … --json result here."}
+                onChange={(e) => setPaste(e.target.value)} />
+      {note && <p className={note.ok ? "ew-ihint" : "ew-modal-bad"}>{note.text}</p>}
+      <div className="ew-btnrow">
+        <button className="ew-btn" disabled={!paste.trim()} onClick={() => importText(paste)}>
+          Import customer details</button>
+        <input ref={jsonRef} type="file" accept=".json,application/json" style={{ display: "none" }}
+               onChange={pickJson} />
+        <button className="ew-btn" onClick={() => jsonRef.current?.click()}>Upload .json…</button>
+      </div>
+    </>
+  );
+}
+
+function BoardContext({ documents, passages, onClose, onAttach, onRemove, onAsk, parseCfg,
+                        customer, onCustomer }) {
+  const [text, setText] = useState("");
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  const [parsing, setParsing] = useState(false);
+  const [parsedVia, setParsedVia] = useState("");  // which machinery read the last upload
+  const fileRef = useRef(null);
+
+  const attach = (doc) => {
+    const failed = onAttach(doc);
+    setError(failed);
+    if (failed) setParsedVia("");
+    else { setText(""); setName(""); }
+    return !failed;
+  };
+
+  /* The picker takes any file — an accept filter greys out exactly the files
+     people bring (their RFP is a PDF), which reads as the button being broken.
+     parseDocument routes what was picked: text reads directly, PDF/DOCX/XLSX
+     go to the Elastic deployment's attachment processor with browser parsers
+     as the fallback, images go to Jina. Failures come back as a sentence
+     saying what to do instead. */
+  const pickFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";                       // re-picking the same file should still fire
+    if (!file) return;
+    setParsing(true);
+    setError("");
+    setParsedVia("");
+    try {
+      const { text: body, via } = await parseDocument(file, parseCfg);
+      if (attach({ name: file.name, text: body })) setParsedVia(`${file.name} — ${via}.`);
+    } catch (err) {
+      setError(err.message || "Couldn't read that file.");
+    } finally {
+      setParsing(false);
+    }
+  };
+
+  /* Straight from here into a turn, because the point of attaching a document
+     is the two questions that follow it. */
+  const ask = (prompt) => { onClose(); onAsk(prompt); };
+
+  const passagesFor = (id) => passages.filter((p) => p.id.startsWith(`${id}#`)).length;
+
+  return (
+    <>
+      <div className="ew-modal-backdrop" onClick={onClose} />
+      <div className="ew-modal">
+        <div className="ew-modal-h">
+          <b>Board context</b>
+          <button className="ew-x" onClick={onClose}>×</button>
+        </div>
+        <div className="ew-modal-body">
+          <p className="ew-modal-hint">
+            What the customer actually asked for — an RFP, a requirements sheet, last call's
+            notes. The AI can design to it and check the board against it, citing the document
+            rather than guessing. Parsed in this browser and stored with this board; it never
+            travels in a share link.
+          </p>
+
+          {documents.length > 0 && (
+            <ul className="ew-docs">
+              {documents.map((d) => (
+                <li key={d.id}>
+                  <span>{d.name}</span>
+                  <em>{passagesFor(d.id)} passage{passagesFor(d.id) === 1 ? "" : "s"}</em>
+                  <button className="ew-x" title="Remove this document"
+                          onClick={() => onRemove(d.id)}>×</button>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <div className="ew-frow">
+            <span className="ew-flabel">Name</span>
+            <input value={name} placeholder="Acme RFP — section 4"
+                   onChange={(e) => setName(e.target.value)} />
+          </div>
+          <textarea className="ew-itext" rows={8} value={text} spellCheck={false}
+                    placeholder={"Paste the requirements, the RFP section, or your notes from the call.\n\nHeadings help — each becomes its own passage, so a citation points at the part that mattered."}
+                    onChange={(e) => setText(e.target.value)} />
+          {error && <p className="ew-modal-bad">{error}</p>}
+          {parsedVia && !error && <p className="ew-ihint">{parsedVia}</p>}
+
+          {documents.length > 0 && (
+            <div className="ew-btnrow">
+              <button className="ew-btn act" onClick={() => ask("Design to the requirements in the documents attached to this board. Search them first, build what they describe, and say which requirement drove each part of the design.")}>
+                ✦ Design to this
+              </button>
+              <button className="ew-btn act" onClick={() => ask("Check this board against the requirements in the attached documents. Search them, then list where the design meets what they asked for and where it does not, citing the document for each. Say plainly if something they asked for is missing.")}>
+                ✦ Check the design against it
+              </button>
+            </div>
+          )}
+
+          <div className="ew-cust-sep" />
+          <CustomerSection customer={customer} onCustomer={onCustomer} />
+        </div>
+        <div className="ew-modal-foot">
+          <span className="ew-ihint">Text, PDF, Word, Excel — and images, with a Jina key.</span>
+          <input ref={fileRef} type="file" style={{ display: "none" }}
+                 onChange={pickFile} />
+          <button className="ew-btn" disabled={parsing}
+                  onClick={() => fileRef.current?.click()}>{parsing ? "Parsing…" : "Upload a file…"}</button>
+          <button className="ew-btn primary" disabled={!text.trim()}
+                  onClick={() => attach({ name, text })}>Attach</button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function ClusterImport({ onClose, onImport }) {
   const [text, setText] = useState("");
   const parsed = useMemo(() => parseClusterInput(text), [text]);
@@ -2975,21 +4435,99 @@ function ClusterImport({ onClose, onImport }) {
   );
 }
 
-/* The written follow-up. Editable before it's copied — the model drafts, the
-   SA decides what actually goes to the customer. */
-function BoardSummary({ state, onClose, onCopy, onRetry }) {
-  const [draft, setDraft] = useState(state.text || "");
-  useEffect(() => { if (state.text) setDraft(state.text); }, [state.text]);
+/* The written artifact. One board's facts, several things to write from them, so
+   the modal opens on the choice and nothing is sent until it's made — then the
+   header's picker re-runs against the same facts. Editable before it's copied:
+   the model drafts, the SA decides what actually goes to the customer. */
+/* The follow-up package's preview: the captured board image, the recap draft
+   (editable — it leaves the building, so it gets checked first), and the two
+   ways out: a self-contained HTML file or markdown on the clipboard. */
+function FollowupModal({ state, onClose, onRetry, onDownload, onCopy }) {
+  const [draft, setDraft] = useState(state.md || "");
+  useEffect(() => { if (state.md) setDraft(state.md); }, [state.md]);
 
   return (
     <>
       <div className="ew-modal-backdrop" onClick={onClose} />
       <div className="ew-modal">
         <div className="ew-modal-h">
-          <b>Follow-up note</b>
+          <b>Follow-up package</b>
           <button className="ew-x" onClick={onClose}>×</button>
         </div>
         <div className="ew-modal-body">
+          {state.busy && <p className="ew-modal-hint">Packaging the session — rendering the board and writing the recap…</p>}
+          {!state.busy && (
+            <>
+              {state.png
+                ? <img className="ew-followup-thumb" src={state.png} alt="The board, as it will appear in the package" />
+                : <p className="ew-ihint">The board image couldn't be rendered — the package will carry text only.</p>}
+              {state.error && <p className="ew-modal-bad">{state.error}</p>}
+              {state.noCreds && (
+                <p className="ew-ihint">No Bedrock credentials, so there's no written recap —
+                  the image, capacity, and findings are exact; add credentials for the narrative.</p>
+              )}
+              {state.md && (
+                <textarea className="ew-itext" rows={10} value={draft}
+                          onChange={(e) => setDraft(e.target.value)} />
+              )}
+              <p className="ew-ihint">
+                One self-contained HTML file: the board image, the recap, capacity, and review
+                findings. Only the account and opportunity names appear — deal details stay out.
+                Check it before it leaves the building.
+              </p>
+            </>
+          )}
+        </div>
+        <div className="ew-modal-foot">
+          <span className="ew-ihint" />
+          <button className="ew-btn" onClick={onClose}>Close</button>
+          {state.error && <button className="ew-btn" onClick={onRetry}>Try again</button>}
+          {!state.busy && <button className="ew-btn" onClick={() => onCopy(draft)}>Copy Markdown</button>}
+          {!state.busy && <button className="ew-btn primary" onClick={() => onDownload(draft)}>Download HTML</button>}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function BoardSummary({ state, onClose, onCopy, onWrite }) {
+  const [draft, setDraft] = useState(state.text || "");
+  useEffect(() => { if (state.text) setDraft(state.text); }, [state.text]);
+  const genre = state.genre || SUMMARY_DEFAULT;
+  const genres = Object.entries(SUMMARY_PROMPTS);
+
+  return (
+    <>
+      <div className="ew-modal-backdrop" onClick={onClose} />
+      <div className="ew-modal">
+        <div className="ew-modal-h">
+          <b>{state.choosing ? "Write it up" : SUMMARY_PROMPTS[genre].label}</b>
+          {!state.choosing && (
+            <select className="ew-chat-select" value={genre} disabled={state.busy}
+                    title="Write something else from the same board"
+                    onChange={(e) => onWrite(e.target.value)}>
+              {genres.map(([key, g]) => <option key={key} value={key}>{g.label}</option>)}
+            </select>
+          )}
+          <button className="ew-x" onClick={onClose}>×</button>
+        </div>
+        <div className="ew-modal-body">
+          {state.choosing && (
+            <>
+              <p className="ew-modal-hint">
+                Same facts — the diagram, the capacity rollup, and the review findings.
+                Pick what to write from them.
+              </p>
+              <div className="ew-genres">
+                {genres.map(([key, g]) => (
+                  <button key={key} className="ew-genre" onClick={() => onWrite(key)}>
+                    <b>{g.label}</b>
+                    <span>{g.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           {state.busy && <p className="ew-modal-hint">Writing up the board…</p>}
           {state.error && <p className="ew-modal-bad">{state.error}</p>}
           {state.text && (
@@ -3003,7 +4541,7 @@ function BoardSummary({ state, onClose, onCopy, onRetry }) {
         <div className="ew-modal-foot">
           <span className="ew-ihint" />
           <button className="ew-btn" onClick={onClose}>Close</button>
-          {state.error && <button className="ew-btn" onClick={onRetry}>Try again</button>}
+          {state.error && <button className="ew-btn" onClick={() => onWrite(genre)}>Try again</button>}
           {state.text && (
             <button className="ew-btn primary" onClick={() => onCopy(draft)}>Copy</button>
           )}
@@ -3021,20 +4559,58 @@ function BoardSummary({ state, onClose, onCopy, onRetry }) {
 function SearchSelect({ value, options, placeholder, onChange }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(null);   // null: not filtering, show the value
+  const inputRef = useRef(null);
+  const hostRef = useRef(null);
+  const [anchor, setAnchor] = useState(null);
   const needle = (query || "").trim().toLowerCase();
   const matches = useMemo(() => {
     const list = needle ? options.filter((o) => o.toLowerCase().includes(needle)) : options;
     return list.slice(0, 200);
   }, [options, needle]);
+
+  /* The list is measured against the viewport and rendered into the body,
+     rather than positioned inside the input. Every dialog using this has an
+     `overflow:auto` body that would clip a child to whatever room is left
+     under the row — a line or two of a two-hundred-entry catalog. `fixed`
+     alone does not escape it either, because `.ew-modal` is transformed and
+     so becomes the containing block. The portal goes to `.ew-root` rather
+     than the document body because the theme's custom properties are scoped
+     there. Measuring also lets the list open upwards when the row sits near
+     the bottom of the screen. */
+  useEffect(() => {
+    if (!open) return undefined;
+    hostRef.current = inputRef.current?.closest(".ew-root") || document.body;
+    const place = () => {
+      const rect = inputRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const below = window.innerHeight - rect.bottom - 12;
+      const above = rect.top - 12;
+      const flip = below < 180 && above > below;
+      setAnchor({
+        left: rect.left,
+        width: rect.width,
+        maxHeight: Math.max(flip ? above : below, 120),
+        ...(flip ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }),
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open]);
+
   return (
     <div className="ew-combo">
-      <input value={query !== null ? query : (value || "")} placeholder={placeholder}
+      <input ref={inputRef} value={query !== null ? query : (value || "")} placeholder={placeholder}
              onFocus={() => setOpen(true)}
              onChange={(e) => { setQuery(e.target.value); setOpen(true); onChange(e.target.value); }}
              onBlur={() => { setOpen(false); setQuery(null); }}
              onKeyDown={(e) => { if (e.key === "Escape" || e.key === "Enter") e.target.blur(); }} />
-      {open && matches.length > 0 && (
-        <div className="ew-combo-list"
+      {open && anchor && hostRef.current && matches.length > 0 && createPortal(
+        <div className="ew-combo-list" style={anchor}
              onPointerDown={(e) => e.preventDefault()} /* keep input focus while scrolling/picking */>
           {matches.map((o) => (
             <button key={o} type="button"
@@ -3042,7 +4618,8 @@ function SearchSelect({ value, options, placeholder, onChange }) {
               {o}
             </button>
           ))}
-        </div>
+        </div>,
+        hostRef.current,
       )}
     </div>
   );
@@ -3061,7 +4638,7 @@ function DataSourcesDialog({ onClose, onAdd }) {
   return (
     <>
       <div className="ew-modal-backdrop" onClick={onClose} />
-      <div className="ew-modal">
+      <div className="ew-modal ew-modal-wide">
         <div className="ew-modal-h">
           <b>Add data sources</b>
           <button className="ew-x" onClick={onClose}>×</button>
@@ -3419,7 +4996,14 @@ const CSS = `
 .ew-toolbar button:hover:not(:disabled){ border-color:var(--accent); }
 .ew-toolbar button:disabled{ opacity:.35; cursor:default; }
 .ew-gap{ width:10px; }
-.ew-zoom{ font-family:var(--mono); font-size:12px; color:var(--muted); min-width:44px; text-align:center; }
+.ew-sep{ width:1px; align-self:stretch; margin:4px 3px; background:var(--line); flex:none; }
+.ew-zoomgrp{ display:inline-flex; align-items:stretch; }
+.ew-zoomgrp button{ border-radius:0; }
+.ew-zoomgrp button + button{ margin-left:-1px; }
+.ew-zoomgrp button:first-child{ border-radius:7px 0 0 7px; }
+.ew-zoomgrp button:last-child{ border-radius:0 7px 7px 0; }
+.ew-zoomgrp button:hover:not(:disabled){ position:relative; z-index:1; }
+.ew-zoom{ color:var(--muted) !important; min-width:44px; text-align:center; padding:5px 6px !important; }
 .ew-totals{ font-family:var(--mono); font-size:11.5px; color:var(--accent) !important; margin-left:6px;
   display:inline-flex; align-items:center; gap:7px; }
 .ew-totals.on{ border-color:var(--accent) !important; }
@@ -3437,6 +5021,9 @@ const CSS = `
 .ew-inkswatch{ width:24px; height:24px; padding:0 !important; border-radius:6px;
   background:var(--sw) !important; border:1px solid var(--line) !important; }
 .ew-inkswatch.act{ box-shadow:0 0 0 2px var(--panel), 0 0 0 3px var(--sw); }
+.ew-menu-inkrow{ display:flex; gap:6px; padding:4px 8px; }
+.ew-menu .ew-inkswatch{ width:24px; height:24px; flex:none; }
+.ew-toolbar > .ew-menuwrap > button.on{ border-color:var(--accent); color:var(--accent); }
 .ew-stepbtns{ flex-wrap:wrap; }
 .ew-stepbtns .ew-btn{ min-width:34px; text-align:center; }
 .ew-present-bar{ justify-content:flex-start; }
@@ -3466,20 +5053,46 @@ const CSS = `
 .ew-modal-preview li{ display:flex; justify-content:space-between; gap:12px; }
 .ew-modal-preview li span{ color:var(--ink); }
 .ew-modal-preview li em{ font-style:normal; font-family:var(--mono); font-size:11px; }
+/* the customer's documents, attached to this board */
+.ew-followup-thumb{ width:100%; border:1px solid var(--line); border-radius:8px; display:block; }
+.ew-cust-sep{ height:1px; background:var(--line); margin:4px 0; }
+.ew-cust-h{ display:flex; align-items:center; justify-content:space-between; }
+.ew-cust-h b{ font-family:var(--display); font-weight:500; font-size:14px; }
+.ew-cust-panel{ display:grid; gap:4px; padding:9px 12px; border:1px solid var(--line);
+  border-radius:9px; background:var(--panel2); font-size:12px; color:var(--ink); }
+.ew-cust-panel i{ font-style:normal; font-family:var(--mono); font-size:9.5px; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--faint); display:inline-block; width:86px; }
+.ew-docs{ margin:0; padding:0; list-style:none; display:grid; gap:5px; }
+.ew-docs li{ display:flex; align-items:center; gap:9px; padding:7px 9px 7px 12px;
+  background:var(--panel2); border:1px solid var(--line); border-radius:8px; font-size:12.5px; }
+.ew-docs li span{ flex:1; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ew-docs li em{ font-style:normal; font-family:var(--mono); font-size:10.5px; color:var(--faint); }
+.ew-ctx-toggle.on{ border-color:var(--accent) !important; color:var(--accent) !important; }
+/* what to write from the board, chosen before anything is sent */
+.ew-genres{ display:grid; gap:7px; }
+.ew-genre{ display:grid; gap:2px; text-align:left; cursor:pointer; padding:10px 13px;
+  background:var(--panel2); color:var(--ink); border:1px solid var(--line); border-radius:9px; }
+.ew-genre:hover{ border-color:var(--accent); }
+.ew-genre b{ font-family:var(--display); font-weight:500; font-size:13px; }
+.ew-genre span{ font-family:var(--body); font-size:11.5px; line-height:1.45; color:var(--muted); }
 .ew-modal-foot{ display:flex; align-items:center; gap:9px; padding:12px 17px;
   border-top:1px solid var(--line); }
 .ew-modal-foot .ew-ihint{ flex:1; margin:0; }
 .ew-btn.primary{ background:var(--accent); border-color:var(--accent); color:#0C1530; }
 .ew-btn.primary:disabled{ opacity:.35; }
-/* capacity + architecture review, floating over the canvas */
-.ew-review{ position:absolute; left:14px; bottom:14px; z-index:20; width:330px;
-  max-height:min(62%, 560px); display:flex; flex-direction:column;
-  background:var(--panel); border:1px solid var(--line); border-radius:11px;
-  box-shadow:0 18px 40px rgba(0,0,0,.45); }
+/* capacity + architecture review, docked to the left edge as a full-height
+   flyout — the mirror of the chat on the right */
+.ew-review{ width:330px; flex:none; min-height:0; display:flex; flex-direction:column;
+  overflow:hidden; background:var(--panel2); border-right:1px solid var(--line);
+  animation:ew-flyin-left .16s ease; }
+@keyframes ew-flyin-left{ from{ transform:translateX(-14px); opacity:0; } }
 .ew-review-h{ display:flex; align-items:center; gap:8px; padding:10px 8px 10px 13px;
-  border-bottom:1px solid var(--line); }
+  border-bottom:1px solid var(--line); flex:none; }
 .ew-review-h b{ flex:1; font-family:var(--display); font-weight:500; font-size:13.5px; }
-.ew-review-body{ padding:11px 13px 13px; overflow:auto; display:grid; gap:11px; }
+/* flex:1 + min-height:0 is what lets the body shrink below its content, which
+   is what makes overflow:auto actually scroll inside the column flex panel */
+.ew-review-body{ flex:1; min-height:0; padding:11px 13px 13px; overflow:auto;
+  display:grid; gap:11px; align-content:start; }
 .ew-review-stats{ display:grid; grid-template-columns:repeat(4, 1fr); gap:7px; }
 .ew-review-stats span{ display:grid; gap:1px; font-size:9.5px; font-family:var(--mono);
   letter-spacing:.06em; text-transform:uppercase; color:var(--faint); }
@@ -3497,7 +5110,10 @@ const CSS = `
 .ew-check.info{ border-left-color:#4C8DFF; }
 .ew-check b{ font-family:var(--display); font-weight:500; font-size:12.5px; }
 .ew-check span{ font-size:11px; color:var(--muted); line-height:1.45; }
-.ew-diff{ left:auto; right:14px; }
+/* the board comparison still floats over the canvas, pinned bottom-right */
+.ew-diff{ position:absolute; right:14px; bottom:14px; z-index:20; width:330px;
+  max-height:min(84%, 800px); background:var(--panel); border:1px solid var(--line);
+  border-radius:11px; box-shadow:0 18px 40px rgba(0,0,0,.45); animation:none; }
 .ew-diff .ew-review-tiers td:last-child{ color:var(--muted); }
 .ew-diff .ew-review-tiers td.up{ color:var(--accent); }
 .ew-diff .ew-review-tiers td.down{ color:#E7664C; }
@@ -3528,7 +5144,8 @@ const CSS = `
 .ew-hw-row .ew-itext{ width:100%; }
 .ew-linkbtn{ background:none; border:none; padding:0; cursor:pointer; color:var(--accent);
   font:inherit; text-decoration:underline; }
-.ew-hint{ font-family:var(--mono); font-size:10.5px; color:var(--faint); }
+.ew-hint{ font-family:var(--mono); font-size:10.5px; color:var(--faint); margin-left:auto;
+  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .ew-menuwrap{ position:relative; display:inline-flex; }
 .ew-menu-backdrop{ position:fixed; inset:0; z-index:40; }
 .ew-menu{ position:absolute; top:calc(100% + 6px); left:0; z-index:41; min-width:190px;
@@ -3544,6 +5161,10 @@ const CSS = `
 .ew-menu button:disabled{ opacity:.35; cursor:default; }
 .ew-menu button.act{ color:var(--accent); }
 .ew-menu-sep{ height:1px; background:var(--line); margin:4px 2px; }
+.ew-menu-row{ display:flex; gap:2px; }
+.ew-menu-row > button:first-child{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ew-menu-row .ew-menu-x{ width:auto; flex:none; padding:6px 7px; color:var(--faint); }
+.ew-menu-row .ew-menu-x:hover{ color:var(--ink); }
 .ew-menu-check{ display:flex; align-items:center; gap:7px; padding:6px 8px; cursor:pointer;
   font-family:var(--mono); font-size:12px; color:var(--muted); }
 .ew-menu-check input{ accent-color:var(--accent); width:14px; height:14px; }
@@ -3634,6 +5255,9 @@ const CSS = `
 .ew-wp-add{ fill:var(--bg); stroke:var(--accent); stroke-width:2.5; opacity:.85; cursor:copy;
   filter:drop-shadow(0 1px 2px rgba(0,0,0,.4)); }
 .ew-wp-add:hover{ opacity:1; fill:var(--accent); }
+.ew-wp-end{ fill:var(--bg); stroke:var(--accent); stroke-width:3; cursor:crosshair;
+  filter:drop-shadow(0 1px 2.5px rgba(0,0,0,.5)); }
+.ew-wp-end:hover{ fill:var(--accent); stroke:var(--bg); }
 .ew-zone{ position:absolute; border:1.5px dashed var(--zc); border-radius:14px;
   background:color-mix(in srgb, var(--zc) 4%, transparent); pointer-events:none; }
 .ew-zone.sel{ border-style:solid; }
@@ -3646,6 +5270,15 @@ const CSS = `
 .ew-zport{ position:absolute; right:-6px; top:50%; margin-top:-6px; width:12px; height:12px; border-radius:99px;
   background:var(--bg); border:2px solid var(--zc); cursor:crosshair; pointer-events:auto; z-index:4; }
 .ew-zport:hover{ background:var(--zc); }
+.ew-minimap{ position:absolute; left:14px; bottom:14px; z-index:25; display:block;
+  background:color-mix(in srgb, var(--panel) 90%, transparent);
+  border:1px solid var(--line); border-radius:9px; box-shadow:0 8px 22px rgba(0,0,0,.3);
+  cursor:pointer; touch-action:none; }
+.ew-minimap-node{ stroke:none; }
+.ew-minimap-vp{ fill:var(--accent); fill-opacity:.07; stroke:var(--accent); stroke-width:1.5; }
+.ew-guide{ position:absolute; pointer-events:none; z-index:30; }
+.ew-guide.v{ width:0; border-left:1.5px dashed var(--accent); }
+.ew-guide.h{ height:0; border-top:1.5px dashed var(--accent); }
 .ew-marquee{ position:absolute; border:1px dashed #4C8DFF; background:rgba(76,141,255,.08);
   pointer-events:none; }
 .ew-node{ position:absolute; border:1px solid var(--line); border-radius:10px;
@@ -3681,9 +5314,9 @@ const CSS = `
 .ew-fchips em{ font-style:normal; font-family:var(--mono); font-size:9.5px; color:var(--muted);
   border:1px solid var(--line); background:var(--panel2); border-radius:99px; padding:1px 7px;
   white-space:nowrap; }
-.ew-port{ position:absolute; width:11px; height:11px; margin:-5.5px; border-radius:99px;
+.ew-port{ position:absolute; width:9px; height:9px; margin:-4.5px; border-radius:99px;
   background:var(--bg); border:2px solid var(--tag); cursor:crosshair; z-index:3; }
-.ew-port:hover{ background:var(--tag); }
+.ew-port:hover{ background:var(--tag); transform:scale(1.35); }
 .ew-grip{ position:absolute; right:-6px; bottom:-6px; width:13px; height:13px; z-index:3;
   border-radius:3px; background:var(--panel2); border:2px solid var(--tag); cursor:nwse-resize; }
 .ew-grip:hover{ background:var(--tag); }
@@ -3705,6 +5338,8 @@ const CSS = `
 .ew-iscroll h5{ margin:0; font-family:var(--mono); font-size:10px; letter-spacing:.14em;
   text-transform:uppercase; color:var(--faint); font-weight:400; }
 .ew-frow{ display:grid; grid-template-columns:72px 1fr; align-items:center; gap:8px; }
+/* full-width variant for controls that can't sit in the label column */
+.ew-fcol{ display:grid; gap:6px; }
 .ew-flabel{ font-size:11.5px; color:var(--muted); }
 .ew-frow input:not([type=checkbox]):not([type=color]):not([type=file]), .ew-frow select{
   background:var(--panel); color:var(--ink); border:1px solid var(--line); border-radius:6px;
@@ -3718,8 +5353,10 @@ const CSS = `
   border-radius:6px; padding:7px 9px; font-size:12.5px; font-family:var(--body); width:100%;
   box-sizing:border-box; }
 .ew-srcrow .ew-combo input:focus{ outline:none; border-color:var(--accent); }
-.ew-combo-list{ position:absolute; top:calc(100% + 4px); left:0; right:0; z-index:30;
-  max-height:200px; overflow-y:auto; overscroll-behavior:contain;
+/* Fixed, and placed by SearchSelect against the input's own rect, so a dialog
+   body that scrolls cannot clip it. */
+.ew-combo-list{ position:fixed; z-index:70;
+  overflow-y:auto; overscroll-behavior:contain;
   background:var(--panel); border:1px solid var(--line); border-radius:8px;
   box-shadow:0 8px 24px rgba(0,0,0,.4); }
 .ew-combo-list button{ display:block; width:100%; text-align:left; padding:6px 10px;
@@ -3761,10 +5398,12 @@ const CSS = `
 /* ---- AI chat ---- */
 .ew-ai-toggle{ font-weight:600; }
 .ew-ai-toggle.on{ border-color:var(--accent) !important; color:var(--accent) !important; }
-.ew-chat{ position:absolute; right:16px; bottom:16px; z-index:20; width:380px;
-  max-height:min(74%, 660px); display:flex; flex-direction:column; overflow:hidden;
-  background:var(--panel2); border:1px solid var(--line); border-radius:14px;
-  box-shadow:0 16px 48px rgba(0,0,0,.5); }
+/* Docked flyout on the right of the body row, full height under the toolbar —
+   same shape as the inspector, so the log has room to be read. */
+.ew-chat{ width:380px; flex:none; min-height:0; display:flex; flex-direction:column;
+  overflow:hidden; background:var(--panel2); border-left:1px solid var(--line);
+  animation:ew-flyin .16s ease; }
+@keyframes ew-flyin{ from{ transform:translateX(14px); opacity:0; } }
 .ew-chat-head{ display:flex; align-items:center; gap:8px; padding:11px 13px;
   border-bottom:1px solid var(--line); flex:none; }
 .ew-chat-head b{ font-family:var(--display); font-size:14px; }
@@ -3772,8 +5411,26 @@ const CSS = `
 .ew-chat-gear{ margin-left:auto; background:none; border:none; color:var(--muted);
   font-size:15px; cursor:pointer; padding:2px 4px; }
 .ew-chat-gear:hover{ color:var(--ink); }
+/* A percentage max-height here resolved against a parent that only has its own
+   max-height, so it never applied and an expanded panel ran off the bottom of
+   a clipped chat with nothing to scroll. Bounded in absolute units instead,
+   and allowed to shrink, so it always scrolls its own overflow. */
 .ew-chat-settings{ display:grid; gap:6px; padding:11px 13px; border-bottom:1px solid var(--line);
-  background:var(--panel); flex:none; max-height:52%; overflow-y:auto; }
+  background:var(--panel); flex:0 1 auto; min-height:0;
+  max-height:min(58vh, 420px); overflow-y:auto; scrollbar-width:thin;
+  scrollbar-color:var(--line) transparent; }
+.ew-chat-settings::-webkit-scrollbar{ width:10px; }
+.ew-chat-settings::-webkit-scrollbar-thumb{ background:var(--line); border-radius:99px;
+  border:2px solid transparent; background-clip:padding-box; }
+.ew-sect{ border:1px solid var(--line); border-radius:9px; background:var(--panel2); }
+.ew-sect-h{ width:100%; display:flex; align-items:center; gap:7px; padding:8px 10px;
+  background:none; border:none; color:var(--ink); font:inherit; text-align:left; cursor:pointer; }
+.ew-sect-h:hover{ color:var(--accent); }
+.ew-sect-caret{ width:9px; font-size:9px; color:var(--muted); }
+.ew-sect-h b{ font-family:var(--display); font-size:12px; font-weight:500; }
+.ew-sect-h em{ margin-left:auto; font-style:normal; font-size:10.5px; color:var(--faint); }
+.ew-sect-h em.ok{ color:var(--accent); }
+.ew-sect-body{ display:grid; gap:6px; padding:9px 10px 10px; border-top:1px solid var(--line); }
 .ew-chat-settings input{ background:var(--panel2); color:var(--ink); border:1px solid var(--line);
   border-radius:6px; padding:6px 9px; font-family:var(--mono); font-size:12px; }
 .ew-chat-settings input:focus{ outline:none; border-color:var(--accent); }
@@ -3796,6 +5453,54 @@ const CSS = `
   background:color-mix(in srgb, #F04E98 15%, transparent); border:1px solid #F04E98; }
 .ew-msg.status{ align-self:center; max-width:100%; text-align:center; background:none;
   color:var(--faint); font-size:11px; padding:2px 4px; font-family:var(--mono); }
+/* the Markdown an AI reply arrives in (see whiteboard/ChatMarkdown.jsx) */
+.ew-md{ display:grid; gap:7px; }
+.ew-md p{ margin:0; }
+.ew-md-h{ font-family:var(--display); font-weight:500; }
+.ew-md ul, .ew-md ol{ margin:0; padding-left:17px; display:grid; gap:3px; }
+.ew-md li::marker{ color:var(--faint); }
+.ew-md strong{ font-weight:600; }
+.ew-md code{ font-family:var(--mono); font-size:11px; padding:1px 4px; border-radius:4px;
+  background:color-mix(in srgb, var(--ink) 9%, transparent); }
+.ew-md pre{ margin:0; padding:7px 9px; border-radius:8px; overflow-x:auto;
+  background:color-mix(in srgb, var(--ink) 7%, transparent); }
+.ew-md pre code{ padding:0; background:none; font-size:10.5px; }
+.ew-md table{ border-collapse:collapse; font-size:12px; width:100%; }
+.ew-md th, .ew-md td{ border:1px solid var(--line); padding:4px 8px; text-align:left; vertical-align:top; }
+.ew-md th{ font-family:var(--display); font-weight:500; background:color-mix(in srgb, var(--ink) 5%, transparent); }
+/* the AI connection check, and the settings a blocked preflight needs */
+.ew-preflight{ display:grid; gap:5px; margin-top:9px; }
+.ew-pf{ display:grid; grid-template-columns:auto 1fr; gap:3px 8px; padding:7px 9px;
+  border-radius:8px; border:1px solid var(--line); background:var(--panel);
+  font-size:11.5px; line-height:1.45; }
+.ew-pf b{ font-family:var(--display); font-weight:500; }
+.ew-pf b::before{ content:"● "; }
+.ew-pf.ok b::before{ color:#00BFB3; }
+.ew-pf.bad b::before{ color:#F04E98; }
+.ew-pf span{ color:var(--muted); word-break:break-word; }
+.ew-pf pre, .ew-cors{ grid-column:1 / -1; margin:5px 0 0; padding:8px 10px; border-radius:7px;
+  overflow-x:auto; white-space:pre; font-family:var(--mono); font-size:10px; line-height:1.6;
+  color:var(--ink); background:color-mix(in srgb, var(--ink) 8%, transparent); }
+/* what ran to produce the answer, above the answer itself */
+.ew-trail{ margin:0 0 7px; padding-bottom:6px; border-bottom:1px solid var(--line);
+  display:flex; flex-wrap:wrap; gap:5px 7px; font-family:var(--mono); font-size:10px;
+  text-transform:uppercase; letter-spacing:.05em; color:var(--faint); }
+.ew-trail em{ font-style:normal; display:flex; align-items:center; gap:4px; }
+.ew-trail em::before{ content:""; width:4px; height:4px; border-radius:50%; background:var(--accent); }
+.ew-trail em.bad::before{ background:#F04E98; }
+/* the turn in progress: the same dots as the trail, arriving one at a time */
+.ew-live{ display:flex; flex-direction:column; gap:5px; font-family:var(--mono);
+  font-size:10px; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); }
+.ew-live em{ font-style:normal; display:flex; align-items:center; gap:4px; }
+.ew-live em::before{ content:""; width:4px; height:4px; border-radius:50%; background:var(--accent); flex:none; }
+.ew-live em.bad::before{ background:#F04E98; }
+/* what a grounded answer rests on, under the reply that used it */
+.ew-cite{ margin:7px 0 0; padding-top:6px; border-top:1px solid var(--line);
+  display:flex; flex-wrap:wrap; gap:5px; align-items:baseline;
+  font-size:10.5px; color:var(--faint); }
+.ew-cite span{ font-family:var(--mono); text-transform:uppercase; letter-spacing:.05em; }
+.ew-cite em{ font-style:normal; padding:1px 6px; border-radius:99px;
+  border:1px solid var(--line); background:color-mix(in srgb, var(--ink) 5%, transparent); }
 .ew-thinking{ opacity:.7; animation:ew-pulse 1.1s ease-in-out infinite; }
 @keyframes ew-pulse{ 50%{ opacity:.35; } }
 .ew-chat-empty{ margin:auto; text-align:center; color:var(--faint); font-size:12px;
@@ -3804,6 +5509,14 @@ const CSS = `
 .ew-chat-chips button{ background:var(--panel); color:var(--muted); border:1px solid var(--line);
   border-radius:8px; padding:7px 10px; font-family:var(--body); font-size:12px; cursor:pointer; text-align:left; }
 .ew-chat-chips button:hover{ border-color:var(--accent); color:var(--ink); }
+/* a staged board change, waiting on Apply */
+.ew-apply{ flex:none; display:grid; gap:7px; padding:10px 13px; border-top:1px solid var(--line);
+  background:var(--panel); }
+.ew-apply b{ font-family:var(--display); font-weight:500; font-size:12.5px; line-height:1.45; }
+.ew-apply ul{ margin:0; padding:0; list-style:none; display:grid; gap:2px; }
+.ew-apply li{ font-family:var(--mono); font-size:10.5px; color:var(--muted); }
+.ew-chat-usage{ flex:none; margin:0; padding:6px 13px 0; font-family:var(--mono); font-size:10px;
+  color:var(--faint); }
 .ew-chat-form{ display:flex; gap:7px; padding:10px; border-top:1px solid var(--line); flex:none; }
 .ew-chat-input{ flex:1; resize:none; background:var(--panel); color:var(--ink);
   border:1px solid var(--line); border-radius:8px; padding:8px 10px; font-family:var(--body);
@@ -3813,7 +5526,7 @@ const CSS = `
   border:none; border-radius:8px; font-family:var(--mono); font-size:12px; font-weight:700; cursor:pointer; }
 .ew-chat-send:disabled{ opacity:.4; cursor:default; }
 
-@media (prefers-reduced-motion: reduce){ .ew-particle{ display:none; } .ew-thinking{ animation:none; } }
+@media (prefers-reduced-motion: reduce){ .ew-particle{ display:none; } .ew-thinking, .ew-chat, .ew-review{ animation:none; } }
 
 /* ---- light theme overrides (follows the app's light/dark toggle) ---- */
 .ew-light{
@@ -3823,7 +5536,6 @@ const CSS = `
 .ew-light .ew-viewport{ background-image:radial-gradient(circle, #d3dcea 1px, transparent 1px); }
 .ew-light .ew-node{ box-shadow:0 1px 3px rgba(16,28,63,.10), 0 1px 2px rgba(16,28,63,.06); }
 .ew-light .ew-ghost{ box-shadow:0 10px 26px rgba(16,28,63,.18); }
-.ew-light .ew-chat{ box-shadow:0 16px 48px rgba(16,28,63,.22); }
 .ew-light .ew-msg.user{ color:#fff; }
 .ew-light .ew-chat-send{ color:#fff; }
 `;

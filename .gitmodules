@@ -1,0 +1,3 @@
+[submodule "hive-mind"]
+	path = hive-mind
+	url = https://github.com/elastic/hive-mind.git

@@ -1,14 +1,16 @@
 import { describe, it, expect } from 'vitest'
-import { tidyLayout, laneOf, flowHops, validateBoard, capacityTotals, parseCapacityTB, formatTB } from './whiteboardAnalysis'
+import { tidyLayout, alignLayout, laneOf, validateBoard, capacityTotals, parseCapacityTB, formatTB } from './whiteboardAnalysis'
 
 const node = (id, type, extra = {}) => ({ id, type, x: 0, y: 0, ...extra })
 const sizeOf = () => ({ w: 248, h: 96 })
 const ids = (warnings) => warnings.map((w) => w.id)
 
 describe('tidyLayout', () => {
+  const tidy = (nodes, zones = []) => tidyLayout(nodes, zones, sizeOf)
+
   it('orders lanes left to right by data-flow stage', () => {
     const nodes = [node('k', 'kibana'), node('h', 'tier_hot'), node('a', 'agent')]
-    const pos = tidyLayout(nodes, sizeOf)
+    const { nodes: pos } = tidy(nodes)
     // agent collects, hot tier stores, Kibana serves
     expect(pos.a.x).toBeLessThan(pos.h.x)
     expect(pos.h.x).toBeLessThan(pos.k.x)
@@ -16,20 +18,20 @@ describe('tidyLayout', () => {
 
   it('stacks a lane vertically without overlapping', () => {
     const nodes = [node('h1', 'tier_hot'), node('h2', 'tier_warm', { y: 400 })]
-    const pos = tidyLayout(nodes, sizeOf)
+    const { nodes: pos } = tidy(nodes)
     expect(pos.h1.x).toBe(pos.h2.x)
     expect(pos.h2.y - pos.h1.y).toBeGreaterThanOrEqual(96)
   })
 
   it('preserves the existing top-to-bottom order within a lane', () => {
     const nodes = [node('lower', 'tier_hot', { y: 500 }), node('upper', 'tier_warm', { y: 100 })]
-    const pos = tidyLayout(nodes, sizeOf)
+    const { nodes: pos } = tidy(nodes)
     expect(pos.upper.y).toBeLessThan(pos.lower.y)
   })
 
   it('leaves annotations where the user put them', () => {
     const nodes = [node('k', 'kibana'), node('note', 'note', { x: 900, y: 900 })]
-    const pos = tidyLayout(nodes, sizeOf)
+    const { nodes: pos } = tidy(nodes)
     expect(pos.note).toBeUndefined()
     expect(pos.k).toBeDefined()
   })
@@ -40,61 +42,120 @@ describe('tidyLayout', () => {
   })
 
   it('returns nothing for an empty or annotation-only board', () => {
-    expect(tidyLayout([], sizeOf)).toEqual({})
-    expect(tidyLayout([node('n', 'note')], sizeOf)).toEqual({})
+    expect(tidy([])).toEqual({ nodes: {}, zones: {} })
+    expect(tidy([node('n', 'note')])).toEqual({ nodes: {}, zones: {} })
+  })
+
+  describe('zones', () => {
+    // two store-tier nodes inside a frame, one collector outside it
+    const zone = { id: 'z1', x: 0, y: 0, w: 600, h: 600, label: 'Cluster' }
+    const nodes = [
+      node('h', 'tier_hot', { x: 40, y: 60 }),
+      node('w', 'tier_warm', { x: 40, y: 300 }),
+      node('a', 'agent', { x: 900, y: 900 }),      // centre outside the zone
+    ]
+
+    it('keeps members inside their zone and refits the frame around them', () => {
+      const { nodes: pos, zones: zpos } = tidy(nodes, [zone])
+      const z = zpos.z1
+      expect(z).toBeTruthy()
+      for (const id of ['h', 'w']) {
+        expect(pos[id].x).toBeGreaterThan(z.x)
+        expect(pos[id].x + sizeOf().w).toBeLessThan(z.x + z.w)
+        expect(pos[id].y).toBeGreaterThan(z.y)
+        expect(pos[id].y + sizeOf().h).toBeLessThan(z.y + z.h)
+      }
+    })
+
+    it('lanes the zone by its members: a store zone sits right of a free collector', () => {
+      const { nodes: pos, zones: zpos } = tidy(nodes, [zone])
+      expect(zpos.z1.x).toBeGreaterThan(pos.a.x)
+    })
+
+    it('does not overlap the zone with free nodes in another lane', () => {
+      const { nodes: pos, zones: zpos } = tidy(nodes, [zone])
+      const z = zpos.z1
+      // the free agent is fully clear of the refitted frame
+      const clear = pos.a.x + sizeOf().w <= z.x || pos.a.x >= z.x + z.w
+        || pos.a.y + sizeOf().h <= z.y || pos.a.y >= z.y + z.h
+      expect(clear).toBe(true)
+    })
+
+    it('leaves an empty zone frame alone', () => {
+      const empty = { id: 'z2', x: 2000, y: 2000, w: 300, h: 200, label: 'Later' }
+      const { zones: zpos } = tidy(nodes, [zone, empty])
+      expect(zpos.z2).toBeUndefined()
+    })
+
+    it('gives a node sitting in two overlapping frames to the last-drawn zone', () => {
+      const zb = { id: 'z2', x: 30, y: 250, w: 600, h: 600, label: 'Also storage' }
+      // h sits in both frames; z2 is later in draw order, so it wins h
+      const two = [node('h', 'tier_hot', { x: 40, y: 300 }), node('c', 'tier_cold', { x: 40, y: 700 })]
+      const { zones: zpos } = tidy(two, [{ ...zone, h: 400 }, zb])
+      // zone (empty after membership) is untouched; z2 wraps both tiers
+      expect(zpos.z1).toBeUndefined()
+      expect(zpos.z2).toBeTruthy()
+    })
   })
 })
 
-describe('flowHops', () => {
-  const hopIds = (hops) => hops.map((hop) => hop.join('+'))
+describe('alignLayout', () => {
+  const align = (nodes, zones = []) => alignLayout(nodes, zones, sizeOf)
 
-  it('walks a chain one connection at a time', () => {
-    const hops = flowHops([
-      { id: 'b', s: 'mid', e: 'end' },
-      { id: 'a', s: 'start', e: 'mid' },
-    ])
-    expect(hopIds(hops)).toEqual(['a', 'b'])
+  it('snaps a near-row onto one centre line', () => {
+    const nodes = [
+      node('a', 'agent', { x: 0, y: 100 }),
+      node('b', 'kafka', { x: 400, y: 130 }),   // 30px of drift — clearly the same row
+    ]
+    const { nodes: pos } = align(nodes)
+    expect(pos.a.y).toBe(pos.b.y)
+    expect(pos.a.x ?? 0).toBe(0)                // columns are far apart, x untouched
   })
 
-  it('fans parallel connections into the same hop', () => {
-    const hops = flowHops([
-      { id: 'a', s: 'src', e: 'one' },
-      { id: 'b', s: 'src', e: 'two' },
-      { id: 'c', s: 'one', e: 'sink' },
-    ])
-    expect(hopIds(hops)).toEqual(['a+b', 'c'])
+  it('snaps a near-column onto one centre line', () => {
+    const nodes = [
+      node('a', 'tier_hot', { x: 80, y: 0 }),
+      node('b', 'tier_warm', { x: 110, y: 300 }),
+    ]
+    const { nodes: pos } = align(nodes)
+    const xOf = (id, n) => pos[id]?.x ?? n.x
+    expect(xOf('a', nodes[0])).toBe(xOf('b', nodes[1]))
   })
 
-  it('starts every source at once so disconnected branches move together', () => {
-    const hops = flowHops([
-      { id: 'a', s: 'src1', e: 'sink1' },
-      { id: 'b', s: 'src2', e: 'sink2' },
-    ])
-    expect(hopIds(hops)).toEqual(['a+b'])
+  it('leaves a block placed below everything exactly where it is', () => {
+    // the management-components case: below the flow, its own row and column
+    const nodes = [
+      node('a', 'agent', { x: 0, y: 0 }),
+      node('h', 'tier_hot', { x: 400, y: 0 }),
+      node('mgmt', 'node_master', { x: 200, y: 600 }),
+    ]
+    const { nodes: pos } = align(nodes)
+    expect(pos.mgmt).toBeUndefined()            // no nudge needed, no lane reshuffle
   })
 
-  it('stops rather than spinning on a cycle', () => {
-    const hops = flowHops([
-      { id: 'a', s: 'one', e: 'two' },
-      { id: 'b', s: 'two', e: 'three' },
-      { id: 'c', s: 'three', e: 'one' },
-    ])
-    expect(hops.flat().sort()).toEqual(['a', 'b', 'c'])
+  it('reports only the nodes that actually move', () => {
+    const nodes = [node('a', 'agent', { x: 0, y: 0 }), node('b', 'kibana', { x: 800, y: 400 })]
+    expect(align(nodes)).toEqual({ nodes: {}, zones: {} })
   })
 
-  it('sweeps up connections only reachable inside a cycle', () => {
-    const hops = flowHops([
-      { id: 'in', s: 'src', e: 'ring1' },
-      { id: 'x', s: 'ring1', e: 'ring2' },
-      { id: 'y', s: 'ring2', e: 'ring1' },
-    ])
-    expect(hops.flat().sort()).toEqual(['in', 'x', 'y'])
+  it('grows a zone rather than let an aligned member poke out of it', () => {
+    const zone = { id: 'z1', x: 0, y: 0, w: 280, h: 200, label: 'Cluster' }
+    const nodes = [
+      node('m', 'tier_hot', { x: 8, y: 40 }),     // inside the frame
+      node('o', 'tier_warm', { x: 88, y: 400 }),  // same column, outside the frame
+    ]
+    const { nodes: pos, zones: zpos } = align(nodes, [zone])
+    expect(pos.m.x).toBe(pos.o.x)                 // the column straightened
+    // the nudge pushed m's right edge past 280, so the frame widened to keep it
+    expect(pos.m.x + sizeOf().w).toBeGreaterThan(280)
+    expect(zpos.z1.w).toBeGreaterThanOrEqual(pos.m.x + sizeOf().w - zpos.z1.x)
   })
 
-  it('ignores half-built connections and empty boards', () => {
-    expect(flowHops()).toEqual([])
-    expect(flowHops([])).toEqual([])
-    expect(flowHops([{ id: 'a', s: 'src' }])).toEqual([])
+  it('ignores annotations on both sides of the nudge', () => {
+    const nodes = [node('k', 'kibana', { x: 0, y: 0 }), node('n', 'note', { x: 8, y: 30 })]
+    const { nodes: pos } = align(nodes)
+    expect(pos.n).toBeUndefined()                 // notes stay put
+    expect(pos.k).toBeUndefined()                 // and don't pull real nodes around
   })
 })
 
@@ -118,6 +179,19 @@ describe('validateBoard', () => {
     const found = ids(validateBoard(nodes, []))
     expect(found).not.toContain('masters-few')
     expect(found).not.toContain('masters-even')
+  })
+
+  it('counts master-eligible data nodes, not just dedicated master boxes', () => {
+    // the small-cluster shape: three nodes that are each master + data
+    const nodes = [node('d', 'node_data', { props: { nodes: 3, roles: ['master', 'data'] } })]
+    const found = ids(validateBoard(nodes, []))
+    expect(found).not.toContain('masters-missing')
+    expect(found).not.toContain('masters-few')
+  })
+
+  it('still flags a quorum that the roles leave short', () => {
+    const nodes = [node('d', 'node_data', { props: { nodes: 2, roles: ['master', 'data'] } })]
+    expect(ids(validateBoard(nodes, []))).toContain('masters-few')
   })
 
   it('flags a frozen tier with no object storage, and clears once added', () => {
