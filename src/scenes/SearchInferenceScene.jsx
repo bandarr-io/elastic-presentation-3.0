@@ -31,21 +31,21 @@ const GROUPS = [
     short: 'Hyperscalers',
     items: ['AWS Bedrock', 'Amazon SageMaker', 'Azure OpenAI', 'Azure AI Foundry', 'Google Vertex AI', 'Google AI Studio', 'IBM watsonx.ai'],
     colorLight: '#0B64DD',
-    colorDark: '#7EB4FF',
+    colorDark: '#5A9AE6',
   },
   {
     title: 'Model Providers & Specialists',
     short: 'Model Providers',
     items: ['OpenAI', 'Anthropic', 'Mistral', 'Cohere', 'AI21 Labs', 'Voyage AI', 'Jina AI', 'Contextual AI', 'Fireworks AI', 'Groq'],
-    colorLight: '#153385',
-    colorDark: '#48EFCF',
+    colorLight: '#1E5BB8',
+    colorDark: '#2BB8A8',
   },
   {
     title: 'Self-Managed & Open Source',
     short: 'Self-Managed',
     items: ['NVIDIA NIM', 'Hugging Face', 'Llama Stack', 'OpenShift AI', 'Custom REST: vLLM', 'Ollama'],
-    colorLight: '#0A52B3',
-    colorDark: '#F990C6',
+    colorLight: '#153385',
+    colorDark: '#D96BA8',
   },
   {
     title: 'Elastic-Native',
@@ -53,7 +53,7 @@ const GROUPS = [
     items: ['Elastic Inference Service', 'Jina On-Prem', 'ELSER', 'E5 / Eland-hosted'],
     native: true,
     colorLight: '#101C3F',
-    colorDark: '#FEC514',
+    colorDark: '#D4A40F',
   },
 ]
 
@@ -64,6 +64,15 @@ const SECTOR_GAP = 12
 
 function groupColor(group, isDark) {
   return isDark ? group.colorDark : group.colorLight
+}
+
+function contrastInk(hex) {
+  const n = hex.replace('#', '')
+  const r = parseInt(n.slice(0, 2), 16)
+  const g = parseInt(n.slice(2, 4), 16)
+  const b = parseInt(n.slice(4, 6), 16)
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255
+  return lum > 0.55 ? '#101C3F' : '#ffffff'
 }
 
 function chipWidth(label) {
@@ -142,6 +151,17 @@ function layoutConstellation(width, height, isDark) {
       const item = group.items[i]
       const p = polar(cx, cy, rx, ry, deg, ORBIT_SCALE)
       const rad = (deg * Math.PI) / 180
+      const dx = p.x - cx
+      const dy = p.y - cy
+      const dist = Math.hypot(dx, dy) || 1
+      const ux = dx / dist
+      const uy = dy / dist
+      const halfW = chipWidth(item) / 2
+      const halfH = 13
+      const inset = Math.min(
+        halfW / Math.max(Math.abs(ux), 0.08),
+        halfH / Math.max(Math.abs(uy), 0.08),
+      ) + 4
       nodes.push({
         key: item,
         item,
@@ -152,17 +172,21 @@ function layoutConstellation(width, height, isDark) {
         y: p.y,
         x0: cx + Math.cos(rad) * HUB_R,
         y0: cy + Math.sin(rad) * HUB_R,
+        x1: p.x - ux * inset,
+        y1: p.y - uy * inset,
       })
     })
   })
 
   const labels = sectors.map(({ group, start, end }) => {
     const p = polar(cx, cy, rx, ry, (start + end) / 2, 1.18)
+    const side = group.short === 'Hyperscalers' || group.short === 'Model Providers'
+    const pole = group.short === 'Self-Managed' || group.short === 'Elastic-Native'
     return {
       short: group.short,
       color: groupColor(group, isDark),
-      x: Math.min(width - 48, Math.max(48, p.x)),
-      y: Math.min(height - 14, Math.max(14, p.y)),
+      x: pole ? cx : Math.min(width - 48, Math.max(48, p.x)),
+      y: side ? cy : Math.min(height - 14, Math.max(14, p.y)),
     }
   })
   return { nodes, labels, sectors, cx, cy, rx, ry }
@@ -202,9 +226,9 @@ function SovChip({ label, color, x, y, align = 'left', live = false, width }) {
         boxSizing: 'border-box',
         display: 'inline-flex',
         justifyContent: 'center',
-        borderColor: `${color}${live ? 'ff' : '99'}`,
-        color,
-        background: '#ffffff',
+        borderColor: `${color}${live ? 'ff' : 'cc'}`,
+        color: contrastInk(color),
+        background: color,
         boxShadow: live ? `0 0 0 1px ${color}, 0 0 16px ${color}` : 'none',
         zIndex: live ? 20 : 10,
       }}
@@ -215,6 +239,7 @@ function SovChip({ label, color, x, y, align = 'left', live = false, width }) {
 }
 
 function ExperienceRow({ label, index, color, x, y, width, mono }) {
+  const ink = contrastInk(color)
   return (
     <div
       className="inf-sov-chip absolute flex items-center gap-2.5 rounded-xl border px-3 py-2.5"
@@ -223,13 +248,13 @@ function ExperienceRow({ label, index, color, x, y, width, mono }) {
         top: y,
         width,
         transform: 'translate(0, -50%)',
-        borderColor: `${color}99`,
-        color,
-        background: '#ffffff',
+        borderColor: `${color}cc`,
+        color: ink,
+        background: color,
         zIndex: 10,
       }}
     >
-      <span className="text-[10px] font-semibold tabular-nums shrink-0" style={{ opacity: 0.45, ...mono }}>
+      <span className="text-[10px] font-semibold tabular-nums shrink-0" style={{ opacity: 0.7, ...mono }}>
         {String(index).padStart(2, '0')}
       </span>
       <span className="text-sm font-semibold leading-tight">{label}</span>
@@ -248,13 +273,13 @@ function DestinationWell({ label, color, x, y, live, mono }) {
         height: WELL_R * 2,
         transform: 'translate(-50%, -50%)',
         borderColor: color,
-        background: '#ffffff',
+        background: color,
         boxShadow: live ? `0 0 0 1px ${color}, 0 0 22px ${color}` : `0 0 14px ${color}33`,
       }}
     >
       <div
         className="text-[10px] uppercase tracking-wider font-semibold leading-tight text-center px-1.5"
-        style={{ color, ...mono }}
+        style={{ color: contrastInk(color), ...mono }}
       >
         {label}
       </div>
@@ -504,7 +529,7 @@ function InferenceHub({ accent, mono, size = 'md', children }) {
       className={`inf-hub relative rounded-full border-2 flex flex-col items-center justify-center text-center px-4 ${box}`}
       style={{
         borderColor: accent,
-        background: `${accent}14`,
+        background: accent,
         '--inf-accent': accent,
       }}
     >
@@ -515,7 +540,7 @@ function InferenceHub({ accent, mono, size = 'md', children }) {
       />
       <div
         className={`${size === 'lg' ? 'text-xl' : 'text-sm'} mt-1.5 tracking-wide`}
-        style={{ color: accent, ...mono }}
+        style={{ color: contrastInk(accent), ...mono }}
       >
         /_inference
       </div>
@@ -614,9 +639,9 @@ function ProviderConstellation({ accent, isDark, headText, mono, playKey, prefer
             {sectors.map(({ group, start, end }) => (
               <path
                 key={`wedge-${group.short}`}
-                d={sectorPath(cx, cy, rx, ry, start, end, 0.2, 1.02)}
+                d={sectorPath(cx, cy, rx, ry, start - SECTOR_GAP / 2, end + SECTOR_GAP / 2, 0.18, 1.10)}
                 fill={groupColor(group, isDark)}
-                fillOpacity={isDark ? 0.07 : 0.06}
+                fillOpacity={isDark ? 0.07 : 0.14}
               />
             ))}
             <ellipse
@@ -642,17 +667,16 @@ function ProviderConstellation({ accent, isDark, headText, mono, playKey, prefer
               strokeOpacity="0.22"
               strokeWidth="1.2"
             />
-            <circle cx={cx} cy={cy} r={HUB_R + 10} fill={accent} fillOpacity="0.06" />
             {nodes.map((node) => {
-              const len = Math.hypot(node.x - node.x0, node.y - node.y0)
+              const len = Math.hypot(node.x1 - node.x0, node.y1 - node.y0)
               return (
                 <line
                   key={`ray-${node.key}`}
                   className="inf-ray"
                   x1={node.x0}
                   y1={node.y0}
-                  x2={node.x}
-                  y2={node.y}
+                  x2={node.x1}
+                  y2={node.y1}
                   stroke={node.color}
                   strokeWidth={node.native ? 1.6 : 1.15}
                   strokeOpacity={node.native ? 0.55 : 0.38}
@@ -660,6 +684,7 @@ function ProviderConstellation({ accent, isDark, headText, mono, playKey, prefer
                 />
               )
             })}
+            <circle cx={cx} cy={cy} r={HUB_R + 28} fill={accent} />
           </svg>
 
           {labels.map((label) => (
@@ -687,9 +712,9 @@ function ProviderConstellation({ accent, isDark, headText, mono, playKey, prefer
                 left: node.x,
                 top: node.y,
                 transform: 'translate(-50%, -50%)',
-                borderColor: `${node.color}${i === live ? 'ff' : '99'}`,
-                color: node.color,
-                background: '#ffffff',
+                borderColor: `${node.color}${i === live ? 'ff' : 'cc'}`,
+                color: contrastInk(node.color),
+                background: node.color,
                 boxShadow: i === live ? `0 0 0 1px ${node.color}, 0 0 16px ${node.color}` : 'none',
                 zIndex: i === live ? 20 : 10,
               }}
