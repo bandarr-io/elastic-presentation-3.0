@@ -50,6 +50,13 @@ import NodeTypesScene from '../scenes/NodeTypesScene'
 import ElasticOverviewScene from '../scenes/ElasticOverviewScene'
 import EnterpriseDeploymentScene from '../scenes/EnterpriseDeploymentScene'
 import WhiteboardScene from '../scenes/WhiteboardScene'
+import VectorSearchScene from '../scenes/VectorSearchScene'
+import CardCatalogScene from '../scenes/CardCatalogScene'
+import SearchChallengeScene from '../scenes/SearchChallengeScene'
+import VectorScaleScene from '../scenes/VectorScaleScene'
+import GpuVectorPipelineScene from '../scenes/GpuVectorPipelineScene'
+import SearchInferenceScene from '../scenes/SearchInferenceScene'
+import SearchContextScene from '../scenes/SearchContextScene'
 
 /**
  * Canonical scene registry for the deck. Shared by the main presentation
@@ -122,6 +129,62 @@ export const SCENE_REGISTRY = [
     title: 'Exploded Platform',
     duration: '2 min',
     description: 'Teardown of the Elastic logo — click to explode it into seven capability parts along one assembly axis, then reassemble'
+  },
+  {
+    id: 'search-catalog',
+    component: CardCatalogScene,
+    title: 'How Search Works',
+    duration: '5 min',
+    description: 'Lexical foundations — full scan to inverted index, analysis, BM25, Lucene, shards, replicas (audience scenario packs)',
+    defaultDisabled: true,
+  },
+  {
+    id: 'search-challenge',
+    component: SearchChallengeScene,
+    title: 'Unstructured Challenge',
+    duration: '2 min',
+    description: '80% of data is unstructured — the retrieval gap above and below the waterline',
+    defaultDisabled: true,
+  },
+  {
+    id: 'search-vector-scale',
+    component: VectorScaleScene,
+    title: 'Vector Database Scale',
+    duration: '4 min',
+    description: 'Elasticsearch as a vector DB — scaling factors and DiskBBQ',
+    defaultDisabled: true,
+  },
+  {
+    id: 'search-vector',
+    component: VectorSearchScene,
+    title: 'Vector Search',
+    duration: '4 min',
+    description: 'Multimodal vector search — image embeddings into 3D space, then text kNN (Jina v5 Omni narrative)',
+    defaultDisabled: true,
+  },
+  {
+    id: 'search-gpu',
+    component: GpuVectorPipelineScene,
+    title: 'GPU Vector Pipeline',
+    duration: '3 min',
+    description: 'CPU indexing bottleneck → NVIDIA cuVS GPU acceleration',
+    defaultDisabled: true,
+  },
+  {
+    id: 'search-inference',
+    component: SearchInferenceScene,
+    title: 'Inference Any Model',
+    duration: '3 min',
+    description: 'Model-agnostic inference providers and sovereign /_inference topology',
+    defaultDisabled: true,
+  },
+  {
+    id: 'search-context',
+    component: SearchContextScene,
+    title: 'Context Layer',
+    duration: '4 min',
+    description: 'The missing context layer — Agent Builder, Context Engine, sources to benefits',
+    defaultDisabled: true,
   },
   {
     id: 'unified-strategy',

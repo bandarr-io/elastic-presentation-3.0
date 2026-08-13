@@ -10,6 +10,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons'
 import { DEFAULT_AGENDA_ITEMS } from '../data/agendaDefaults'
 import { DECK_PRESETS, DEFAULT_PRESET_ID, CUSTOM_PRESET_ID, presetConfig } from '../data/deckPresets'
+import { catalogSpeakerNotes, resolveCatalogScenario } from '../data/catalogScenarios'
 
 import ElasticValueEditor from './sceneEditors/ElasticValueEditor'
 import ValueByTeamEditor from './sceneEditors/ValueByTeamEditor'
@@ -569,14 +570,20 @@ function SceneItem({
 
           <label className={`text-xs mb-1 block pt-3 ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Speaker Notes (optional)</label>
           <textarea
-            value={metadata.speakerNotes || ''}
+            value={
+              metadata.speakerNotes
+              || (scene.id === 'search-catalog'
+                ? catalogSpeakerNotes(resolveCatalogScenario(metadata))
+                : '')
+            }
             onChange={(e) => onUpdateSceneMetadata?.(scene.id, { speakerNotes: e.target.value })}
-            rows={3}
+            rows={scene.id === 'search-catalog' ? 6 : 3}
             className={`${inputClass} resize-y`}
             placeholder="Talking points for this scene…"
           />
           <p className={`text-xs mt-1 ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`}>
             Shown only in the presenter view.
+            {scene.id === 'search-catalog' ? ' Audience pack details live here (not on the slide).' : ''}
           </p>
         </div>
       )}

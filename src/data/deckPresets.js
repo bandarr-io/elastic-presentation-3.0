@@ -133,7 +133,7 @@ export const DECK_PRESETS = [
   {
     id: 'search',
     label: 'Search',
-    description: 'The Search story — platform grounding, AI capabilities, and ES|QL. A skeleton flow: dedicated search scenes slot in here as they land.',
+    description: 'The Search story — lexical foundations, vector scale, GPU, inference, and context layer through ES|QL.',
     sceneIds: [
       'hero',
       'agenda',
@@ -141,7 +141,13 @@ export const DECK_PRESETS = [
       'about',
       'unified-strategy',
       'elastic-exploded',
-      // search-* scenes go here as they are built
+      'search-catalog',
+      'search-challenge',
+      'search-vector-scale',
+      'search-vector',
+      'search-gpu',
+      'search-inference',
+      'search-context',
       'ai-assistant',
       'esql',
       'licensing',

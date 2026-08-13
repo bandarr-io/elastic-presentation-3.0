@@ -19,7 +19,7 @@ const COLORS = {
   poppy: '#FF957D',
 }
 
-// The maturity spectrum: reactive (today) -> agentic (emerging today) -> autonomous (roadmap).
+// The maturity spectrum: reactive (today) -> agentic (emerging today) -> autonomous (in process).
 const DEFAULT_STAGES = [
   {
     key: 'reactive',
@@ -59,7 +59,7 @@ function AIAssistantScene({ metadata = {} }) {
     return { ...merged, icon: resolveIcon(merged.icon, DEFAULT_STAGES[i]?.icon) }
   })
   const todayLabel = metadata.todayLabel || 'In production today'
-  const roadmapLabel = metadata.roadmapLabel || 'Committed roadmap'
+  const roadmapLabel = metadata.roadmapLabel || 'In process'
 
   // Light theme is monochrome blue; dark theme uses the full accent palette.
   const accent = (darkColor) => (isDark ? darkColor : COLORS.blue)

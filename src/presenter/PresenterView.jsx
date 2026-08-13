@@ -11,6 +11,7 @@ import { useSceneConfiguration } from '../components/SceneSettings'
 import { SCENE_REGISTRY } from '../data/sceneRegistry'
 import { createPresenterChannel } from './presenterChannel'
 import ScenePreview from './ScenePreview'
+import { catalogSpeakerNotes, resolveCatalogScenario } from '../data/catalogScenarios'
 
 /**
  * Preview instances get inert stand-ins for the interactive props AppContent
@@ -229,7 +230,12 @@ function PresenterView() {
 
   // ── Notes ──────────────────────────────────────────────────────────────────
   // Scene-level notes plus optional per-beat notes (beatNotes[beatIndex]).
-  const sceneNotes = sceneMetadata?.[currentScene?.id]?.speakerNotes || ''
+  // search-catalog audience pack lives in speaker notes (not on-slide).
+  const storedSceneNotes = sceneMetadata?.[currentScene?.id]?.speakerNotes || ''
+  const catalogDefaultNotes = currentScene?.id === 'search-catalog'
+    ? catalogSpeakerNotes(resolveCatalogScenario(sceneMetadata?.['search-catalog'] || {}))
+    : ''
+  const sceneNotes = storedSceneNotes || catalogDefaultNotes
   const beatNotes = sceneMetadata?.[currentScene?.id]?.beatNotes || []
   const beatNote = beatNotes[beat] || ''
 

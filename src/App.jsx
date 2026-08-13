@@ -274,6 +274,20 @@ function AppContent() {
     }
   } else if (currentSceneId === 'enterprise-deployment') {
     sceneProps = { metadata: sceneMetadata?.['enterprise-deployment'] || {} }
+  } else if (currentSceneId === 'search-catalog') {
+    sceneProps = { metadata: sceneMetadata?.['search-catalog'] || { scenarioId: 'dib' } }
+  } else if (currentSceneId === 'search-challenge') {
+    sceneProps = { metadata: sceneMetadata?.['search-challenge'] || {} }
+  } else if (currentSceneId === 'search-vector-scale') {
+    sceneProps = { metadata: sceneMetadata?.['search-vector-scale'] || {} }
+  } else if (currentSceneId === 'search-vector') {
+    sceneProps = { metadata: sceneMetadata?.['search-vector'] || {} }
+  } else if (currentSceneId === 'search-gpu') {
+    sceneProps = { metadata: sceneMetadata?.['search-gpu'] || {} }
+  } else if (currentSceneId === 'search-inference') {
+    sceneProps = { metadata: sceneMetadata?.['search-inference'] || {} }
+  } else if (currentSceneId === 'search-context') {
+    sceneProps = { metadata: sceneMetadata?.['search-context'] || {} }
   }
 
   const handleNext = () => {

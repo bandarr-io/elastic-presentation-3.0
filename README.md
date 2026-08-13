@@ -95,7 +95,7 @@ content edits are preserved when switching presets. The default preset is
 | **Whiteboard** | `whiteboard-session` | A live working session — platform grounding and the reference architecture, then draw theirs on the live board. |
 | **Observability** | `observability` | The Observability story — from efficient datastore to the autonomous AI SRE (Nightshift). Uses the 14 `obs-*` / `nightshift-*` scenes. |
 | **Security** | `security` | Modern threat landscape → AI-driven SecOps → tool consolidation, governance, and commercials. |
-| **Search** | `search` | The Search story — platform grounding, AI capabilities, and ES\|QL. A skeleton flow that dedicated search scenes slot into as they land. |
+| **Search** | `search` | The Search story — lexical foundations → vector scale → GPU → inference → context layer, then AI and ES\|QL. |
 | **All Scenes** | `all-scenes` | Everything enabled in registration order — the full library. Newly added scenes are always included. |
 | **No Scenes** | `no-scenes` | Blank slate — only Hero. Build a custom flow from scratch. |
 
@@ -103,7 +103,7 @@ content edits are preserved when switching presets. The default preset is
 
 ## Scene Library
 
-All 57 scenes, grouped as they appear in `src/data/sceneRegistry.jsx`. "Default"
+All 59 scenes, grouped as they appear in `src/data/sceneRegistry.jsx`. "Default"
 indicates whether the scene ships enabled before any preset/customization is
 applied (the New Prospect preset governs the actual default flow).
 
@@ -136,6 +136,13 @@ applied (the New Prospect preset governs the actual default flow).
 
 | Scene | ID | What it shows |
 |---|---|---|
+| How Search Works | `search-catalog` | Lexical foundations (scan → inverted index → analysis → BM25 → Lucene → shards → replicas); audience packs: dib / government / commercial |
+| Unstructured Challenge | `search-challenge` | 80% unstructured data — tip of the iceberg vs depth below the waterline |
+| Vector Database Scale | `search-vector-scale` | Elasticsearch as a vector DB — four scaling factors and DiskBBQ |
+| Vector Search | `search-vector` | Multimodal DOW-style demo: image → Jina embeddings into 3D space, then text kNN with cosine neighbours |
+| GPU Vector Pipeline | `search-gpu` | CPU indexing bottleneck cleared by NVIDIA cuVS (CAGRA → HNSW) |
+| Inference Any Model | `search-inference` | Provider mosaic + sovereign `/_inference` topology |
+| Context Layer | `search-context` | Missing layer reveal, Agent Builder / Context Engine, sources → benefits |
 | Panel | `panel` | Featured panel discussion layout with speaker cards |
 | Problem Patterns | `problem-patterns` | Filterable common challenges across Observability, Security, Search |
 | Data Explosion | `data-explosion` | Animated chart — structured vs. unstructured data growth |

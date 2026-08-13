@@ -41,6 +41,8 @@ function toTitleCase(str) {
  * - subtitleMaxWidth: tailwind max-w-* class for the subtitle
  * - titleMaxWidth: optional tailwind max-w-* class to control title wrapping
  * - align: 'center' (default) or 'left' for document-mode scenes (F-pattern)
+ * - size: 'default' for the banner slot at the top of a scene, or 'hero' for a
+ *   statement beat where the header is the centerpiece instead of a banner
  */
 function SceneHeader({
   eyebrow,
@@ -52,6 +54,7 @@ function SceneHeader({
   subtitleMaxWidth = 'max-w-5xl',
   titleMaxWidth = '',
   align = 'center',
+  size = 'default',
 }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
@@ -68,16 +71,23 @@ function SceneHeader({
   const subtitleAlign = isLeft ? '' : 'mx-auto'
   const titleAlignWidth = titleMaxWidth ? `${titleMaxWidth} ${isLeft ? '' : 'mx-auto'}` : ''
 
+  // The hero variant is vertically centred in the scene body, so it drops the
+  // banner's top/bottom padding and steps every line up the type scale.
+  const isHero = size === 'hero'
+  const eyebrowSize = isHero ? 'text-base md:text-lg mb-5' : 'text-sm pt-8 mb-4'
+  const titleSize = isHero ? 'text-5xl md:text-6xl xl:text-7xl mb-6' : 'text-4xl md:text-5xl mb-4'
+  const subtitleSize = isHero ? 'text-xl md:text-2xl' : 'text-lg md:text-xl pb-6'
+
   return (
     <div className={`flex-shrink-0 ${isLeft ? 'text-left' : 'text-center'}`}>
-      <p className={`${r}text-sm font-semibold uppercase tracking-eyebrow pt-8 mb-4 ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>
+      <p className={`${r}${eyebrowSize} font-semibold uppercase tracking-eyebrow ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>
         {eyebrow}
       </p>
-      <h2 className={`${r}font-headline text-4xl md:text-5xl font-extrabold leading-headline mb-4 [text-wrap:balance] ${titleAlignWidth}`}>
+      <h2 className={`${r}font-headline ${titleSize} font-extrabold leading-headline [text-wrap:balance] ${titleAlignWidth}`}>
         {accentFirst ? <>{accentSpan}{plainSpan}</> : <>{plainSpan}{accentSpan}</>}
       </h2>
       {subtitle && (
-        <p className={`${r}leading-paragraph text-lg md:text-xl ${subtitleMaxWidth} ${subtitleAlign} pb-6 ${isDark ? 'text-elastic-light-grey' : 'text-elastic-ink'}`}>
+        <p className={`${r}leading-paragraph ${subtitleSize} ${subtitleMaxWidth} ${subtitleAlign} ${isDark ? 'text-elastic-light-grey' : 'text-elastic-ink'}`}>
           {subtitle}
         </p>
       )}

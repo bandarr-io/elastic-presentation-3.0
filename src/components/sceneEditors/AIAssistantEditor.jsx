@@ -71,7 +71,7 @@ export default function AIAssistantEditor({ sceneMetadata, onUpdateSceneMetadata
           </div>
           <div>
             <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Roadmap Label</label>
-            <input type="text" value={meta.roadmapLabel || ''} onChange={(e) => update({ roadmapLabel: e.target.value })} className={inputClass} placeholder="Committed roadmap" />
+            <input type="text" value={meta.roadmapLabel || ''} onChange={(e) => update({ roadmapLabel: e.target.value })} className={inputClass} placeholder="In process" />
           </div>
         </div>
       </div>
