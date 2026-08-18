@@ -46,7 +46,7 @@ export default function SecurityUseCasesEditor({ sceneMetadata, onUpdateSceneMet
         <div className="space-y-3 mt-3">
           <div>
             <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Eyebrow</label>
-            <input type="text" value={meta.eyebrow || ''} onChange={(e) => update({ eyebrow: e.target.value })} className={inputClass} placeholder="Eyebrow text" />
+            <input type="text" value={meta.eyebrow || ''} onChange={(e) => update({ eyebrow: e.target.value })} className={inputClass} placeholder="Security · Visual Gallery" />
           </div>
           <div>
             <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Title Accent</label>

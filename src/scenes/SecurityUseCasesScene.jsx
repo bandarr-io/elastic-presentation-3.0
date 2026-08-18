@@ -43,7 +43,7 @@ function SecurityUseCasesScene({ metadata = {} }) {
     const merged = { ...(DEFAULT_USE_CASES[i] || {}), ...item }
     return { ...merged, icon: resolveIcon(merged.icon, DEFAULT_USE_CASES[i]?.icon) }
   })
-  const eyebrow = metadata.eyebrow || 'Eyebrow text'
+  const eyebrow = metadata.eyebrow || 'Security · Visual Gallery'
   const titleAccent = metadata.titleAccent || 'Section Title'
   const titlePlain = metadata.titlePlain || ' Accent'
   const subtitle =

@@ -36,7 +36,7 @@ function PillarsScene({ metadata = {} }) {
   const isDark = theme === 'dark'
   const rootRef = useRef(null)
 
-  const eyebrow = metadata.eyebrow || 'Elastic Observability · The Roadmap'
+  const eyebrow = metadata.eyebrow || 'Observability · Three Pillars'
   const titlePlain = metadata.titlePlain || 'Three pillars. '
   const titleAccent = metadata.titleAccent || 'One platform.'
   const subtitle = metadata.subtitle ||

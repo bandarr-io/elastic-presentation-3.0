@@ -173,7 +173,7 @@ export default function SecurityEditor({ sceneMetadata, onUpdateSceneMetadata, i
         <div className="space-y-3 mt-3">
           <div>
             <label className={labelClass}>Eyebrow</label>
-            <input type="text" value={meta.eyebrow || ''} onChange={(e) => update({ eyebrow: e.target.value })} className={inputClass} placeholder="Elastic Security" />
+            <input type="text" value={meta.eyebrow || ''} onChange={(e) => update({ eyebrow: e.target.value })} className={inputClass} placeholder="Security · Operations" />
           </div>
           <div>
             <label className={labelClass}>Title Plain</label>

@@ -64,7 +64,7 @@ function SecurityNarrativeVisualScene({ metadata = {} }) {
   const isDark = theme === 'dark'
   const headerRef = useRef(null)
 
-  const eyebrow = metadata.eyebrow || 'Elastic Security · Why Now'
+  const eyebrow = metadata.eyebrow || 'Security · Why Now'
   const beats = (metadata.beats || BEATS).map((b, i) => ({ ...(BEATS[i] || {}), ...b }))
   // Beat state lives in useSceneMotion so the presenter view can drive it.
   const { beat, playKey, goTo, replay } = useSceneMotion(beats)

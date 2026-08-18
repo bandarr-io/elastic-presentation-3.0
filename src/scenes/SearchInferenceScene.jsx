@@ -120,28 +120,28 @@ function sectorPath(cx, cy, rx, ry, start, end, innerScale, outerScale) {
   return `${draw(outer, 'M')} ${draw(inner, 'L')} Z`
 }
 
-function buildSectors() {
-  const weights = RING_ORDER.map((index) => Math.max(groupWeight(GROUPS[index]), 320))
+function buildSectors(groups) {
+  const weights = RING_ORDER.map((index) => Math.max(groupWeight(groups[index]), 320))
   const sum = weights.reduce((a, b) => a + b, 0)
-  const usable = 360 - SECTOR_GAP * GROUPS.length
+  const usable = 360 - SECTOR_GAP * groups.length
   const firstSweep = (weights[0] / sum) * usable
   let angle = -firstSweep / 2
   return RING_ORDER.map((index, i) => {
-    const group = GROUPS[index]
+    const group = groups[index]
     const sweep = (weights[i] / sum) * usable
     const start = angle
     const end = angle + sweep
     angle = end + SECTOR_GAP
-    return { group, start, end }
+    return { group, start, end, index }
   })
 }
 
-function layoutConstellation(width, height, isDark) {
+function layoutConstellation(width, height, isDark, groups) {
   const cx = width / 2
   const cy = height / 2
   const rx = Math.max(240, width / 2 - 100)
   const ry = Math.max(152, height / 2 - 28)
-  const sectors = buildSectors()
+  const sectors = buildSectors(groups)
   const nodes = []
 
   sectors.forEach(({ group, start, end }) => {
@@ -178,10 +178,10 @@ function layoutConstellation(width, height, isDark) {
     })
   })
 
-  const labels = sectors.map(({ group, start, end }) => {
+  const labels = sectors.map(({ group, start, end, index }) => {
     const p = polar(cx, cy, rx, ry, (start + end) / 2, 1.18)
-    const side = group.short === 'Hyperscalers' || group.short === 'Model Providers'
-    const pole = group.short === 'Self-Managed' || group.short === 'Elastic-Native'
+    const side = index === 0 || index === 1
+    const pole = index === 2 || index === 3
     return {
       short: group.short,
       color: groupColor(group, isDark),
@@ -287,7 +287,25 @@ function DestinationWell({ label, color, x, y, live, mono }) {
   )
 }
 
-function SovereignSplit({ accent, isDark, headText, mono, playKey, prefersReducedMotion }) {
+function wellLines(text) {
+  const parts = String(text).trim().split(/\s+/)
+  if (parts.length === 2) return <>{parts[0]}<br />{parts[1]}</>
+  return text
+}
+
+function SovereignSplit({
+  accent,
+  isDark,
+  headText,
+  mono,
+  playKey,
+  prefersReducedMotion,
+  experiences: experienceLabels = EXPERIENCES,
+  publicItems = PUBLIC,
+  privateItems = PRIVATE,
+  publicWell = 'Elastic Cloud',
+  privateWell = 'Your GPU',
+}) {
   const wrapRef = useRef(null)
   const [box, setBox] = useState({ w: 0, h: 0 })
   const [live, setLive] = useState(0)
@@ -314,7 +332,7 @@ function SovereignSplit({ accent, isDark, headText, mono, playKey, prefersReduce
   const expX = 24
   const expW = 196
   const expGap = 62
-  const destChipW = Math.max(...PUBLIC.map(chipWidth), ...PRIVATE.map(chipWidth))
+  const destChipW = Math.max(...publicItems.map(chipWidth), ...privateItems.map(chipWidth))
   const CHIP_H = 26
   const forkX = cx + HUB_SPLIT_R + 52
   const wellX = Math.min(w - destChipW - WELL_R - 32, forkX + Math.max(150, w * 0.16))
@@ -325,30 +343,30 @@ function SovereignSplit({ accent, isDark, headText, mono, playKey, prefersReduce
   const chipX = wellX + WELL_R + 14
   const clusterLeft = wellX - WELL_R
   const clusterRight = chipX + destChipW
-  const stackHalf = ((PUBLIC.length - 1) / 2) * chipGap + CHIP_H / 2
+  const stackHalf = ((publicItems.length - 1) / 2) * chipGap + CHIP_H / 2
   const { cx: ovalCx, rx: ovalRx, ry: ovalRy } = clusterEllipse(
     clusterLeft,
     clusterRight,
     Math.max(stackHalf, WELL_R),
   )
 
-  const experiences = EXPERIENCES.map((label, i) => ({
+  const experiences = experienceLabels.map((label, i) => ({
     label,
     index: i + 1,
     x: expX,
-    y: cy + (i - 1) * expGap,
+    y: cy + (i - (experienceLabels.length - 1) / 2) * expGap,
     color: accent,
   }))
-  const publicChips = PUBLIC.map((label, i) => ({
+  const publicChips = publicItems.map((label, i) => ({
     label,
     x: chipX,
-    y: publicY + (i - (PUBLIC.length - 1) / 2) * chipGap,
+    y: publicY + (i - (publicItems.length - 1) / 2) * chipGap,
     color: publicColor,
   }))
-  const privateChips = PRIVATE.map((label, i) => ({
+  const privateChips = privateItems.map((label, i) => ({
     label,
     x: chipX,
-    y: privateY + (i - (PRIVATE.length - 1) / 2) * chipGap,
+    y: privateY + (i - (privateItems.length - 1) / 2) * chipGap,
     color: privateColor,
   }))
   const destChips = [...publicChips, ...privateChips]
@@ -404,7 +422,7 @@ function SovereignSplit({ accent, isDark, headText, mono, playKey, prefersReduce
     return () => clearInterval(id)
   }, [w, destChips.length, playKey, prefersReducedMotion])
 
-  const liveLane = live < PUBLIC.length ? 'public' : 'private'
+  const liveLane = live < publicItems.length ? 'public' : 'private'
 
   return (
     <div ref={wrapRef} className="relative flex-1 min-h-0">
@@ -493,7 +511,7 @@ function SovereignSplit({ accent, isDark, headText, mono, playKey, prefersReduce
           ))}
 
           <DestinationWell
-            label={<>Elastic<br />Cloud</>}
+            label={wellLines(publicWell)}
             color={publicColor}
             x={wellX}
             y={publicY}
@@ -501,7 +519,7 @@ function SovereignSplit({ accent, isDark, headText, mono, playKey, prefersReduce
             mono={mono}
           />
           <DestinationWell
-            label={<>Your<br />GPU</>}
+            label={wellLines(privateWell)}
             color={privateColor}
             x={wellX}
             y={privateY}
@@ -549,7 +567,7 @@ function InferenceHub({ accent, mono, size = 'md', children }) {
   )
 }
 
-function ProviderConstellation({ accent, isDark, headText, mono, playKey, prefersReducedMotion }) {
+function ProviderConstellation({ groups = GROUPS, accent, isDark, headText, mono, playKey, prefersReducedMotion }) {
   const wrapRef = useRef(null)
   const [box, setBox] = useState({ w: 0, h: 0 })
   const [live, setLive] = useState(0)
@@ -568,8 +586,8 @@ function ProviderConstellation({ accent, isDark, headText, mono, playKey, prefer
   }, [])
 
   const layout = useMemo(
-    () => (box.w > 0 ? layoutConstellation(box.w, box.h, isDark) : null),
-    [box, isDark],
+    () => (box.w > 0 ? layoutConstellation(box.w, box.h, isDark, groups) : null),
+    [box, isDark, groups],
   )
   const nodes = layout?.nodes || []
   const labels = layout?.labels || []
@@ -746,6 +764,23 @@ function SearchInferenceScene({ metadata = {} }) {
   const headText = isDark ? 'text-white' : 'text-elastic-dark-ink'
   const eyebrow = metadata.eyebrow || 'Search · Inference'
   const mono = { fontFamily: 'Space Mono, ui-monospace, monospace' }
+  const groups = GROUPS.map((g, i) => {
+    const override = metadata.groups?.[i] || {}
+    return {
+      ...g,
+      ...override,
+      items: override.items?.length ? override.items : g.items,
+      colorLight: g.colorLight,
+      colorDark: g.colorDark,
+      native: g.native,
+    }
+  })
+  const experiences = metadata.experiences?.length ? metadata.experiences : EXPERIENCES
+  const publicItems = metadata.public?.length ? metadata.public : PUBLIC
+  const privateItems = metadata.private?.length ? metadata.private : PRIVATE
+  const publicWell = metadata.publicWell || 'Elastic Cloud'
+  const privateWell = metadata.privateWell || 'Your GPU'
+  const closer = metadata.closer || 'Air-gapped or Elastic Cloud. The call does not change.'
 
   useEffect(() => {
     const el = rootRef.current
@@ -776,7 +811,7 @@ function SearchInferenceScene({ metadata = {} }) {
           {beat === 0 && (
             <div className="flex-1 min-h-0 flex flex-col mt-1">
               <div className="reveal shrink-0 flex justify-center gap-5 mb-2">
-                {GROUPS.map((g) => {
+                {groups.map((g) => {
                   const color = groupColor(g, isDark)
                   return (
                     <div key={g.short} className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider" style={{ color }}>
@@ -790,6 +825,7 @@ function SearchInferenceScene({ metadata = {} }) {
                 })}
               </div>
               <ProviderConstellation
+                groups={groups}
                 accent={accent}
                 isDark={isDark}
                 headText={headText}
@@ -820,9 +856,14 @@ function SearchInferenceScene({ metadata = {} }) {
                 mono={mono}
                 playKey={playKey}
                 prefersReducedMotion={prefersReducedMotion}
+                experiences={experiences}
+                publicItems={publicItems}
+                privateItems={privateItems}
+                publicWell={publicWell}
+                privateWell={privateWell}
               />
               <p className="reveal shrink-0 text-center text-lg mt-2 mb-1" style={{ color: accent }}>
-                Air-gapped or Elastic Cloud. The call does not change.
+                {closer}
               </p>
             </div>
           )}

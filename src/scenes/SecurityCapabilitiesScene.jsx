@@ -194,7 +194,7 @@ function SecurityCapabilitiesScene({ metadata = {} }) {
   const baseAccent = isDark ? '#48EFCF' : '#0B64DD'
   const color = layer ? colorFor(layer.key) : baseAccent
 
-  const eyebrow = metadata.eyebrow || (isSummary ? 'Elastic Security \u00b7 Built as One' : `Elastic Security \u00b7 The ${layer.name} Layer`)
+  const eyebrow = metadata.eyebrow || (isSummary ? 'Security · Built as One' : `Security · ${layer.name}`)
 
   useEffect(() => {
     const el = rootRef.current

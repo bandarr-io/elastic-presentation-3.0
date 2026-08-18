@@ -111,7 +111,7 @@ function DiscoveryScene({ metadata = {} }) {
   const kiGraphRef = useRef(null)
   const [drill, setDrill] = useState(null)
 
-  const eyebrow = metadata.eyebrow || 'Agentic Observability · Discovery'
+  const eyebrow = metadata.eyebrow || 'Observability · Discovery'
   const beats = (metadata.beats || BEATS).map((b, i) => ({ ...(BEATS[i] || {}), ...b }))
   const { beat, playKey, isPlaying, goTo, replay, toggleAutoplay } = useSceneMotion(beats)
   const current = beats[beat]

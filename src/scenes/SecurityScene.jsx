@@ -235,7 +235,7 @@ function SecurityScene({ externalStage, onStageChange, playSignal = 0, phaseAdva
   const { theme } = useTheme()
   const isDark = theme === 'dark'
 
-  const eyebrow = metadata.eyebrow || 'Elastic Security'
+  const eyebrow = metadata.eyebrow || 'Security · Operations'
   const titlePlain = metadata.titlePlain || 'Modernizing Cyber Defense with '
   const titleAccent = metadata.titleAccent || 'AI-Driven Efficiency'
   const stageSubtitles = metadata.stageSubtitles || DEFAULT_STAGE_SUBTITLES

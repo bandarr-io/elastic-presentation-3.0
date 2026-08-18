@@ -100,7 +100,7 @@ function SignalsScene({ metadata = {} }) {
   const isDark = theme === 'dark'
   const rootRef = useRef(null)
 
-  const eyebrow = metadata.eyebrow || 'Elastic Observability · Signals'
+  const eyebrow = metadata.eyebrow || 'Observability · Signals'
   const signals = metadata.signals || SIGNALS
   const beats = (metadata.beats || BEATS).map((b, i) => ({ ...(BEATS[i] || {}), ...b }))
   const { beat, playKey, isPlaying, goTo, replay, toggleAutoplay } = useSceneMotion(beats)

@@ -171,7 +171,7 @@ const FUNNEL = [
 const BEATS = [
   { key: 'context', step: 'Context Layer', titlePlain: 'The context layer ', titleAccent: 'above every stack.', subtitle: 'It connects to the monitoring tools and data stores already in your environment — no migration required.', hold: 4600 },
   { key: 'arch', step: 'Architecture', titlePlain: 'A flywheel inside ', titleAccent: 'your cluster.', subtitle: 'Telemetry feeds a self-updating Context Layer; the agent reasons over it and reaches out to your tools — no direct infra access.' },
-  { key: 'brain', step: 'Elastic Brain', eyebrow: 'Elastic Brain', titlePlain: 'What’s yours. ', titleAccent: 'What’s shared.', subtitle: 'The memory layer behind Nightshift — learns from every incident, gets smarter every time.' },
+  { key: 'brain', step: 'Elastic Brain', eyebrow: 'Observability · Elastic Brain', titlePlain: 'What’s yours. ', titleAccent: 'What’s shared.', subtitle: 'The memory layer behind Nightshift — learns from every incident, gets smarter every time.' },
   { key: 'economics', step: 'AI Economics', titlePlain: 'The hierarchy ', titleAccent: 'is the token strategy.', subtitle: 'You can’t pass petabytes of logs to an LLM — so Elastic compresses meaning at every layer.' },
 ]
 
@@ -181,7 +181,7 @@ function NightshiftArchScene({ metadata = {} }) {
   const rootRef = useRef(null)
   const archRef = useRef(null)
 
-  const eyebrow = metadata.eyebrow || 'Elastic Observability · Inside Nightshift'
+  const eyebrow = metadata.eyebrow || 'Observability · Inside Nightshift'
   const beats = (metadata.beats || BEATS).map((b, i) => ({ ...(BEATS[i] || {}), ...b }))
   const { beat, playKey, isPlaying, goTo, replay, toggleAutoplay } = useSceneMotion(beats)
   const { prefersReducedMotion } = useReducedMotion()
@@ -331,7 +331,7 @@ function NightshiftArchScene({ metadata = {} }) {
           <div className="reveal">
             {beat === 1 ? (
               <SceneHeader
-                eyebrow={`Nightshift · Architecture · Step ${archStep + 1} of ${ARCH_STORY.length}`}
+                eyebrow="Observability · Architecture"
                 titlePlain={story.title}
                 subtitle={story.desc}
               />

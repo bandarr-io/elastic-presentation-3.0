@@ -57,6 +57,7 @@ function VectorSearchScene({ metadata = {} }) {
     ? 'bg-black/30 border-white/15 text-white placeholder:text-white/35'
     : 'bg-white border-elastic-dev-blue/20 text-elastic-dark-ink'
   const busy = searchPhase !== 'idle' && searchPhase !== 'done'
+  const searchQuery = metadata.query || DEFAULT_QUERY
 
   const clearTimers = () => {
     timersRef.current.forEach((id) => {
@@ -118,7 +119,7 @@ function VectorSearchScene({ metadata = {} }) {
     setKnnRevealed(0)
     setSearchPhase('typing')
 
-    const full = DEFAULT_QUERY
+    const full = searchQuery
     let idx = 0
     const id = setInterval(() => {
       idx++
@@ -369,10 +370,10 @@ function VectorSearchScene({ metadata = {} }) {
                     <p className={`reveal text-xs leading-relaxed mt-4 ${mutedText}`}>
                       {searchPhase === 'embedding' && <>Query embedded — landing in vector space.</>}
                       {searchPhase === 'neighbours' && (
-                        <>Query &ldquo;{DEFAULT_QUERY}&rdquo; → revealing nearest neighbours ({knnRevealed} / {KNN_TOTAL}).</>
+                        <>Query &ldquo;{searchQuery}&rdquo; → revealing nearest neighbours ({knnRevealed} / {KNN_TOTAL}).</>
                       )}
                       {searchPhase === 'done' && (
-                        <>Query &ldquo;{DEFAULT_QUERY}&rdquo; → top {KNN_TOTAL} nearest neighbours shown. Dotted lines = cosine distance in 64-dim space.</>
+                        <>Query &ldquo;{searchQuery}&rdquo; → top {KNN_TOTAL} nearest neighbours shown. Dotted lines = cosine distance in 64-dim space.</>
                       )}
                     </p>
                   )}

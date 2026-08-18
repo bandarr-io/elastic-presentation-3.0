@@ -221,7 +221,7 @@ function KubernetesScene({ metadata = {} }) {
   const isDark = theme === 'dark'
   const rootRef = useRef(null)
 
-  const eyebrow = metadata.eyebrow || 'Signals · Kubernetes'
+  const eyebrow = metadata.eyebrow || 'Observability · Kubernetes'
   const titlePlain = metadata.titlePlain || 'Kubernetes, '
   const titleAccent = metadata.titleAccent || 'out of the box.'
   const subtitle = metadata.subtitle ||

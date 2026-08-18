@@ -474,7 +474,7 @@ function KubernetesMCPScene({ metadata = {} }) {
   const beats = metadata.beats || BEATS
   const { beat, playKey, isPlaying, goTo, replay, toggleAutoplay } = useSceneMotion(beats, { holdMs: 5200 })
 
-  const eyebrow = metadata.eyebrow || 'Elastic for Claude · MCP Integration'
+  const eyebrow = metadata.eyebrow || 'Observability · MCP'
   const headText = isDark ? 'text-white' : 'text-elastic-dark-ink'
   const mutedText = isDark ? 'text-white/60' : 'text-elastic-dark-ink/65'
   const cardBase = isDark ? 'bg-white/[0.03] border-white/10' : 'bg-white/90 border-elastic-dev-blue/10'

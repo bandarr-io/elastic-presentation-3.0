@@ -50,7 +50,7 @@ function StreamsScene({ metadata = {} }) {
   const rootRef = useRef(null)
   const flowRef = useRef(null)
 
-  const eyebrow = metadata.eyebrow || 'Elastic Observability · Streams'
+  const eyebrow = metadata.eyebrow || 'Observability · Streams'
   const stages = metadata.stages || STAGES
   const beats = (metadata.beats || BEATS).map((b, i) => ({ ...(BEATS[i] || {}), ...b }))
   const { beat, playKey, isPlaying, goTo, replay, toggleAutoplay } = useSceneMotion(beats)

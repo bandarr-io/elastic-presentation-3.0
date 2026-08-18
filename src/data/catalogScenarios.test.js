@@ -4,6 +4,7 @@ import {
   DEFAULT_CATALOG_SCENARIO_ID,
   resolveCatalogScenario,
   catalogSpeakerNotes,
+  buildCatalogBeats,
 } from './catalogScenarios'
 
 describe('catalogScenarios', () => {
@@ -35,5 +36,12 @@ describe('catalogScenarios', () => {
       const hitRow = s.indexRows.find((r) => r.hit)
       expect(hitRow.docs).toBe('3, 7, 11')
     }
+  })
+
+  it('builds catalog beats from the audience pack', () => {
+    const beats = buildCatalogBeats(CATALOG_SCENARIOS.dib)
+    expect(beats).toHaveLength(9)
+    expect(beats[0].titleAccent).toBe('AVIONICS')
+    expect(beats[1].subtitle).toContain('avionics')
   })
 })

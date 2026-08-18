@@ -152,7 +152,7 @@ export default function SecurityNarrativeVisualEditor({ sceneMetadata, onUpdateS
             value={meta.eyebrow || ''}
             onChange={(e) => update({ eyebrow: e.target.value })}
             className={inputClass}
-            placeholder="Elastic Security · Why Now"
+            placeholder="Security · Why Now"
           />
         </div>
       </div>

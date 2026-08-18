@@ -293,18 +293,24 @@ function GpuVectorPipelineScene({ metadata = {} }) {
   const tokenChip = isDark ? '#0A1628' : '#F4F6F8'
   const eyebrow = metadata.eyebrow || 'Search · GPU Acceleration'
   const mono = { fontFamily: 'Space Mono, ui-monospace, monospace' }
+  const stats = STATS.map((stat, i) => ({ ...stat, ...(metadata.stats?.[i] || {}) }))
+  const stationCopy = metadata.stations || []
 
   const stations = [
-    { label: 'Your data', sub: 'Unstructured', color: accent, kind: 'media' },
-    { label: 'Embedding', sub: 'Vectors', color: embed, kind: 'vector' },
+    { label: stationCopy[0]?.label || 'Your data', sub: stationCopy[0]?.sub || 'Unstructured', color: accent, kind: 'media' },
+    { label: stationCopy[1]?.label || 'Embedding', sub: stationCopy[1]?.sub || 'Vectors', color: embed, kind: 'vector' },
     {
-      label: gpuOn ? 'NVIDIA cuVS' : 'CPU indexing',
-      sub: gpuOn ? 'CAGRA → HNSW' : 'HNSW bottleneck',
+      label: gpuOn
+        ? (stationCopy[2]?.gpuLabel || 'NVIDIA cuVS')
+        : (stationCopy[2]?.cpuLabel || 'CPU indexing'),
+      sub: gpuOn
+        ? (stationCopy[2]?.gpuSub || 'CAGRA → HNSW')
+        : (stationCopy[2]?.cpuSub || 'HNSW bottleneck'),
       color: indexColor,
       hot: true,
       kind: 'json',
     },
-    { label: 'Elasticsearch', sub: 'Vector DB', color: accent, kind: 'database' },
+    { label: stationCopy[3]?.label || 'Elasticsearch', sub: stationCopy[3]?.sub || 'Vector DB', color: accent, kind: 'database' },
   ]
 
   useEffect(() => {
@@ -475,13 +481,13 @@ function GpuVectorPipelineScene({ metadata = {} }) {
                 className="gpu-handoff mt-3 text-center text-sm uppercase tracking-wider opacity-0"
                 style={{ color: nvidia, ...mono }}
               >
-                CAGRA on GPU → HNSW in Elasticsearch
+                {metadata.handoff || 'CAGRA on GPU → HNSW in Elasticsearch'}
               </div>
             </div>
 
             {gpuOn && (
               <div className="gpu-stats grid grid-cols-3 gap-4 w-full opacity-0">
-                {STATS.map((stat) => (
+                {stats.map((stat) => (
                   <div
                     key={stat.label}
                     className={`rounded-2xl border px-5 py-5 text-center ${panel}`}
@@ -499,8 +505,8 @@ function GpuVectorPipelineScene({ metadata = {} }) {
 
             <p className={`reveal text-center text-lg ${gpuOn ? headText : mutedText}`}>
               {gpuOn
-                ? 'Same cluster. No sidecar vector database.'
-                : 'Graph construction on CPU is the stage that cannot keep up.'}
+                ? (metadata.gpuCloser || 'Same cluster. No sidecar vector database.')
+                : (metadata.cpuCloser || 'Graph construction on CPU is the stage that cannot keep up.')}
             </p>
           </div>
         </div>

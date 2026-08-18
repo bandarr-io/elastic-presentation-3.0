@@ -190,6 +190,87 @@ export function resolveCatalogScenario(metadata = {}) {
   return CATALOG_SCENARIOS[id] || DIB
 }
 
+/** Header beats for search-catalog. Nouns come from the audience pack. */
+export function buildCatalogBeats(scenario) {
+  const s = scenario || DIB
+  const u = s.unit.plural
+  const term = s.queryTermDisplay || s.queryTerm.toUpperCase()
+  return [
+    {
+      key: 'scan',
+      step: 'Scan',
+      titlePlain: 'Finding the Word ',
+      titleAccent: term,
+      subtitle: `Open every ${s.unit.singular}. A million ${u} means a million looks — search engines exist to avoid this.`,
+      hold: 20000,
+    },
+    {
+      key: 'invert',
+      step: 'Index',
+      titlePlain: "Don't open the documents. ",
+      titleAccent: 'Look up the word.',
+      subtitle: `“${s.queryTerm}” already lists which ${u} contain it. One lookup. Zero ${u} opened.`,
+      hold: 20000,
+    },
+    {
+      key: 'analyze',
+      step: 'Analyze',
+      titlePlain: 'Clean the words ',
+      titleAccent: 'so they match.',
+      subtitle: `Break them apart, make them simple, drop the noise — so searching “${s.queryTerm}” still finds the variants.`,
+      hold: 20000,
+    },
+    {
+      key: 'score',
+      step: 'Score',
+      titlePlain: 'Which match ',
+      titleAccent: 'ranks highest?',
+      subtitle: 'Score ≈ how often × how rare. Frequency ranks matches; rarity decides if the word matters.',
+      hold: 20000,
+    },
+    {
+      key: 'lucene',
+      step: 'Lucene',
+      titlePlain: 'All of that ',
+      titleAccent: 'is Lucene.',
+      subtitle: 'Clean the words. Manage the index. Score the matches. One engine.',
+      hold: 20000,
+    },
+    {
+      key: 'shards',
+      step: 'Shards',
+      titlePlain: 'One Lucene ',
+      titleAccent: 'can’t hold it all.',
+      subtitle: 'A billion documents break a single engine. Elasticsearch splits the pile into shards — each shard is still a Lucene drawer.',
+      hold: 20000,
+    },
+    {
+      key: 'scatter',
+      step: 'Scatter',
+      titlePlain: 'Ask all three ',
+      titleAccent: 'at once.',
+      subtitle: 'Elasticsearch fans one query to every shard, then gathers the best hits into one ranked list.',
+      hold: 20000,
+    },
+    {
+      key: 'replicas',
+      step: 'Replicas',
+      titlePlain: 'Keep a ',
+      titleAccent: 'spare copy.',
+      subtitle: 'Elasticsearch puts every shard in more than one place. If a node dies, a replica takes over — search never stops.',
+      hold: 20000,
+    },
+    {
+      key: 'library',
+      step: 'Close',
+      titlePlain: 'One drawer. ',
+      titleAccent: 'Or a catalog?',
+      subtitle: 'You’ve seen both. Lucene is the drawer. Elasticsearch is the catalog that runs many of them.',
+      hold: 20000,
+    },
+  ]
+}
+
 /** Default presenter notes for search-catalog (audience pack lives here, not on-slide). */
 export function catalogSpeakerNotes(scenarioOrId) {
   const scenario = typeof scenarioOrId === 'string'
@@ -202,6 +283,6 @@ export function catalogSpeakerNotes(scenarioOrId) {
     '',
     'Teaching arc: full scan → inverted index → analysis → BM25 → Lucene → Elasticsearch (shards → scatter/gather → replicas) → drawer vs library close.',
     '',
-    'Switch packs in Scene Settings → search-catalog metadata: scenarioId = dib | government | commercial.',
+    'Switch packs in Settings → Customizations → Search: How Search Works.',
   ].join('\n')
 }

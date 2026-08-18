@@ -275,6 +275,16 @@ function VectorScaleScene({ metadata = {} }) {
   const svgFaint = isDark ? 'rgba(255,255,255,0.26)' : 'rgba(26,26,26,0.2)'
   const mono = { fontFamily: 'Space Mono, ui-monospace, monospace' }
   const eyebrow = metadata.eyebrow || 'Search · Vector Database'
+  const pills = metadata.pills?.length
+    ? metadata.pills.map((label, i) => ({
+        ...(PILLS[i] || PILLS[PILLS.length - 1]),
+        label: typeof label === 'string' ? label : label.label,
+      }))
+    : PILLS
+  const factors = FACTORS.map((f, i) => {
+    const override = metadata.factors?.[i] || {}
+    return { ...f, ...override, icon: f.icon, color: f.color, num: f.num }
+  })
 
   useEffect(() => {
     if (beat !== 2) {
@@ -570,7 +580,7 @@ function VectorScaleScene({ metadata = {} }) {
               </div>
 
               <div className="reveal flex flex-wrap justify-center gap-3">
-                {PILLS.map((p) => {
+                {pills.map((p) => {
                   // The per-pill accents only read on the dark stage; light mode stays Elastic blue.
                   const tone = isDark ? p.color : accent
                   return (
@@ -590,7 +600,7 @@ function VectorScaleScene({ metadata = {} }) {
 
           {beat === 1 && (
             <div className="flex-1 min-h-0 w-full max-w-5xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 content-center">
-              {FACTORS.map((f) => {
+              {factors.map((f) => {
                 // The per-factor accents only read on the dark stage; light mode stays Elastic blue.
                 const tone = isDark ? f.color : accent
                 return (

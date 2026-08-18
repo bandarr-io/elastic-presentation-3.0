@@ -101,22 +101,35 @@ function LayerBand({ name, sub, color, panel, headText, mutedText }) {
   )
 }
 
-function GapSlot({ accent, mono }) {
+function GapSlot({ accent, mono, kicker = 'Missing', title = 'Context Layer', sub = 'retrieval · memory · ontology · skills · tools' }) {
   return (
     <div
       className="ctx-gap rounded-2xl border-2 border-dashed px-5 py-5 text-center"
       style={{ borderColor: `${accent}77`, color: accent }}
     >
       <div className="text-[10px] uppercase tracking-wider font-semibold" style={mono}>
-        Missing
+        {kicker}
       </div>
-      <div className="text-base font-bold mt-0.5">Context Layer</div>
-      <div className="text-xs mt-1 opacity-70">retrieval · memory · ontology · skills · tools</div>
+      <div className="text-base font-bold mt-0.5">{title}</div>
+      <div className="text-xs mt-1 opacity-70">{sub}</div>
     </div>
   )
 }
 
-function InsideLayer({ accent, engineColor, panel, mono, prefersReducedMotion, playKey }) {
+function InsideLayer({
+  accent,
+  engineColor,
+  panel,
+  mono,
+  prefersReducedMotion,
+  playKey,
+  title = 'Context Layer',
+  kicker = 'permissions fire before the model',
+  agentBuilderLabel = 'Agent Builder',
+  contextEngineLabel = 'Context Engine',
+  agentBuilder = AGENT_BUILDER,
+  contextEngine = CONTEXT_ENGINE,
+}) {
   const ref = useRef(null)
 
   useEffect(() => {
@@ -158,19 +171,19 @@ function InsideLayer({ accent, engineColor, panel, mono, prefersReducedMotion, p
       <div className="flex items-center gap-2.5 mb-3">
         <img src="/logo-elastic-glyph-color.png" alt="Elastic" className="w-8 h-8 object-contain" />
         <div>
-          <div className="text-sm font-bold" style={{ color: accent }}>Context Layer</div>
+          <div className="text-sm font-bold" style={{ color: accent }}>{title}</div>
           <div className="text-[10px] uppercase tracking-wider" style={{ color: accent, ...mono }}>
-            permissions fire before the model
+            {kicker}
           </div>
         </div>
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div>
           <div className="text-[10px] uppercase tracking-wider font-semibold mb-2" style={{ color: accent, ...mono }}>
-            Agent Builder
+            {agentBuilderLabel}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {AGENT_BUILDER.map((t) => (
+            {agentBuilder.map((t) => (
               <span
                 key={t}
                 className="ctx-chip text-xs rounded-full px-2.5 py-1 border"
@@ -183,10 +196,10 @@ function InsideLayer({ accent, engineColor, panel, mono, prefersReducedMotion, p
         </div>
         <div>
           <div className="text-[10px] uppercase tracking-wider font-semibold mb-2" style={{ color: engineColor, ...mono }}>
-            Context Engine
+            {contextEngineLabel}
           </div>
           <div className="flex flex-wrap gap-1.5">
-            {CONTEXT_ENGINE.map((t) => (
+            {contextEngine.map((t) => (
               <span
                 key={t}
                 className="ctx-chip text-xs rounded-full px-2.5 py-1 border"
@@ -226,7 +239,16 @@ function CtxChip({ label, color, x, y, width, live = false }) {
   )
 }
 
-function ConvergeRadiate({ accent, isDark, mono, playKey, prefersReducedMotion }) {
+function ConvergeRadiate({
+  accent,
+  isDark,
+  mono,
+  playKey,
+  prefersReducedMotion,
+  sources: sourceLabels = SOURCES,
+  benefits: benefitLabels = BENEFITS,
+  hubLabel = 'Context Engine',
+}) {
   const wrapRef = useRef(null)
   const [box, setBox] = useState({ w: 0, h: 0 })
   const [live, setLive] = useState(0)
@@ -251,23 +273,23 @@ function ConvergeRadiate({ accent, isDark, mono, playKey, prefersReducedMotion }
   const cx = w / 2
   const cy = h / 2
   const hubR = 86
-  const srcW = Math.max(...SOURCES.map(chipWidth))
-  const benW = Math.max(...BENEFITS.map(chipWidth))
+  const srcW = Math.max(...sourceLabels.map(chipWidth))
+  const benW = Math.max(...benefitLabels.map(chipWidth))
   const srcX = 24
   const benX = w - 24 - benW
   const gap = Math.min(44, h * 0.14)
 
-  const sources = SOURCES.map((label, i) => ({
+  const sources = sourceLabels.map((label, i) => ({
     label,
     x: srcX,
-    y: cy + (i - (SOURCES.length - 1) / 2) * gap,
+    y: cy + (i - (sourceLabels.length - 1) / 2) * gap,
     color: sourceColor,
     width: srcW,
   }))
-  const benefits = BENEFITS.map((label, i) => ({
+  const benefits = benefitLabels.map((label, i) => ({
     label,
     x: benX,
-    y: cy + (i - (BENEFITS.length - 1) / 2) * gap,
+    y: cy + (i - (benefitLabels.length - 1) / 2) * gap,
     color: benefitColor,
     width: benW,
   }))
@@ -382,7 +404,7 @@ function ConvergeRadiate({ accent, isDark, mono, playKey, prefersReducedMotion }
             Benefits
           </div>
           {benefits.map((b, i) => (
-            <CtxChip key={b.label} {...b} live={i + SOURCES.length === live} />
+            <CtxChip key={b.label} {...b} live={i + sourceLabels.length === live} />
           ))}
 
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-20">
@@ -392,7 +414,7 @@ function ConvergeRadiate({ accent, isDark, mono, playKey, prefersReducedMotion }
             >
               <img src="/logo-elastic-glyph-color.png" alt="Elastic" className="w-12 h-12 object-contain" />
               <div className="text-[10px] uppercase tracking-wider font-semibold mt-1.5" style={{ color: accent, ...mono }}>
-                Context Engine
+                {hubLabel}
               </div>
             </div>
           </div>
@@ -420,6 +442,24 @@ function SearchContextScene({ metadata = {} }) {
   const panel = isDark ? 'bg-white/[0.04] border-white/10' : 'bg-white border-elastic-dev-blue/12 shadow-sm'
   const eyebrow = metadata.eyebrow || 'Search · Context Layer'
   const mono = { fontFamily: 'Space Mono, ui-monospace, monospace' }
+  const layers = LAYERS.map((layer, i) => ({ ...layer, ...(metadata.layers?.[i] || {}) }))
+  const gap = {
+    kicker: 'Missing',
+    title: 'Context Layer',
+    sub: 'retrieval · memory · ontology · skills · tools',
+    ...(metadata.gap || {}),
+  }
+  const inside = {
+    title: 'Context Layer',
+    kicker: 'permissions fire before the model',
+    agentBuilderLabel: 'Agent Builder',
+    contextEngineLabel: 'Context Engine',
+    ...(metadata.inside || {}),
+  }
+  const agentBuilder = metadata.agentBuilder?.length ? metadata.agentBuilder : AGENT_BUILDER
+  const contextEngine = metadata.contextEngine?.length ? metadata.contextEngine : CONTEXT_ENGINE
+  const sources = metadata.sources?.length ? metadata.sources : SOURCES
+  const benefits = metadata.benefits?.length ? metadata.benefits : BENEFITS
 
   useEffect(() => {
     const el = rootRef.current
@@ -434,9 +474,9 @@ function SearchContextScene({ metadata = {} }) {
     return () => anim?.pause?.()
   }, [beat, playKey, prefersReducedMotion])
 
-  const agents = LAYERS[0]
-  const models = LAYERS[1]
-  const data = LAYERS[2]
+  const agents = layers[0]
+  const models = layers[1]
+  const data = layers[2]
 
   return (
     <div className="h-full w-full flex flex-col px-8 pt-2 pb-3 overflow-hidden">
@@ -459,7 +499,7 @@ function SearchContextScene({ metadata = {} }) {
                 <LayerBand {...models} color={bandColor} panel={panel} headText={headText} mutedText={mutedText} />
                 <StackTrack color={accent} leak={beat === 0} prefersReducedMotion={prefersReducedMotion} />
                 {beat === 0 ? (
-                  <GapSlot accent={accent} mono={mono} />
+                  <GapSlot accent={accent} mono={mono} kicker={gap.kicker} title={gap.title} sub={gap.sub} />
                 ) : (
                   <InsideLayer
                     accent={accent}
@@ -468,6 +508,12 @@ function SearchContextScene({ metadata = {} }) {
                     mono={mono}
                     prefersReducedMotion={prefersReducedMotion}
                     playKey={playKey}
+                    title={inside.title}
+                    kicker={inside.kicker}
+                    agentBuilderLabel={inside.agentBuilderLabel}
+                    contextEngineLabel={inside.contextEngineLabel}
+                    agentBuilder={agentBuilder}
+                    contextEngine={contextEngine}
                   />
                 )}
                 <StackTrack color={accent} leak={beat === 0} prefersReducedMotion={prefersReducedMotion} />
@@ -475,8 +521,8 @@ function SearchContextScene({ metadata = {} }) {
               </div>
               <p className="reveal shrink-0 text-center text-lg mt-3 mb-1" style={{ color: accent }}>
                 {beat === 0
-                  ? 'Jump the gap and retrieval stays a DIY project.'
-                  : 'What the model sees is curated — and governed.'}
+                  ? (metadata.missingCloser || 'Jump the gap and retrieval stays a DIY project.')
+                  : (metadata.insideCloser || 'What the model sees is curated — and governed.')}
               </p>
             </div>
           )}
@@ -500,9 +546,12 @@ function SearchContextScene({ metadata = {} }) {
                 mono={mono}
                 playKey={playKey}
                 prefersReducedMotion={prefersReducedMotion}
+                sources={sources}
+                benefits={benefits}
+                hubLabel={inside.contextEngineLabel}
               />
               <p className="reveal shrink-0 text-center text-lg mt-2 mb-1" style={{ color: accent }}>
-                Governed context in. Agent-ready answers out.
+                {metadata.flowCloser || 'Governed context in. Agent-ready answers out.'}
               </p>
             </div>
           )}

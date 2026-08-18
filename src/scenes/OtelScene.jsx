@@ -44,7 +44,7 @@ function OtelScene({ metadata = {} }) {
   const isDark = theme === 'dark'
   const rootRef = useRef(null)
 
-  const eyebrow = metadata.eyebrow || 'Elastic Observability · OpenTelemetry'
+  const eyebrow = metadata.eyebrow || 'Observability · OpenTelemetry'
   const titlePlain = metadata.titlePlain || 'Collect everything, '
   const titleAccent = metadata.titleAccent || 'from everywhere.'
   const subtitle = metadata.subtitle ||

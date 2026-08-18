@@ -65,6 +65,14 @@ const SUBMERGED_ICE =
   'M201.1 329.9L201.1 394.3L197.2 436L214 393.8L209.7 369.3L201.1 329.9Z' +
   'M166.1 331.7L165.6 333.1L172.1 378.1L174.3 391L175.6 393.8L179.5 367L166.1 331.7Z'
 
+function overlaySourceList(defaults, labels) {
+  if (!labels?.length) return defaults
+  return labels.map((label, i) => ({
+    ...(defaults[i] || { tone: defaults[defaults.length - 1]?.tone || '#A0AEC0' }),
+    label,
+  }))
+}
+
 function SearchChallengeScene({ metadata = {} }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
@@ -75,6 +83,9 @@ function SearchChallengeScene({ metadata = {} }) {
   const { beat, playKey, isPlaying, goTo, replay, toggleAutoplay } = useSceneMotion(beats)
   const current = beats[beat]
   const deep = beat >= 1
+  const structuredSources = overlaySourceList(STRUCTURED_SOURCES, metadata.structuredSources)
+  const unstructuredSources = overlaySourceList(UNSTRUCTURED_SOURCES, metadata.unstructuredSources)
+  const depthCaption = metadata.depthCaption || 'Unstructured · Siloed · Invisible to AI'
 
   const accent = isDark ? '#48EFCF' : '#0B64DD'
   const ink = isDark ? '#fff' : '#1a1a1a'
@@ -287,14 +298,14 @@ function SearchChallengeScene({ metadata = {} }) {
                     fontFamily="Space Mono, monospace"
                     fontWeight="600"
                   >
-                    Unstructured · Siloed · Invisible to AI
+                    {depthCaption}
                   </text>
                 </g>
               </svg>
             </div>
 
             <div className="reveal shrink-0 flex flex-wrap justify-center gap-2 max-w-4xl">
-              {(deep ? UNSTRUCTURED_SOURCES : STRUCTURED_SOURCES).map((t) => {
+              {(deep ? unstructuredSources : structuredSources).map((t) => {
                 // The multi-hue palette only carries on the dark canvas; on light it washes out.
                 const tone = isDark ? t.tone : accent
                 return (

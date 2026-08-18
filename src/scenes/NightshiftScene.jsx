@@ -59,7 +59,7 @@ function NightshiftScene({ metadata = {} }) {
   const isDark = theme === 'dark'
   const rootRef = useRef(null)
 
-  const eyebrow = metadata.eyebrow || 'Elastic Observability · Nightshift'
+  const eyebrow = metadata.eyebrow || 'Observability · Nightshift'
   const capabilities = metadata.capabilities || CAPABILITIES
   const callouts = metadata.callouts || CALLOUTS
   const trustModes = metadata.trustModes || TRUST_MODES

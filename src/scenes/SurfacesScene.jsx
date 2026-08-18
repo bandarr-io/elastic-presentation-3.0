@@ -41,7 +41,7 @@ function SurfacesScene({ metadata = {} }) {
   const [chatStep, setChatStep] = useState(0)
   const [chatTyping, setChatTyping] = useState(false)
 
-  const eyebrow = metadata.eyebrow || 'Agentic Observability · Multi-Surface'
+  const eyebrow = metadata.eyebrow || 'Observability · Surfaces'
   const surfaces = metadata.surfaces || SURFACES
   const beats = (metadata.beats || BEATS).map((b, i) => ({ ...(BEATS[i] || {}), ...b }))
   const { beat, playKey, goTo, replay } = useSceneMotion(beats)

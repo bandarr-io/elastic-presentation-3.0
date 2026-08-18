@@ -141,7 +141,7 @@ function SecuritySOCModelScene({ metadata = {} }) {
   const isCompare = beat === 2
   const isDiamond = beat === 1
 
-  const eyebrow = metadata.eyebrow || 'Elastic Security \u00b7 SOC Operating Model'
+  const eyebrow = metadata.eyebrow || 'Security · SOC Operating Model'
   const subtitle = metadata.subtitle ||
     "The traditional SOC pyramid \u2014 masses of junior analysts triaging alerts \u2014 can't scale against AI-powered adversaries. The future is the diamond model."
 

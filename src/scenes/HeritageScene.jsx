@@ -31,7 +31,7 @@ function HeritageScene({ metadata = {} }) {
   const isDark = theme === 'dark'
   const rootRef = useRef(null)
 
-  const eyebrow = metadata.eyebrow || 'Elastic Observability · Track Record'
+  const eyebrow = metadata.eyebrow || 'Observability · Track Record'
   const titlePlain = metadata.titlePlain || 'A proven track record of '
   const titleAccent = metadata.titleAccent || 'innovation.'
   const subtitle = metadata.subtitle ||

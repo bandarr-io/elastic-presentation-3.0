@@ -38,7 +38,7 @@ function ThreeLayersScene({ metadata = {} }) {
   const isDark = theme === 'dark'
   const rootRef = useRef(null)
 
-  const eyebrow = metadata.eyebrow || 'The Structural Advantage'
+  const eyebrow = metadata.eyebrow || 'Observability · Three Layers'
   const titlePlain = metadata.titlePlain || 'Three layers, '
   const titleAccent = metadata.titleAccent || 'one structural advantage.'
   const subtitle = metadata.subtitle ||

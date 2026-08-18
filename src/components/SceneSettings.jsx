@@ -3,10 +3,10 @@ import { useTheme } from '../context/ThemeContext'
 import { useTeamConfig } from '../context/TeamContext'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { 
-  faGear, faXmark, faEye, faEyeSlash, faRotateLeft, faClock, faCheck,
+  faGear, faXmark, faRotateLeft, faClock, faCheck,
   faUsers, faSliders, faPlus, faTrash, faGripVertical, faChevronDown,
-  faDownload, faUpload, faImage, faPalette, faArrowUp, faArrowDown,
-  faMagnifyingGlass
+  faDownload, faUpload, faPalette, faArrowUp, faArrowDown,
+  faLayerGroup
 } from '@fortawesome/free-solid-svg-icons'
 import { DEFAULT_AGENDA_ITEMS } from '../data/agendaDefaults'
 import { DECK_PRESETS, DEFAULT_PRESET_ID, CUSTOM_PRESET_ID, presetConfig } from '../data/deckPresets'
@@ -27,7 +27,15 @@ import PricingRomEditor from './sceneEditors/PricingRomEditor'
 import DataTieringEditor from './sceneEditors/DataTieringEditor'
 import SecurityEditor from './sceneEditors/SecurityEditor'
 import EnterpriseDeploymentEditor from './sceneEditors/EnterpriseDeploymentEditor'
+import SearchCatalogEditor from './sceneEditors/SearchCatalogEditor'
+import SearchChallengeEditor from './sceneEditors/SearchChallengeEditor'
+import SearchVectorScaleEditor from './sceneEditors/SearchVectorScaleEditor'
+import SearchVectorEditor from './sceneEditors/SearchVectorEditor'
+import SearchGpuEditor from './sceneEditors/SearchGpuEditor'
+import SearchInferenceEditor from './sceneEditors/SearchInferenceEditor'
+import SearchContextEditor from './sceneEditors/SearchContextEditor'
 import IconSelect from './sceneEditors/IconSelect'
+import DeckBuilder from './DeckBuilder'
 
 // Scenes whose content editors live in ./sceneEditors as standalone modules.
 // Each receives ({ sceneMetadata, onUpdateSceneMetadata, isDark, inputClass, textareaClass }).
@@ -47,6 +55,13 @@ const MODULAR_SCENE_EDITORS = {
   'data-tiering': DataTieringEditor,
   'security': SecurityEditor,
   'enterprise-deployment': EnterpriseDeploymentEditor,
+  'search-catalog': SearchCatalogEditor,
+  'search-challenge': SearchChallengeEditor,
+  'search-vector-scale': SearchVectorScaleEditor,
+  'search-vector': SearchVectorEditor,
+  'search-gpu': SearchGpuEditor,
+  'search-inference': SearchInferenceEditor,
+  'search-context': SearchContextEditor,
 }
 
 const STORAGE_KEY = 'presentation-scene-config'
@@ -916,7 +931,8 @@ export default function SceneSettings({
   const setIsOpen = onOpenChange || setInternalIsOpen
   const [activeTab, setActiveTab] = useState('scenes')
   const [showAgendaEditor, setShowAgendaEditor] = useState(false)
-  const [librarySearch, setLibrarySearch] = useState('')
+  const [deckBuilderOpen, setDeckBuilderOpen] = useState(false)
+  const [deckBuilderFocusId, setDeckBuilderFocusId] = useState(null)
   const { theme } = useTheme()
   const { teamConfig, updateTeamConfig } = useTeamConfig()
   const isDark = theme === 'dark'
@@ -930,15 +946,6 @@ export default function SceneSettings({
   // so the deck always reads off the front of the list.
   const deckScenes = scenes.filter(s => enabledSceneIds.includes(s.id))
   const libraryScenes = scenes.filter(s => !enabledSceneIds.includes(s.id))
-
-  const searchQuery = librarySearch.trim().toLowerCase()
-  const filteredLibrary = searchQuery
-    ? libraryScenes.filter(s => {
-        const title = (sceneMetadata?.[s.id]?.title || s.title || '').toLowerCase()
-        const desc = (s.description || '').toLowerCase()
-        return title.includes(searchQuery) || desc.includes(searchQuery) || s.id.toLowerCase().includes(searchQuery)
-      })
-    : libraryScenes
 
   const commitDeckOrder = (deckIds) => {
     onUpdateOrder([...deckIds, ...libraryScenes.map(s => s.id)])
@@ -1267,102 +1274,42 @@ export default function SceneSettings({
                   )}
                 </div>
 
-                {/* Deck builder toolbar */}
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <p className={`text-xs ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>
-                    Add scenes from the library, drag or use arrows to reorder, ✕ to remove.
-                  </p>
-                  <button
-                    onClick={onReset}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 flex-shrink-0 transition-all ${
-                      isDark
-                        ? 'bg-white/10 hover:bg-white/20 text-white/70'
-                        : 'bg-elastic-dev-blue/10 hover:bg-elastic-dev-blue/20 text-elastic-dev-blue/70'
-                    }`}
-                  >
-                    <FontAwesomeIcon icon={faRotateLeft} />
-                    Reset
-                  </button>
-                </div>
-
-                {/* Two-column deck builder */}
-                <div className="grid grid-cols-2 gap-4 items-start">
-                  {/* In this deck */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2 px-1">
-                      <span className={`text-sm font-semibold flex items-center gap-2 ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>
-                        <FontAwesomeIcon icon={faSliders} className={isDark ? 'text-elastic-teal' : 'text-elastic-blue'} />
-                        In this deck
-                      </span>
-                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-white/10 text-white/60' : 'bg-elastic-dev-blue/10 text-elastic-dev-blue/60'}`}>
-                        {deckScenes.length} scene{deckScenes.length === 1 ? '' : 's'}{totalTime > 0 ? ` · ~${totalTime} min` : ''}
-                      </span>
+                {/* Deck builder */}
+                <div className={`mb-4 rounded-xl border p-4 ${isDark ? 'border-elastic-teal/30 bg-elastic-teal/[0.06]' : 'border-elastic-blue/30 bg-elastic-blue/[0.05]'}`}>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>Deck</p>
+                      <p className={`text-xs ${isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'}`}>
+                        {deckScenes.length} scene{deckScenes.length === 1 ? '' : 's'}
+                        {totalTime > 0 ? ` · ~${totalTime} min` : ''}
+                        {libraryScenes.length > 0 ? ` · ${libraryScenes.length} in library` : ''}
+                        {' · preview, notes, reorder'}
+                      </p>
                     </div>
-                    <div className="space-y-2">
-                      {deckScenes.map((scene, i) => (
-                        <SceneItem
-                          key={scene.id}
-                          scene={scene}
-                          variant="deck"
-                          deckIndex={i}
-                          isLastEnabled={deckScenes.length === 1}
-                          onRemove={removeFromDeck}
-                          onMoveUp={(id) => moveInDeck(id, -1)}
-                          onMoveDown={(id) => moveInDeck(id, 1)}
-                          canMoveUp={i > 0}
-                          canMoveDown={i < deckScenes.length - 1}
-                          customDuration={customDurations?.[scene.id]}
-                          onUpdateDuration={onUpdateDuration}
-                          sceneMetadata={sceneMetadata}
-                          onUpdateSceneMetadata={onUpdateSceneMetadata}
-                          onReorder={reorderDeck}
-                          isDark={isDark}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Scene library */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2 px-1">
-                      <span className={`text-sm font-semibold flex items-center gap-2 ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>
-                        <FontAwesomeIcon icon={faImage} className={isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'} />
-                        Scene library
-                      </span>
-                      <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${isDark ? 'bg-white/10 text-white/60' : 'bg-elastic-dev-blue/10 text-elastic-dev-blue/60'}`}>
-                        {libraryScenes.length}
-                      </span>
-                    </div>
-                    <div className="relative mb-2">
-                      <FontAwesomeIcon icon={faMagnifyingGlass} className={`absolute left-3 top-1/2 -translate-y-1/2 text-xs ${isDark ? 'text-white/30' : 'text-elastic-dev-blue/30'}`} />
-                      <input
-                        type="text"
-                        value={librarySearch}
-                        onChange={(e) => setLibrarySearch(e.target.value)}
-                        placeholder="Search scenes…"
-                        className={`w-full pl-8 pr-3 py-2 text-sm rounded-lg border ${
-                          isDark ? 'bg-white/5 border-white/10 text-white placeholder-white/30' : 'bg-white border-elastic-dev-blue/10 text-elastic-dev-blue placeholder-elastic-dev-blue/30'
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={onReset}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-2 transition-all ${
+                          isDark
+                            ? 'bg-white/10 hover:bg-white/20 text-white/70'
+                            : 'bg-elastic-dev-blue/10 hover:bg-elastic-dev-blue/20 text-elastic-dev-blue/70'
                         }`}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      {filteredLibrary.length === 0 ? (
-                        <p className={`text-xs text-center py-6 ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>
-                          {searchQuery ? 'No scenes match your search.' : 'Every scene is already in your deck.'}
-                        </p>
-                      ) : (
-                        filteredLibrary.map((scene) => (
-                          <SceneItem
-                            key={scene.id}
-                            scene={scene}
-                            variant="library"
-                            onAdd={addToDeck}
-                            customDuration={customDurations?.[scene.id]}
-                            sceneMetadata={sceneMetadata}
-                            isDark={isDark}
-                          />
-                        ))
-                      )}
+                      >
+                        <FontAwesomeIcon icon={faRotateLeft} />
+                        Reset
+                      </button>
+                      <button
+                        onClick={() => {
+                          setDeckBuilderFocusId(deckScenes[0]?.id || null)
+                          setDeckBuilderOpen(true)
+                        }}
+                        className={`px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-2 transition-colors ${
+                          isDark ? 'bg-elastic-teal text-elastic-dev-blue hover:bg-elastic-teal/90' : 'bg-elastic-blue text-white hover:bg-elastic-blue/90'
+                        }`}
+                      >
+                        <FontAwesomeIcon icon={faLayerGroup} />
+                        Open Deck Builder
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1378,6 +1325,27 @@ export default function SceneSettings({
             )}
           </div>
         </div>
+      )}
+
+      {deckBuilderOpen && (
+        <DeckBuilder
+          scenes={scenes}
+          deckScenes={deckScenes}
+          libraryScenes={libraryScenes}
+          customDurations={customDurations}
+          sceneMetadata={sceneMetadata}
+          onUpdateDuration={onUpdateDuration}
+          onUpdateSceneMetadata={onUpdateSceneMetadata}
+          onAdd={addToDeck}
+          onRemove={removeFromDeck}
+          onMoveUp={(id) => moveInDeck(id, -1)}
+          onMoveDown={(id) => moveInDeck(id, 1)}
+          onReorder={reorderDeck}
+          onReset={onReset}
+          onClose={() => setDeckBuilderOpen(false)}
+          initialSceneId={deckBuilderFocusId}
+          totalTime={totalTime}
+        />
       )}
     </>
   )
@@ -1705,6 +1673,13 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
           <option value="platform-operations">Deployment Models</option>
           <option value="platform-value">Platform Value</option>
           <option value="enterprise-deployment">Enterprise Deployment</option>
+          <option value="search-catalog">Search: How Search Works</option>
+          <option value="search-challenge">Search: The Challenge</option>
+          <option value="search-vector-scale">Search: Vector Database</option>
+          <option value="search-vector">Search: Vector Search</option>
+          <option value="search-gpu">Search: GPU Acceleration</option>
+          <option value="search-inference">Search: Inference</option>
+          <option value="search-context">Search: Context Layer</option>
         </select>
       </div>
 

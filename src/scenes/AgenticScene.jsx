@@ -27,7 +27,7 @@ function AgenticScene({ metadata = {} }) {
   const isDark = theme === 'dark'
   const rootRef = useRef(null)
 
-  const eyebrow = metadata.eyebrow || 'Elastic Observability · Strategy'
+  const eyebrow = metadata.eyebrow || 'Observability · Agentic'
   const titlePlain = metadata.titlePlain || 'Agentic '
   const titleAccent = metadata.titleAccent || 'observability.'
   const subtitle = metadata.subtitle ||
