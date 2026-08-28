@@ -257,7 +257,7 @@ export function buildCatalogBeats(scenario) {
       step: 'Replicas',
       titlePlain: 'Keep a ',
       titleAccent: 'spare copy.',
-      subtitle: 'Elasticsearch puts every shard in more than one place. If a node dies, a replica takes over — search never stops.',
+      subtitle: 'Elasticsearch puts every shard in more than one place. If a node dies, a replica takes over — then a new node restores the spares.',
       hold: 20000,
     },
     {

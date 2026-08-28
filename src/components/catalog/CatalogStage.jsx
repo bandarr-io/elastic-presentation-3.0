@@ -1866,15 +1866,17 @@ function ScatterBeat({ scenario, phase, accent, isDark, headText, mutedText, pan
   )
 }
 
-function ReplicasBeat({ phase, accent, danger, isDark, headText, mutedText, panel, reduce, onReplicasStep }) {
-  const steps = ['Distribute copies', 'A node fails', 'Promote a replica']
-  const nextLabel = phase < 3 ? steps[phase] : null
+function ReplicasBeat({ phase, accent, danger, isDark, headText, panel, reduce, onReplicasStep }) {
+  const steps = ['Distribute copies', 'A node fails', 'Promote a replica', 'Add a node', 'Rebalance shards']
+  const nextLabel = phase < 5 ? steps[phase] : null
   const ink = isDark ? '#fff' : '#1a1a1a'
   const softInk = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.4)'
   const ease = reduce ? 'none' : '0.55s cubic-bezier(.22,.8,.24,1)'
   const showCopies = phase >= 1
   const failed = phase >= 2
   const recovered = phase >= 3
+  const joining = phase >= 4
+  const rebalanced = phase >= 5
 
   // A: P1 + R2 · B: P2 + R3 (dies) · C: P3 + R1
   // When B dies, R2 on A becomes the new primary for shard 2
@@ -1899,29 +1901,39 @@ function ReplicasBeat({ phase, accent, danger, isDark, headText, mutedText, pane
     },
   ]
 
-  const story = recovered
+  const story = rebalanced
     ? {
-        lead: 'Search never stopped.',
-        body: 'Elasticsearch promoted the spare. Users didn’t notice.',
+        lead: 'Replicas restored. Search never paused.',
+        body: 'Node D took the missing copies. Primaries stayed put. No re-index — Elasticsearch filled the holes.',
       }
-    : failed
+    : joining
       ? {
-          lead: 'Node B is gone.',
-          body: 'Shard 2’s primary just vanished. Without a spare, that slice goes dark.',
+          lead: 'Node D just joined.',
+          body: 'Empty for a beat. Shards 2 and 3 still have no spare. Rebalance and Elasticsearch fills the holes.',
         }
-      : showCopies
+      : recovered
         ? {
-            lead: 'Elasticsearch keeps spare copies.',
-            body: 'Primaries do the work. Replicas are live copies on other nodes — ready.',
+            lead: 'Search never stopped.',
+            body: 'Elasticsearch promoted the spare. Users didn’t notice. The cluster is still missing copies.',
           }
-        : {
-            lead: 'Scale isn’t enough. You need resilience.',
-            body: 'Right now each shard lives in only one place. That’s a single point of failure.',
-          }
+        : failed
+          ? {
+              lead: 'Node B is gone.',
+              body: 'Shard 2’s primary just vanished. Without a spare, that slice goes dark.',
+            }
+          : showCopies
+            ? {
+                lead: 'Elasticsearch keeps spare copies.',
+                body: 'Primaries do the work. Replicas are live copies on other nodes — ready.',
+              }
+            : {
+                lead: 'Scale isn’t enough. You need resilience.',
+                body: 'Right now each shard lives in only one place. That’s a single point of failure.',
+              }
 
   return (
-    <div className="w-full max-w-5xl mx-auto h-full min-h-0 flex flex-col items-center justify-center gap-6 sm:gap-8 overflow-hidden">
-      <div className="grid grid-cols-3 gap-4 sm:gap-5 w-full shrink-0">
+    <div className={`w-full mx-auto h-full min-h-0 flex flex-col items-center justify-center gap-6 sm:gap-8 overflow-hidden ${joining ? 'max-w-6xl' : 'max-w-5xl'}`}>
+      <div className={`grid gap-3 sm:gap-4 w-full shrink-0 ${joining ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
         {nodes.map((n, i) => {
           const isDown = n.dead && failed
           const promoteHere = recovered && n.replica.promotes
@@ -2047,6 +2059,74 @@ function ReplicasBeat({ phase, accent, danger, isDark, headText, mutedText, pane
             </div>
           )
         })}
+        {joining && (
+          <div
+            className={`relative rounded-2xl border p-4 sm:p-5 ${panel} ${!reduce && !rebalanced ? 'catalog-node-join' : ''}`}
+            style={{
+              borderColor: `${accent}88`,
+              boxShadow: `0 14px 36px ${accent}22`,
+              transform: 'translateY(-4px)',
+              transition: ease,
+            }}
+          >
+            <div className="relative flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <img
+                  src="/logo-elastic-glyph-color.png"
+                  alt=""
+                  className="w-7 h-7 sm:w-8 sm:h-8 object-contain shrink-0"
+                />
+                <div className="text-base sm:text-lg font-bold" style={{ color: ink, ...MONO }}>
+                  Node D
+                </div>
+              </div>
+              <span
+                className={`text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${rebalanced && !reduce ? 'catalog-hit-pop' : ''}`}
+                style={{ background: accent, color: isDark ? '#041018' : '#fff', ...MONO }}
+              >
+                {rebalanced ? 'in balance' : 'joining'}
+              </span>
+            </div>
+            {rebalanced ? (
+              <div className="flex flex-col gap-2">
+                {[
+                  { shardId: 2, role: 'replica' },
+                  { shardId: 3, role: 'replica' },
+                ].map((chip, ci) => (
+                  <ShardLuceneChip
+                    key={`D-${chip.shardId}`}
+                    shardId={chip.shardId}
+                    role={chip.role}
+                    accent={accent}
+                    danger={danger}
+                    isDark={isDark}
+                    softInk={softInk}
+                    tone="replica"
+                    className={!reduce ? 'catalog-shard-in' : ''}
+                    style={{ animationDelay: reduce ? undefined : `${ci * 110}ms`, transition: ease }}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {[0, 1].map((slot) => (
+                  <div
+                    key={`d-empty-${slot}`}
+                    className="rounded-xl border border-dashed flex items-center justify-center text-[11px] font-bold uppercase tracking-wider"
+                    style={{
+                      minHeight: 54,
+                      borderColor: isDark ? 'rgba(255,255,255,0.12)' : 'rgba(11,100,221,0.16)',
+                      color: softInk,
+                      ...MONO,
+                    }}
+                  >
+                    waiting
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {recovered && (
@@ -2059,7 +2139,11 @@ function ReplicasBeat({ phase, accent, danger, isDark, headText, mutedText, pane
             ...MONO,
           }}
         >
-          search keeps working · nobody notices
+          {rebalanced
+            ? 'replicas restored · no downtime'
+            : joining
+              ? 'search is up · copies still missing'
+              : 'search keeps working · nobody notices'}
         </div>
       )}
 
@@ -2114,6 +2198,7 @@ function LibraryBeat({ scenario, phase, accent, isDark, headText, mutedText, pan
   const esCaps = [
     'many drawers · shards',
     'spare drawers · replicas',
+    'new node · rebalance',
     'one front desk · JSON',
     'asks every drawer at once',
   ]
@@ -2126,7 +2211,7 @@ function LibraryBeat({ scenario, phase, accent, isDark, headText, mutedText, pan
     : showEs
       ? {
           lead: 'Elasticsearch is the card catalog.',
-          body: 'Shards, scatter/gather, replicas — everything you just watched outside one Lucene.',
+          body: 'Shards, scatter/gather, replicas, rebalance — everything you just watched outside one Lucene.',
         }
       : showLucene
         ? {

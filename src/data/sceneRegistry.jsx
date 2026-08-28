@@ -135,7 +135,7 @@ export const SCENE_REGISTRY = [
     component: CardCatalogScene,
     title: 'How Search Works',
     duration: '5 min',
-    description: 'Lexical foundations — full scan to inverted index, analysis, BM25, Lucene, shards, replicas (audience scenario packs)',
+    description: 'Lexical foundations — full scan to inverted index, analysis, BM25, Lucene, shards, replicas, rebalance (audience scenario packs)',
     defaultDisabled: true,
   },
   {

@@ -40,7 +40,9 @@ describe('catalogScenarios', () => {
 
   it('builds catalog beats from the audience pack', () => {
     const beats = buildCatalogBeats(CATALOG_SCENARIOS.dib)
-    expect(beats).toHaveLength(9)
+    expect(beats.map((b) => b.key)).toEqual([
+      'scan', 'invert', 'analyze', 'score', 'lucene', 'shards', 'scatter', 'replicas', 'library',
+    ])
     expect(beats[0].titleAccent).toBe('AVIONICS')
     expect(beats[1].subtitle).toContain('avionics')
   })

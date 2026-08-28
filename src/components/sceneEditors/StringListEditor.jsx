@@ -48,5 +48,16 @@ export default function StringListEditor({
 }
 
 export function mergeBeats(defaults, overrides) {
-  return defaults.map((def, i) => ({ ...def, ...(overrides?.[i] || {}) }))
+  if (!overrides?.length) return defaults.map((d) => ({ ...d }))
+  const byKey = new Map()
+  for (const beat of overrides) {
+    if (beat?.key) byKey.set(beat.key, beat)
+  }
+  return defaults.map((def, i) => {
+    const matched = def.key ? byKey.get(def.key) : undefined
+    if (matched) return { ...def, ...matched }
+    const indexed = overrides[i]
+    if (indexed && !indexed.key) return { ...def, ...indexed }
+    return { ...def }
+  })
 }

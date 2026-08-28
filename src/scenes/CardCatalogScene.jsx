@@ -17,7 +17,10 @@ function CardCatalogScene({ metadata = {} }) {
 
   const scenario = useMemo(() => resolveCatalogScenario(metadata), [metadata])
   const defaultBeats = useMemo(() => buildCatalogBeats(scenario), [scenario])
-  const beats = (metadata.beats || defaultBeats).map((b, i) => ({ ...(defaultBeats[i] || {}), ...b }))
+  const beats = defaultBeats.map((def) => {
+    const override = (metadata.beats || []).find((b) => b.key === def.key)
+    return { ...def, ...(override || {}) }
+  })
   const { beat, playKey, isPlaying, goTo, replay, toggleAutoplay } = useSceneMotion(beats)
   const current = beats[beat]
   const key = current?.key || 'scan'
@@ -110,8 +113,8 @@ function CardCatalogScene({ metadata = {} }) {
   }
 
   const advanceReplicas = () => {
-    if (key !== 'replicas' || phase >= 3) return
-    setPhase((p) => Math.min(3, p + 1))
+    if (key !== 'replicas' || phase >= 5) return
+    setPhase((p) => Math.min(5, p + 1))
   }
 
   const advanceLibrary = () => {
@@ -146,7 +149,7 @@ function CardCatalogScene({ metadata = {} }) {
       // Wait for presenter to click through scatter/gather
       setPhase(0)
     } else if (key === 'replicas') {
-      // Wait for presenter to click through failover
+      // Wait for presenter to click through failover, add-node, rebalance
       setPhase(0)
     } else if (key === 'library') {
       // Wait for presenter to click Lucene → Elasticsearch → punchline
