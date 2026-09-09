@@ -13,6 +13,7 @@ import { createPresenterChannel } from './presenterChannel'
 import ScenePreview from './ScenePreview'
 import { buildPreviewProps } from './buildPreviewProps'
 import { catalogSpeakerNotes, resolveCatalogScenario } from '../data/catalogScenarios'
+import { baseSceneId } from '../utils/sceneIdentity'
 
 const LIFTED_STAGE_SCENES = new Set(['security', 'schema', 'esql', 'services', 'elastic-overview'])
 
@@ -190,8 +191,8 @@ function PresenterView() {
   // Scene-level notes plus optional per-beat notes (beatNotes[beatIndex]).
   // search-catalog audience pack lives in speaker notes (not on-slide).
   const storedSceneNotes = sceneMetadata?.[currentScene?.id]?.speakerNotes || ''
-  const catalogDefaultNotes = currentScene?.id === 'search-catalog'
-    ? catalogSpeakerNotes(resolveCatalogScenario(sceneMetadata?.['search-catalog'] || {}))
+  const catalogDefaultNotes = baseSceneId(currentScene?.id) === 'search-catalog'
+    ? catalogSpeakerNotes(resolveCatalogScenario(sceneMetadata?.[currentScene.id] || {}))
     : ''
   const sceneNotes = storedSceneNotes || catalogDefaultNotes
   const beatNotes = sceneMetadata?.[currentScene?.id]?.beatNotes || []
@@ -228,7 +229,7 @@ function PresenterView() {
   const previewContext = { sceneMetadata, orderedScenes, customDurations, enabledScenes }
   const CurrentComponent = currentScene?.component
   const NextComponent = nextScene?.component
-  const currentStage = LIFTED_STAGE_SCENES.has(currentScene?.id) ? beat : 0
+  const currentStage = LIFTED_STAGE_SCENES.has(baseSceneId(currentScene?.id)) ? beat : 0
 
   const panelClass = isDark
     ? 'bg-white/[0.04] border border-white/10'

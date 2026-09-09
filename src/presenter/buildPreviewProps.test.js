@@ -25,4 +25,16 @@ describe('buildPreviewProps', () => {
     expect(props.playSignal).toBe(3)
     expect(props.metadata.eyebrow).toBe('Hi')
   })
+
+  it('uses the copy metadata and the source scene wiring', () => {
+    const copyCtx = {
+      sceneMetadata: { 'security~2': { eyebrow: 'Copy' } },
+      orderedScenes: [],
+      customDurations: {},
+      enabledScenes: [],
+    }
+    const props = buildPreviewProps('security~2', copyCtx, 2)
+    expect(props.metadata.eyebrow).toBe('Copy')
+    expect(props.externalStage).toBe(2)
+  })
 })

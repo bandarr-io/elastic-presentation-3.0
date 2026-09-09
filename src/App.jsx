@@ -11,6 +11,7 @@ import HeroScene from './scenes/HeroScene'
 import { SCENE_REGISTRY } from './data/sceneRegistry'
 import { usePresenterSync } from './presenter/usePresenterSync'
 import PresenterView from './presenter/PresenterView'
+import { baseSceneId } from './utils/sceneIdentity'
 
 function AppContent() {
   const { theme, toggleTheme } = useTheme()
@@ -30,7 +31,10 @@ function AppContent() {
     updateDuration,
     updateSceneMetadata,
     updateOrder,
-    resetToDefault
+    resetToDefault,
+    duplicateScene,
+    deleteDuplicate,
+    duplicates,
   } = useSceneConfiguration(SCENE_REGISTRY)
 
   const navigate = useNavigate()
@@ -104,52 +108,54 @@ function AppContent() {
   // Pass props to scenes
   const Scene = scenes[currentScene]?.component || HeroScene
   const currentSceneId = scenes[currentScene]?.id
+  const currentBaseId = baseSceneId(currentSceneId)
+  const currentMeta = sceneMetadata?.[currentSceneId] || {}
   
   let sceneProps = {}
-  if (currentSceneId === 'agenda') {
+  if (currentBaseId === 'agenda') {
     sceneProps = {
       scenes: orderedScenes,
       sceneMetadata,
       customDurations,
-      metadata: sceneMetadata?.agenda || {},
+      metadata: currentMeta,
       expanded: agendaExpanded,
       setExpanded: setAgendaExpanded,
       expandAllSignal: agendaExpandAllSignal,
     }
-  } else if (currentSceneId === 'hero') {
-    sceneProps = { metadata: sceneMetadata?.hero || {} }
-  } else if (currentSceneId === 'about') {
-    sceneProps = { metadata: sceneMetadata?.about || {} }
-  } else if (currentSceneId === 'business-value') {
+  } else if (currentBaseId === 'hero') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'about') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'business-value') {
     sceneProps = {
       selectedCard: businessValueSelectedCard,
       setSelectedCard: setBusinessValueSelectedCard,
       showUnifiedMessage: businessValueShowUnified,
       setShowUnifiedMessage: setBusinessValueShowUnified,
-      metadata: sceneMetadata?.['business-value'] || {}
+      metadata: currentMeta
     }
-  } else if (currentSceneId === 'problem-patterns') {
-    sceneProps = { metadata: sceneMetadata?.['problem-patterns'] || {} }
-  } else if (currentSceneId === 'logsdb') {
-    sceneProps = { metadata: sceneMetadata?.logsdb || {} }
-  } else if (currentSceneId === 'ai-assistant') {
-    sceneProps = { metadata: sceneMetadata?.['ai-assistant'] || {} }
-  } else if (currentSceneId === 'customer-architect') {
-    sceneProps = { metadata: sceneMetadata?.['customer-architect'] || {} }
-  } else if (currentSceneId === 'elastic-exploded') {
-    sceneProps = { metadata: sceneMetadata?.['elastic-exploded'] || {} }
-  } else if (currentSceneId === 'unified-strategy') {
-    sceneProps = { metadata: sceneMetadata?.['unified-strategy'] || {} }
-  } else if (currentSceneId === 'data-explosion') {
+  } else if (currentBaseId === 'problem-patterns') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'logsdb') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'ai-assistant') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'customer-architect') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'elastic-exploded') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'unified-strategy') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'data-explosion') {
     sceneProps = {
-      metadata: sceneMetadata?.['data-explosion'] || {},
+      metadata: currentMeta,
       verdictSignal: dataExplosionVerdictSignal,
     }
-  } else if (currentSceneId === 'data-mesh') {
+  } else if (currentBaseId === 'data-mesh') {
     sceneProps = {
       scenes: enabledScenes,
       onNavigate: (i) => navigateToScene(i),
-      metadata: sceneMetadata?.['data-mesh'] || {},
+      metadata: currentMeta,
       runQuerySignal: dataMeshRunQuerySignal,
       onQueryStateChange: setDataMeshQueryState,
       playSignal: dataMeshPlaySignal,
@@ -159,135 +165,135 @@ function AppContent() {
       activateMeshSignal: dataMeshActivateMeshSignal,
       onActivateMeshStateChange: setDataMeshActivateMeshState,
     }
-  } else if (currentSceneId === 'cross-cluster') {
-    sceneProps = { metadata: sceneMetadata?.['cross-cluster'] || {} }
-  } else if (currentSceneId === 'security-narrative-visual') {
-    sceneProps = { metadata: sceneMetadata?.['security-narrative-visual'] || {} }
-  } else if (currentSceneId === 'security-soc-model') {
-    sceneProps = { metadata: sceneMetadata?.['security-soc-model'] || {} }
-  } else if (currentSceneId === 'security-capabilities') {
-    sceneProps = { metadata: sceneMetadata?.['security-capabilities'] || {} }
-  } else if (currentSceneId === 'security') {
+  } else if (currentBaseId === 'cross-cluster') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'security-narrative-visual') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'security-soc-model') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'security-capabilities') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'security') {
     sceneProps = {
       externalStage: securityStage,
       onStageChange: setSecurityStage,
       playSignal: securityPlaySignal,
       phaseAdvanceSignal: securityPhaseSignal,
       onAlertPhaseChange: setSecurityAlertPhase,
-      metadata: sceneMetadata?.security || {},
+      metadata: currentMeta,
     }
-  } else if (currentSceneId === 'licensing') {
-    sceneProps = { metadata: sceneMetadata?.licensing || {} }
-  } else if (currentSceneId === 'pricing-rom') {
-    sceneProps = { metadata: sceneMetadata?.['pricing-rom'] || {} }
-  } else if (currentSceneId === 'elastic-value') {
-    sceneProps = { metadata: sceneMetadata?.['elastic-value'] || {} }
-  } else if (currentSceneId === 'platform-operations') {
-    sceneProps = { metadata: sceneMetadata?.['platform-operations'] || {} }
-  } else if (currentSceneId === 'platform-value') {
-    sceneProps = { metadata: sceneMetadata?.['platform-value'] || {} }
-  } else if (currentSceneId === 'value-by-team') {
-    sceneProps = { metadata: sceneMetadata?.['value-by-team'] || {} }
-  } else if (currentSceneId === 'security-use-cases') {
-    sceneProps = { metadata: sceneMetadata?.['security-use-cases'] || {} }
-  } else if (currentSceneId === 'schema') {
+  } else if (currentBaseId === 'licensing') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'pricing-rom') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'elastic-value') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'platform-operations') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'platform-value') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'value-by-team') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'security-use-cases') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'schema') {
     sceneProps = {
       externalStage: schemaStage,
       onStageChange: setSchemaStage,
       playSignal: schemaPlaySignal,
-      metadata: sceneMetadata?.schema || {},
+      metadata: currentMeta,
     }
-  } else if (currentSceneId === 'access-control') {
+  } else if (currentBaseId === 'access-control') {
     sceneProps = {
-      metadata: sceneMetadata?.['access-control'] || {},
+      metadata: currentMeta,
     }
-  } else if (currentSceneId === 'data-tiering') {
+  } else if (currentBaseId === 'data-tiering') {
     sceneProps = {
       isRunning: dataTieringIsRunning,
       setIsRunning: setDataTieringIsRunning,
       resetSignal: dataTieringResetSignal,
-      metadata: sceneMetadata?.['data-tiering'] || {},
+      metadata: currentMeta,
     }
-  } else if (currentSceneId === 'consolidation') {
+  } else if (currentBaseId === 'consolidation') {
     sceneProps = {
-      tools: sceneMetadata?.consolidation?.tools,
-      metadata: sceneMetadata?.consolidation || {},
+      tools: currentMeta.tools,
+      metadata: currentMeta,
     }
-  } else if (currentSceneId === 'esql') {
+  } else if (currentBaseId === 'esql') {
     sceneProps = {
-      metadata: sceneMetadata?.esql || {},
+      metadata: currentMeta,
       externalStage: esqlStage,
       onStageChange: setEsqlStage,
     }
-  } else if (currentSceneId === 'services') {
+  } else if (currentBaseId === 'services') {
     sceneProps = {
       externalStage: servicesStage,
       onStageChange: (s) => { setServicesStage(s); if (s !== 2) setDemoPhase('idle') },
       demoPhase,
-      metadata: sceneMetadata?.services || {},
+      metadata: currentMeta,
     }
-  } else if (currentSceneId === 'next-steps') {
+  } else if (currentBaseId === 'next-steps') {
     sceneProps = {
-      metadata: sceneMetadata?.['next-steps'] || {},
+      metadata: currentMeta,
     }
-  } else if (currentSceneId === 'panel') {
+  } else if (currentBaseId === 'panel') {
     sceneProps = {
-      metadata: sceneMetadata?.panel || {},
+      metadata: currentMeta,
     }
-  } else if (currentSceneId === 'obs-ai-scale') {
-    sceneProps = { metadata: sceneMetadata?.['obs-ai-scale'] || {} }
-  } else if (currentSceneId === 'obs-heritage') {
-    sceneProps = { metadata: sceneMetadata?.['obs-heritage'] || {} }
-  } else if (currentSceneId === 'obs-three-layers') {
-    sceneProps = { metadata: sceneMetadata?.['obs-three-layers'] || {} }
-  } else if (currentSceneId === 'obs-pillars') {
-    sceneProps = { metadata: sceneMetadata?.['obs-pillars'] || {} }
-  } else if (currentSceneId === 'obs-signals') {
-    sceneProps = { metadata: sceneMetadata?.['obs-signals'] || {} }
-  } else if (currentSceneId === 'nightshift-sre') {
-    sceneProps = { metadata: sceneMetadata?.['nightshift-sre'] || {} }
-  } else if (currentSceneId === 'obs-streams') {
-    sceneProps = { metadata: sceneMetadata?.['obs-streams'] || {} }
-  } else if (currentSceneId === 'obs-otel') {
-    sceneProps = { metadata: sceneMetadata?.['obs-otel'] || {} }
-  } else if (currentSceneId === 'obs-kubernetes') {
-    sceneProps = { metadata: sceneMetadata?.['obs-kubernetes'] || {} }
-  } else if (currentSceneId === 'obs-mcp-app') {
-    sceneProps = { metadata: sceneMetadata?.['obs-mcp-app'] || {} }
-  } else if (currentSceneId === 'obs-agentic') {
-    sceneProps = { metadata: sceneMetadata?.['obs-agentic'] || {} }
-  } else if (currentSceneId === 'obs-discovery') {
-    sceneProps = { metadata: sceneMetadata?.['obs-discovery'] || {} }
-  } else if (currentSceneId === 'obs-surfaces') {
-    sceneProps = { metadata: sceneMetadata?.['obs-surfaces'] || {} }
-  } else if (currentSceneId === 'nightshift-arch') {
-    sceneProps = { metadata: sceneMetadata?.['nightshift-arch'] || {} }
-  } else if (currentSceneId === 'core-components') {
-    sceneProps = { metadata: sceneMetadata?.['core-components'] || {} }
-  } else if (currentSceneId === 'node-types') {
-    sceneProps = { metadata: sceneMetadata?.['node-types'] || {} }
-  } else if (currentSceneId === 'elastic-overview') {
+  } else if (currentBaseId === 'obs-ai-scale') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'obs-heritage') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'obs-three-layers') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'obs-pillars') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'obs-signals') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'nightshift-sre') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'obs-streams') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'obs-otel') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'obs-kubernetes') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'obs-mcp-app') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'obs-agentic') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'obs-discovery') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'obs-surfaces') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'nightshift-arch') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'core-components') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'node-types') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'elastic-overview') {
     sceneProps = {
-      metadata: sceneMetadata?.['elastic-overview'] || {},
+      metadata: currentMeta,
       externalStage: elasticOverviewStage,
       onStageChange: setElasticOverviewStage,
     }
-  } else if (currentSceneId === 'enterprise-deployment') {
-    sceneProps = { metadata: sceneMetadata?.['enterprise-deployment'] || {} }
-  } else if (currentSceneId === 'search-catalog') {
-    sceneProps = { metadata: sceneMetadata?.['search-catalog'] || { scenarioId: 'dib' } }
-  } else if (currentSceneId === 'search-challenge') {
-    sceneProps = { metadata: sceneMetadata?.['search-challenge'] || {} }
-  } else if (currentSceneId === 'search-vector-scale') {
-    sceneProps = { metadata: sceneMetadata?.['search-vector-scale'] || {} }
-  } else if (currentSceneId === 'search-vector') {
-    sceneProps = { metadata: sceneMetadata?.['search-vector'] || {} }
-  } else if (currentSceneId === 'search-gpu') {
-    sceneProps = { metadata: sceneMetadata?.['search-gpu'] || {} }
-  } else if (currentSceneId === 'search-inference') {
-    sceneProps = { metadata: sceneMetadata?.['search-inference'] || {} }
-  } else if (currentSceneId === 'search-context') {
-    sceneProps = { metadata: sceneMetadata?.['search-context'] || {} }
+  } else if (currentBaseId === 'enterprise-deployment') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'search-catalog') {
+    sceneProps = { metadata: { scenarioId: 'dib', ...currentMeta } }
+  } else if (currentBaseId === 'search-challenge') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'search-vector-scale') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'search-vector') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'search-gpu') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'search-inference') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'search-context') {
+    sceneProps = { metadata: currentMeta }
   }
 
   const handleNext = () => {
@@ -311,7 +317,7 @@ function AppContent() {
   // Step controls for scenes whose stage state is lifted into App (instead of
   // useSceneMotion), so the presenter view can drive them too.
   const liftedStageControls = (() => {
-    switch (currentSceneId) {
+    switch (currentBaseId) {
       case 'security':
         return { stage: securityStage, count: SECURITY_STAGE_COUNT, setStage: setSecurityStage }
       case 'schema':
@@ -332,26 +338,26 @@ function AppContent() {
   // stays in this tab; only { id, label, disabled } is broadcast.
   const sceneActions = (() => {
     const actions = []
-    if (currentSceneId === 'agenda') {
+    if (currentBaseId === 'agenda') {
       actions.push({
         id: 'agenda-toggle-all',
         label: agendaAnyExpanded ? 'Collapse all' : 'Expand all',
         run: () => { if (agendaAnyExpanded) setAgendaExpanded({}); else setAgendaExpandAllSignal(n => n + 1) },
       })
     }
-    if (currentSceneId === 'business-value' && businessValueSelectedCard && !businessValueShowUnified) {
+    if (currentBaseId === 'business-value' && businessValueSelectedCard && !businessValueShowUnified) {
       actions.push({ id: 'bv-unified', label: 'Show unified message', run: () => setBusinessValueShowUnified(true) })
     }
-    if (currentSceneId === 'data-explosion') {
+    if (currentBaseId === 'data-explosion') {
       actions.push({ id: 'reveal-verdict', label: 'Reveal verdict', run: () => setDataExplosionVerdictSignal(n => n + 1) })
     }
-    if (currentSceneId === 'security') {
+    if (currentBaseId === 'security') {
       actions.push({ id: 'security-play', label: 'Play animation', run: () => setSecurityPlaySignal(n => n + 1) })
       if (securityAlertPhase === 'flooding' || securityAlertPhase === 'connecting') {
         actions.push({ id: 'security-phase', label: 'Show attack story', run: () => setSecurityPhaseSignal(n => n + 1) })
       }
     }
-    if (currentSceneId === 'data-mesh') {
+    if (currentBaseId === 'data-mesh') {
       if (dataMeshPlayState.canPlay) {
         actions.push({ id: 'mesh-play', label: 'Play typing', run: () => setDataMeshPlaySignal(n => n + 1) })
       }
@@ -374,11 +380,11 @@ function AppContent() {
         })
       }
     }
-    if (currentSceneId === 'data-tiering') {
+    if (currentBaseId === 'data-tiering') {
       actions.push({ id: 'tiering-toggle', label: dataTieringIsRunning ? 'Pause flow' : 'Start flow', run: () => setDataTieringIsRunning(r => !r) })
       actions.push({ id: 'tiering-reset', label: 'Reset', run: () => { setDataTieringIsRunning(false); setDataTieringResetSignal(n => n + 1) } })
     }
-    if (currentSceneId === 'services' && servicesStage === 2) {
+    if (currentBaseId === 'services' && servicesStage === 2) {
       actions.push({ id: 'demo-back', label: 'Demo back', disabled: demoPhase === 'idle', run: handleDemoBack })
       actions.push({ id: 'demo-reset', label: 'Reset demo', disabled: demoPhase === 'idle', run: () => setDemoPhase('idle') })
       actions.push({ id: 'demo-next', label: 'Demo next', disabled: demoPhase === 'complete', run: handleDemoAdvance })
@@ -409,7 +415,7 @@ function AppContent() {
   // presenter's current-scene preview so trigger-driven animations render
   // there too. Values must be serializable and use the scene's prop names.
   const previewProps = (() => {
-    switch (currentSceneId) {
+    switch (currentBaseId) {
       case 'agenda':
         return { expanded: agendaExpanded, expandAllSignal: agendaExpandAllSignal }
       case 'business-value':
@@ -485,24 +491,24 @@ function AppContent() {
 
   // Reset scene-specific state when navigating away
   useEffect(() => {
-    if (currentSceneId !== 'business-value') {
+    if (currentBaseId !== 'business-value') {
       setBusinessValueSelectedCard(null)
       setBusinessValueShowUnified(false)
     }
-    if (currentSceneId !== 'data-explosion') {
+    if (currentBaseId !== 'data-explosion') {
       setDataExplosionVerdictSignal(0)
     }
-    if (currentSceneId !== 'security') {
+    if (currentBaseId !== 'security') {
       setSecurityStage(0)
       setSecurityPlaySignal(0)
       setSecurityAlertPhase('idle')
       setSecurityPhaseSignal(0)
     }
-    if (currentSceneId !== 'schema') {
+    if (currentBaseId !== 'schema') {
       setSchemaPlaySignal(0)
       setSchemaStage(0)
     }
-    if (currentSceneId !== 'elastic-overview') {
+    if (currentBaseId !== 'elastic-overview') {
       setElasticOverviewStage(0)
     }
   }, [currentSceneId])
@@ -520,6 +526,9 @@ function AppContent() {
         onUpdateSceneMetadata={updateSceneMetadata}
         onUpdateOrder={updateOrder}
         onReset={resetToDefault}
+        onDuplicate={duplicateScene}
+        onDeleteDuplicate={deleteDuplicate}
+        duplicates={duplicates}
         presets={presets}
         activePreset={activePreset}
         onApplyPreset={applyPreset}
@@ -625,7 +634,7 @@ function AppContent() {
             )}
 
             {/* Expand/collapse all agenda blocks - only visible on Agenda scene */}
-            {currentSceneId === 'agenda' && (
+            {currentBaseId === 'agenda' && (
               <button
                 onClick={() => {
                   if (agendaAnyExpanded) setAgendaExpanded({})
@@ -643,7 +652,7 @@ function AppContent() {
             )}
 
             {/* Air-gapped toggle - only visible on Enterprise Deployment scene */}
-            {currentSceneId === 'enterprise-deployment' && (() => {
+            {currentBaseId === 'enterprise-deployment' && (() => {
               const airGapped = !!sceneMetadata?.['enterprise-deployment']?.airGapped
               return (
                 <button
@@ -667,7 +676,7 @@ function AppContent() {
             })()}
 
             {/* Data-path legend - only visible on Enterprise Deployment scene */}
-            {currentSceneId === 'enterprise-deployment' && (() => {
+            {currentBaseId === 'enterprise-deployment' && (() => {
               const c = theme === 'dark'
                 ? { collect: '#4C8DFF', process: '#FEC514', store: '#48EFCF', serve: '#F04E98', ops: '#8A9BB4' }
                 : { collect: '#0B64DD', process: '#B7791F', store: '#0E8C7F', serve: '#F04E98', ops: '#64748B' }
@@ -702,7 +711,7 @@ function AppContent() {
             })()}
 
             {/* Reveal button - only visible on Data Explosion scene */}
-            {currentSceneId === 'data-explosion' && (
+            {currentBaseId === 'data-explosion' && (
               <button
                 onClick={() => setDataExplosionVerdictSignal(n => n + 1)}
                 className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 ${
@@ -717,7 +726,7 @@ function AppContent() {
             )}
 
             {/* Play Button - only visible on Security scene, triggers current stage animation */}
-            {currentSceneId === 'security' && (
+            {currentBaseId === 'security' && (
               <button
                 onClick={() => setSecurityPlaySignal(n => n + 1)}
                 className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 ${
@@ -732,7 +741,7 @@ function AppContent() {
             )}
 
             {/* Phase Advance Button - appears when correlation is running; advances to attack story cards */}
-            {currentSceneId === 'security' && (securityAlertPhase === 'flooding' || securityAlertPhase === 'connecting') && (
+            {currentBaseId === 'security' && (securityAlertPhase === 'flooding' || securityAlertPhase === 'connecting') && (
               <button
                 onClick={() => setSecurityPhaseSignal(n => n + 1)}
                 className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 ${
@@ -747,7 +756,7 @@ function AppContent() {
             )}
 
             {/* Play Button - only visible on Data Mesh scene stage 0 before typing starts */}
-            {currentSceneId === 'data-mesh' && dataMeshPlayState.canPlay && (
+            {currentBaseId === 'data-mesh' && dataMeshPlayState.canPlay && (
               <button
                 onClick={() => setDataMeshPlaySignal(n => n + 1)}
                 className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 ${
@@ -762,7 +771,7 @@ function AppContent() {
             )}
 
             {/* Run Query Button - only visible on Data Mesh scene when stage 4 and mesh is active */}
-            {currentSceneId === 'data-mesh' && dataMeshQueryState.canRun && (
+            {currentBaseId === 'data-mesh' && dataMeshQueryState.canRun && (
               <button
                 onClick={() => setDataMeshRunQuerySignal(n => n + 1)}
                 disabled={dataMeshQueryState.isRunning}
@@ -781,7 +790,7 @@ function AppContent() {
             )}
 
             {/* Activate Mesh Button - Data Mesh stage 4 before mesh is active */}
-            {currentSceneId === 'data-mesh' && dataMeshActivateMeshState.canActivate && (
+            {currentBaseId === 'data-mesh' && dataMeshActivateMeshState.canActivate && (
               <button
                 onClick={() => setDataMeshActivateMeshSignal(n => n + 1)}
                 className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 ${
@@ -796,7 +805,7 @@ function AppContent() {
             )}
 
             {/* Compare All Button - Data Mesh stage 3 */}
-            {currentSceneId === 'data-mesh' && dataMeshSummaryState.canToggle && (
+            {currentBaseId === 'data-mesh' && dataMeshSummaryState.canToggle && (
               <button
                 onClick={() => setDataMeshSummarySignal(n => n + 1)}
                 className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 ${
@@ -811,7 +820,7 @@ function AppContent() {
             )}
 
             {/* Start/Pause + Reset - Data Tiering scene */}
-            {currentSceneId === 'data-tiering' && (
+            {currentBaseId === 'data-tiering' && (
               <>
                 <button
                   onClick={() => setDataTieringIsRunning(r => !r)}
@@ -839,7 +848,7 @@ function AppContent() {
             )}
 
             {/* How Button - only visible on Business Value scene when card is selected and unified message not shown */}
-            {currentSceneId === 'business-value' && businessValueSelectedCard && !businessValueShowUnified && (
+            {currentBaseId === 'business-value' && businessValueSelectedCard && !businessValueShowUnified && (
               <button
                 onClick={() => setBusinessValueShowUnified(true)}
                 className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 ${
@@ -854,7 +863,7 @@ function AppContent() {
             )}
 
             {/* Stage Back/Forward - only visible on ES|QL scene */}
-            {currentSceneId === 'esql' && (
+            {currentBaseId === 'esql' && (
               <>
                 <button
                   onClick={() => setEsqlStage(s => Math.max(0, s - 1))}
@@ -884,7 +893,7 @@ function AppContent() {
             )}
 
             {/* Stage Back/Forward - only visible on Elastic Overview scene */}
-            {currentSceneId === 'elastic-overview' && (
+            {currentBaseId === 'elastic-overview' && (
               <>
                 <button
                   onClick={() => setElasticOverviewStage(s => Math.max(0, s - 1))}
@@ -913,7 +922,7 @@ function AppContent() {
               </>
             )}
           {/* Demo controls — Zero Downtime stage */}
-          {currentSceneId === 'services' && servicesStage === 2 && (
+          {currentBaseId === 'services' && servicesStage === 2 && (
             <>
               <button
                 onClick={handleDemoBack}

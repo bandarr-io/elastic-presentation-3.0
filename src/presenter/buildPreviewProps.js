@@ -1,3 +1,5 @@
+import { baseSceneId } from '../utils/sceneIdentity'
+
 /**
  * Preview instances get inert stand-ins for the interactive props AppContent
  * normally supplies. `stage` lets a follower preview mirror a lifted stage
@@ -8,7 +10,7 @@ export function buildPreviewProps(sceneId, { sceneMetadata, orderedScenes, custo
   const metadata = sceneMetadata?.[sceneId] || {}
   const noop = () => {}
   const base = (() => {
-    switch (sceneId) {
+    switch (baseSceneId(sceneId)) {
     case 'agenda':
       return { scenes: orderedScenes, sceneMetadata, customDurations, metadata, expanded: {}, setExpanded: noop, expandAllSignal: 0 }
     case 'business-value':

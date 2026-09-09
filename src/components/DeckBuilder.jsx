@@ -15,6 +15,10 @@ import {
   faTableCells,
   faPenToSquare,
   faPalette,
+  faCopy,
+  faChevronLeft,
+  faChevronRight,
+  faUsers,
 } from '@fortawesome/free-solid-svg-icons'
 import { useTheme } from '../context/ThemeContext'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
@@ -24,8 +28,11 @@ import ErrorBoundary from './ErrorBoundary'
 import SceneThumbnailBooth from './SceneThumbnailBooth'
 import { catalogSpeakerNotes, resolveCatalogScenario } from '../data/catalogScenarios'
 import { getThumbnail, thumbnailFailed, thumbnailKey } from '../utils/sceneThumbnails'
-import { baseSceneId } from '../utils/sceneIdentity'
+import { baseSceneId, isDuplicateSceneId, nextDuplicateId } from '../utils/sceneIdentity'
+import { aliasSceneEditorProps } from '../utils/sceneDuplicates'
 import { MODULAR_SCENE_EDITORS } from './sceneEditors'
+import TeamEditorPanel from './TeamEditorPanel'
+import AgendaEditorPanel from './AgendaEditorPanel'
 
 function parseMinutes(duration) {
   const m = String(duration || '').match(/(\d+)/)
@@ -53,6 +60,7 @@ function SceneCard({
   onMoveUp,
   onMoveDown,
   onRemove,
+  onDuplicate,
   onDragStart,
   onDragOver,
   onDragLeave,
@@ -61,6 +69,8 @@ function SceneCard({
   sceneId,
   thumbnail,
   capturing,
+  isDuplicate,
+  sourceTitle,
 }) {
   const stop = (e) => {
     e.preventDefault()
@@ -131,10 +141,24 @@ function SceneCard({
               </button>
               <button
                 type="button"
+                onClick={(e) => { stop(e); onDuplicate?.() }}
+                className={btn}
+                title="Duplicate this scene"
+              >
+                <FontAwesomeIcon icon={faCopy} />
+              </button>
+              <button
+                type="button"
                 onClick={(e) => { stop(e); onRemove() }}
                 disabled={!canRemove}
                 className={`${btn} ${!canRemove ? 'opacity-25 pointer-events-none' : (isDark ? 'hover:text-red-400' : 'hover:text-red-500')}`}
-                title={canRemove ? 'Remove from deck' : 'At least one scene must stay in the deck'}
+                title={
+                  isDuplicate
+                    ? 'Delete this copy'
+                    : canRemove
+                      ? 'Remove from deck'
+                      : 'At least one scene must stay in the deck'
+                }
               >
                 <FontAwesomeIcon icon={faTrash} />
               </button>
@@ -147,6 +171,11 @@ function SceneCard({
             <div className={`text-sm font-bold leading-tight line-clamp-2 ${
               thumbnail ? 'text-white drop-shadow-md' : text
             }`}>{title}</div>
+            {isDuplicate && sourceTitle ? (
+              <div className={`text-[10px] mt-0.5 ${thumbnail ? 'text-white/80 drop-shadow' : muted}`}>
+                Copy of {sourceTitle}
+              </div>
+            ) : null}
             {duration ? (
               <div className={`text-[10px] mt-1 ${thumbnail ? 'text-white/80 drop-shadow' : muted}`}>
                 <FontAwesomeIcon icon={faClock} className="mr-1" />
@@ -170,6 +199,8 @@ export default function DeckBuilder({
   onUpdateSceneMetadata,
   onAdd,
   onRemove,
+  onDuplicate,
+  onDeleteDuplicate,
   onMoveUp,
   onMoveDown,
   onReorder,
@@ -182,6 +213,7 @@ export default function DeckBuilder({
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   const [rail, setRail] = useState('deck')
+  const [railCollapsed, setRailCollapsed] = useState(false)
   const [viewMode, setViewMode] = useState(initialViewMode)
   const [librarySearch, setLibrarySearch] = useState('')
   const [selectedId, setSelectedId] = useState(initialSceneId || deckScenes[0]?.id || null)
@@ -228,8 +260,8 @@ export default function DeckBuilder({
   const durationValue = selected ? (customDurations?.[selected.id] || '') : ''
   const durationMin = parseMinutes(durationValue)
 
-  const catalogDefaultNotes = selected?.id === 'search-catalog'
-    ? catalogSpeakerNotes(resolveCatalogScenario(sceneMetadata?.['search-catalog'] || {}))
+  const catalogDefaultNotes = baseSceneId(selected?.id) === 'search-catalog'
+    ? catalogSpeakerNotes(resolveCatalogScenario(sceneMetadata?.[selected.id] || {}))
     : ''
   const speakerNotes = metadata.speakerNotes || catalogDefaultNotes
 
@@ -300,6 +332,39 @@ export default function DeckBuilder({
       : 'bg-white border-elastic-dev-blue/10 text-elastic-dev-blue placeholder-elastic-dev-blue/30'
   }`
   const ContentEditor = selected ? MODULAR_SCENE_EDITORS[baseSceneId(selected.id)] : null
+  const editorProps = selected
+    ? aliasSceneEditorProps(selected.id, sceneMetadata, onUpdateSceneMetadata)
+    : { sceneMetadata, onUpdateSceneMetadata }
+  const isTeamScene = selected ? baseSceneId(selected.id) === 'team' : false
+  const isAgendaScene = selected ? baseSceneId(selected.id) === 'agenda' : false
+  const teamEditor = isTeamScene ? (
+    <div className="mt-6">
+      <TeamEditorPanel isDark={isDark} />
+    </div>
+  ) : null
+  const agendaEditor = isAgendaScene ? (
+    <div className="mt-6">
+      <AgendaEditorPanel
+        isDark={isDark}
+        scenes={scenes}
+        sceneMetadata={editorProps.sceneMetadata}
+        onUpdateSceneMetadata={editorProps.onUpdateSceneMetadata}
+      />
+    </div>
+  ) : null
+  const extraEditor = ContentEditor ? (
+    <ContentEditor
+      sceneMetadata={editorProps.sceneMetadata}
+      onUpdateSceneMetadata={editorProps.onUpdateSceneMetadata}
+      isDark={isDark}
+      inputClass={inputClass}
+      textareaClass={textareaClass}
+    />
+  ) : teamEditor || agendaEditor || (selected ? (
+    <p className={`text-sm ${muted}`}>
+      {displayTitle} has no editable content fields yet.
+    </p>
+  ) : null)
   const tabActive = isDark ? 'bg-elastic-teal text-elastic-dev-blue' : 'bg-elastic-blue text-white'
   const tabIdle = isDark ? 'text-white/60 hover:text-white/80' : 'text-elastic-dev-blue/60 hover:text-elastic-dev-blue/80'
   const stageBg = isDark ? 'bg-elastic-dev-blue' : 'bg-elastic-light-grey'
@@ -321,12 +386,32 @@ export default function DeckBuilder({
     setRail('deck')
   }
 
+  const openSpecialScene = (baseId) => {
+    const inDeck = deckScenes.find((s) => baseSceneId(s.id) === baseId)
+    const inLibrary = libraryScenes.find((s) => baseSceneId(s.id) === baseId)
+    const scene = inDeck || inLibrary
+    if (!scene) return
+    if (!inDeck) addAndSelect(scene.id)
+    else setSelectedId(scene.id)
+    setViewMode('content')
+    setRailCollapsed(false)
+    setRail('deck')
+  }
+
   const removeScene = (id) => {
     if (deckScenes.length <= 1) return
     const i = deckScenes.findIndex((s) => s.id === id)
     const next = deckScenes[i + 1] || deckScenes[i - 1]
-    onRemove?.(id)
+    if (isDuplicateSceneId(id)) onDeleteDuplicate?.(id)
+    else onRemove?.(id)
     if (selectedId === id && next) setSelectedId(next.id)
+  }
+
+  const copyScene = (id) => {
+    const newId = nextDuplicateId(id, scenes.map((s) => s.id))
+    onDuplicate?.(id)
+    setSelectedId(newId)
+    setRail('deck')
   }
 
   const cardProps = (scene, i) => ({
@@ -350,6 +435,9 @@ export default function DeckBuilder({
     onMoveUp: () => onMoveUp?.(scene.id),
     onMoveDown: () => onMoveDown?.(scene.id),
     onRemove: () => removeScene(scene.id),
+    onDuplicate: () => copyScene(scene.id),
+    isDuplicate: !!scene.isDuplicate || isDuplicateSceneId(scene.id),
+    sourceTitle: scene.sourceTitle,
     onDragStart: (e) => handleDragStart(e, scene.id),
     onDragOver: (e) => {
       e.preventDefault()
@@ -393,6 +481,20 @@ export default function DeckBuilder({
               >
                 <FontAwesomeIcon icon={faPalette} />
                 Content
+              </button>
+              <button
+                onClick={() => openSpecialScene('team')}
+                className={`px-2.5 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 ${isTeamScene && viewMode === 'content' ? tabActive : tabIdle}`}
+              >
+                <FontAwesomeIcon icon={faUsers} />
+                Team
+              </button>
+              <button
+                onClick={() => openSpecialScene('agenda')}
+                className={`px-2.5 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 ${isAgendaScene && viewMode === 'content' ? tabActive : tabIdle}`}
+              >
+                <FontAwesomeIcon icon={faClock} />
+                Agenda
               </button>
               <button
                 onClick={() => setViewMode('sorter')}
@@ -456,24 +558,63 @@ export default function DeckBuilder({
         <div className="flex-1 min-h-0 flex">
           {/* Left rail — filmstrip + library */}
           <div
-            className="w-[280px] shrink-0 flex flex-col border-r"
+            className={`${railCollapsed ? 'w-12' : 'w-[280px]'} shrink-0 flex flex-col border-r transition-[width] duration-200`}
             style={{ borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(16,28,63,0.1)' }}
           >
             <div className={`p-2 flex gap-1 border-b ${isDark ? 'border-white/10' : 'border-elastic-dev-blue/10'}`}>
-              <button
-                onClick={() => setRail('deck')}
-                className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold ${rail === 'deck' ? tabActive : tabIdle}`}
-              >
-                In deck ({deckScenes.length})
-              </button>
-              <button
-                onClick={() => setRail('library')}
-                className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold ${rail === 'library' ? tabActive : tabIdle}`}
-              >
-                Library ({libraryScenes.length})
-              </button>
+              {railCollapsed ? (
+                <button
+                  onClick={() => setRailCollapsed(false)}
+                  className={`w-full py-1.5 rounded-lg text-xs ${tabIdle}`}
+                  title="Show filmstrip"
+                >
+                  <FontAwesomeIcon icon={faChevronRight} />
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => setRail('deck')}
+                    className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold ${rail === 'deck' ? tabActive : tabIdle}`}
+                  >
+                    In deck ({deckScenes.length})
+                  </button>
+                  <button
+                    onClick={() => setRail('library')}
+                    className={`flex-1 px-2 py-1.5 rounded-lg text-xs font-semibold ${rail === 'library' ? tabActive : tabIdle}`}
+                  >
+                    Library ({libraryScenes.length})
+                  </button>
+                  <button
+                    onClick={() => setRailCollapsed(true)}
+                    className={`px-2 py-1.5 rounded-lg text-xs ${tabIdle}`}
+                    title="Collapse filmstrip"
+                  >
+                    <FontAwesomeIcon icon={faChevronLeft} />
+                  </button>
+                </>
+              )}
             </div>
 
+            {railCollapsed ? (
+              <div className="flex-1 overflow-y-auto p-1 space-y-1">
+                {deckScenes.map((scene, i) => {
+                  const active = scene.id === selectedId
+                  return (
+                    <button
+                      key={scene.id}
+                      onClick={() => setSelectedId(scene.id)}
+                      title={sceneTitle(scene, sceneMetadata)}
+                      className={`w-full py-1.5 rounded-md text-[10px] font-mono font-semibold ${
+                        active ? tabActive : tabIdle
+                      }`}
+                    >
+                      {String(i + 1).padStart(2, '0')}
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <>
             {rail === 'library' && (
               <div className="px-2 pt-2">
                 <div className="relative">
@@ -523,6 +664,8 @@ export default function DeckBuilder({
                 })
               )}
             </div>
+              </>
+            )}
           </div>
 
           {/* Center + right: content mode is a wide form + preview; edit mode
@@ -548,21 +691,7 @@ export default function DeckBuilder({
                     onUpdateSceneMetadata={onUpdateSceneMetadata}
                     onUpdateDuration={onUpdateDuration}
                     compactNotes
-                    extra={
-                      ContentEditor ? (
-                        <ContentEditor
-                          sceneMetadata={sceneMetadata}
-                          onUpdateSceneMetadata={onUpdateSceneMetadata}
-                          isDark={isDark}
-                          inputClass={inputClass}
-                          textareaClass={textareaClass}
-                        />
-                      ) : selected ? (
-                        <p className={`text-sm ${muted}`}>
-                          {displayTitle} has no editable content fields yet.
-                        </p>
-                      ) : null
-                    }
+                    extra={extraEditor}
                   />
                 </div>
               </div>
@@ -632,6 +761,7 @@ export default function DeckBuilder({
               inputClass={inputClass}
               onUpdateSceneMetadata={onUpdateSceneMetadata}
               onUpdateDuration={onUpdateDuration}
+              extra={teamEditor || agendaEditor}
             />
           </div>
             </>
@@ -720,7 +850,7 @@ function Inspector({
         />
         <p className={`text-[11px] mt-1 ${muted}`}>
           Shown only in the presenter view.
-          {selected.id === 'search-catalog' ? ' Audience pack details live here (not on the slide).' : ''}
+          {baseSceneId(selected.id) === 'search-catalog' ? ' Audience pack details live here (not on the slide).' : ''}
         </p>
       </div>
 
