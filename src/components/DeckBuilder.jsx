@@ -16,6 +16,7 @@ import {
   faPenToSquare,
 } from '@fortawesome/free-solid-svg-icons'
 import { useTheme } from '../context/ThemeContext'
+import { useDebouncedValue } from '../hooks/useDebouncedValue'
 import ScenePreview from '../presenter/ScenePreview'
 import { buildPreviewProps } from '../presenter/buildPreviewProps'
 import ErrorBoundary from './ErrorBoundary'
@@ -247,16 +248,31 @@ export default function DeckBuilder({
     [sceneMetadata, scenes, customDurations, deckScenes],
   )
 
+  // Thumbnail keys hash the whole metadata blob, and a miss costs a full
+  // offscreen render plus an html-to-image encode. Editing content in this
+  // panel would queue one capture per keystroke, so thumbnails track a settled
+  // copy of the metadata while the live copy drives the preview.
+  const settledMetadata = useDebouncedValue(sceneMetadata, 500)
+  const thumbnailContext = useMemo(
+    () => ({
+      sceneMetadata: settledMetadata,
+      orderedScenes: scenes,
+      customDurations,
+      enabledScenes: deckScenes,
+    }),
+    [settledMetadata, scenes, customDurations, deckScenes],
+  )
+
   const thumbs = useMemo(() => {
     const next = {}
     for (const scene of deckScenes) {
-      next[scene.id] = getThumbnail(thumbnailKey(scene.id, theme, sceneMetadata?.[scene.id]))
+      next[scene.id] = getThumbnail(thumbnailKey(scene.id, theme, settledMetadata?.[scene.id]))
     }
     return next
-  }, [deckScenes, theme, sceneMetadata, thumbTick])
+  }, [deckScenes, theme, settledMetadata, thumbTick])
 
   const captureScene = deckScenes.find((scene) => {
-    const key = thumbnailKey(scene.id, theme, sceneMetadata?.[scene.id])
+    const key = thumbnailKey(scene.id, theme, settledMetadata?.[scene.id])
     return !getThumbnail(key) && !thumbnailFailed(key)
   }) || null
 
@@ -542,8 +558,8 @@ export default function DeckBuilder({
     {captureScene ? (
       <SceneThumbnailBooth
         scene={captureScene}
-        previewProps={buildPreviewProps(captureScene.id, previewContext)}
-        cacheKey={thumbnailKey(captureScene.id, theme, sceneMetadata?.[captureScene.id])}
+        previewProps={buildPreviewProps(captureScene.id, thumbnailContext)}
+        cacheKey={thumbnailKey(captureScene.id, theme, settledMetadata?.[captureScene.id])}
         stageClass={stageBg}
         backgroundColor={isDark ? '#101C3F' : '#F5F7FA'}
         onSettled={onThumbSettled}

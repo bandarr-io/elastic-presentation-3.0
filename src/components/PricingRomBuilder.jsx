@@ -106,6 +106,7 @@ export default function PricingRomBuilder({ meta, onChange, onClose }) {
   const [showPaste, setShowPaste] = useState(false)
   const [pasteText, setPasteText] = useState('')
   const [showTemplates, setShowTemplates] = useState(false)
+  const templatesRef = useRef(null)
   const [copied, setCopied] = useState(false)
 
   // Lock body scroll while the builder is open.
@@ -124,6 +125,15 @@ export default function PricingRomBuilder({ meta, onChange, onClose }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  useEffect(() => {
+    if (!showTemplates) return
+    const onPointerDown = (e) => {
+      if (!templatesRef.current?.contains(e.target)) setShowTemplates(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    return () => document.removeEventListener('pointerdown', onPointerDown)
+  }, [showTemplates])
 
   // --- scenario ops ---
   const updateScenario = (patch) => setScenarios(scenarios.map((s, i) => (i === si ? { ...s, ...patch } : s)))
@@ -223,6 +233,8 @@ export default function PricingRomBuilder({ meta, onChange, onClose }) {
   // ---- styles ----
   const panelBg = isDark ? 'bg-elastic-dev-blue' : 'bg-elastic-light-grey'
   const surface = isDark ? 'bg-white/[0.03] border-white/10' : 'bg-white border-elastic-dev-blue/10'
+  // Floating menus need an opaque fill so the content they overlap doesn't bleed through
+  const popover = isDark ? 'bg-elastic-dev-blue border-white/20' : 'bg-white border-elastic-dev-blue/15'
   const text = isDark ? 'text-white' : 'text-elastic-dark-ink'
   const muted = isDark ? 'text-white/60' : 'text-elastic-dev-blue/60'
   const cell = `w-full px-2 py-1.5 text-xs rounded-md border outline-none focus:ring-2 ${
@@ -349,12 +361,12 @@ export default function PricingRomBuilder({ meta, onChange, onClose }) {
               {/* Toolbar */}
               <div className="flex flex-wrap items-center gap-2">
                 <button onClick={addRow} className={`${chipBtn} ${isDark ? 'text-elastic-teal border-elastic-teal/40' : 'text-elastic-blue border-elastic-blue/40'}`}><FontAwesomeIcon icon={faPlus} className="mr-1" />Line item</button>
-                <div className="relative">
+                <div className="relative" ref={templatesRef}>
                   <button onClick={() => setShowTemplates((v) => !v)} className={chipBtn}><FontAwesomeIcon icon={faWandMagicSparkles} className="mr-1.5" />Template</button>
                   {showTemplates && (
-                    <div className={`absolute z-10 mt-1 w-64 rounded-lg border shadow-xl overflow-hidden ${surface}`}>
+                    <div className={`absolute z-10 mt-1 w-64 rounded-lg border shadow-2xl overflow-hidden ${popover}`}>
                       {TEMPLATES.map((t) => (
-                        <button key={t.id} onClick={() => applyTemplate(t)} className={`w-full text-left px-3 py-2 text-xs ${isDark ? 'text-white/80 hover:bg-white/10' : 'text-elastic-dark-ink/80 hover:bg-elastic-dev-blue/5'}`}>
+                        <button key={t.id} onClick={() => applyTemplate(t)} className={`w-full text-left px-3 py-2.5 text-[13px] ${text} ${isDark ? 'hover:bg-white/10' : 'hover:bg-elastic-dev-blue/5'}`}>
                           {t.label}
                         </button>
                       ))}

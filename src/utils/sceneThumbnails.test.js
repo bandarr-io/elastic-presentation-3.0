@@ -21,4 +21,17 @@ describe('sceneThumbnails', () => {
     markThumbnailFailed(key)
     expect(thumbnailFailed(key)).toBe(true)
   })
+
+  // Runs last: filling the cache evicts keys stored by the tests above.
+  it('caps the cache so metadata edits cannot grow it without bound', () => {
+    const first = thumbnailKey('hero', 'dark', { edit: 0 })
+    setThumbnail(first, 'data:image/png;base64,first')
+
+    for (let i = 1; i <= 200; i += 1) {
+      setThumbnail(thumbnailKey('hero', 'dark', { edit: i }), `data:image/png;base64,${i}`)
+    }
+
+    expect(getThumbnail(first)).toBe(null)
+    expect(getThumbnail(thumbnailKey('hero', 'dark', { edit: 200 }))).toBe('data:image/png;base64,200')
+  })
 })

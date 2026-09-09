@@ -994,7 +994,8 @@ export default function SceneSettings({
         enabled: enabledSceneIds,
         order: scenes.map(s => s.id),
         durations: customDurations,
-        metadata: sceneMetadata
+        metadata: sceneMetadata,
+        activePreset
       },
       team: teamConfig
     }
@@ -1018,15 +1019,20 @@ export default function SceneSettings({
       try {
         const config = JSON.parse(e.target.result)
         
-        // Import scene configuration
+        // Import scene configuration. orderVersion must be stamped, or the
+        // version check in useSceneConfiguration treats the import as stale and
+        // rebuilds order/enabledIds from the default preset — silently dropping
+        // the imported flow.
         if (config.scenes) {
           const sceneConfig = {
             enabledIds: config.scenes.enabled || [],
             order: config.scenes.order || [],
             durations: config.scenes.durations || {},
-            sceneMetadata: config.scenes.metadata || {}
+            sceneMetadata: config.scenes.metadata || {},
+            activePreset: config.scenes.activePreset || CUSTOM_PRESET_ID,
+            orderVersion: ORDER_VERSION
           }
-          localStorage.setItem('presentation-scene-config', JSON.stringify(sceneConfig))
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(sceneConfig))
         }
 
         // Import team configuration
@@ -1610,23 +1616,6 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
       : 'bg-white border-elastic-dev-blue/10 text-elastic-dev-blue placeholder-elastic-dev-blue/30'
   }`
 
-  const problemPatterns = sceneMetadata?.['problem-patterns'] || {}
-
-  const handleProblemUpdate = (category, index, value) => {
-    const currentProblems = problemPatterns.problems || {}
-    const categoryProblems = currentProblems[category] || []
-    const newCategoryProblems = [...categoryProblems]
-    newCategoryProblems[index] = value
-    
-    onUpdateSceneMetadata('problem-patterns', {
-      ...problemPatterns,
-      problems: {
-        ...currentProblems,
-        [category]: newCategoryProblems
-      }
-    })
-  }
-
   return (
     <div className="space-y-4">
       <p className={`text-xs ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>
@@ -2080,136 +2069,6 @@ function CustomizationsPanel({ isDark, sceneMetadata, onUpdateSceneMetadata }) {
                 )
               })}
             </div>
-          </div>
-        </div>
-      )}
-
-      {selectedScene === 'problem-patterns' && (
-        <div className="space-y-6 mt-6">
-          <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-elastic-dark-ink'}`}>
-            Problem Patterns Content
-          </h3>
-
-          {/* Header */}
-          <div className="space-y-3">
-            <div>
-              <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Eyebrow</label>
-              <input
-                type="text"
-                value={problemPatterns.eyebrow || ''}
-                onChange={(e) => onUpdateSceneMetadata('problem-patterns', { ...problemPatterns, eyebrow: e.target.value })}
-                className={inputClass}
-                placeholder="Problem Orientation"
-              />
-            </div>
-            <div>
-              <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Title</label>
-              <input
-                type="text"
-                value={problemPatterns.title || ''}
-                onChange={(e) => onUpdateSceneMetadata('problem-patterns', { ...problemPatterns, title: e.target.value })}
-                className={inputClass}
-                placeholder="Common"
-              />
-            </div>
-            <div>
-              <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Title Highlight</label>
-              <input
-                type="text"
-                value={problemPatterns.titleHighlight || ''}
-                onChange={(e) => onUpdateSceneMetadata('problem-patterns', { ...problemPatterns, titleHighlight: e.target.value })}
-                className={inputClass}
-                placeholder="Problem Patterns"
-              />
-            </div>
-            <div>
-              <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Subtitle</label>
-              <input
-                type="text"
-                value={problemPatterns.subtitle || ''}
-                onChange={(e) => onUpdateSceneMetadata('problem-patterns', { ...problemPatterns, subtitle: e.target.value })}
-                className={inputClass}
-                placeholder="Elastic is broad, so rather than walk through everything, let's orient around the problems teams typically solve with it."
-              />
-            </div>
-          </div>
-
-          {/* Observability Problems */}
-          <div className="space-y-3">
-            <h4 className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-pink-400' : 'text-elastic-blue'}`}>
-              Observability Problems
-            </h4>
-            {[0, 1, 2, 3].map((index) => (
-              <div key={`obs-${index}`}>
-                <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
-                  Problem #{index + 1}
-                </label>
-                <input
-                  type="text"
-                  value={problemPatterns.problems?.observability?.[index] || ''}
-                  onChange={(e) => handleProblemUpdate('observability', index, e.target.value)}
-                  className={inputClass}
-                  placeholder={
-                    index === 0 ? 'Disconnected logs, metrics, traces' :
-                    index === 1 ? 'MTTR stays high despite lots of data' :
-                    index === 2 ? 'Tool sprawl and cost pressure' :
-                    'Weak correlation to customer impact'
-                  }
-                />
-              </div>
-            ))}
-          </div>
-
-          {/* Security Problems */}
-          <div className="space-y-3">
-            <h4 className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-orange-400' : 'text-elastic-blue'}`}>
-              Security Problems
-            </h4>
-            {[0, 1, 2, 3].map((index) => (
-              <div key={`sec-${index}`}>
-                <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
-                  Problem #{index + 1}
-                </label>
-                <input
-                  type="text"
-                  value={problemPatterns.problems?.security?.[index] || ''}
-                  onChange={(e) => handleProblemUpdate('security', index, e.target.value)}
-                  className={inputClass}
-                  placeholder={
-                    index === 0 ? 'Alert fatigue and signal-to-noise ratio' :
-                    index === 1 ? 'Blind spots across cloud and on-prem' :
-                    index === 2 ? 'Tool sprawl and cost pressure' :
-                    'Manual investigation slows response'
-                  }
-                />
-              </div>
-            ))}
-          </div>
-
-          {/* Search/Product Problems */}
-          <div className="space-y-3">
-            <h4 className={`text-xs font-semibold uppercase tracking-wide ${isDark ? 'text-yellow-400' : 'text-elastic-blue'}`}>
-              Search / Product Problems
-            </h4>
-            {[0, 1, 2, 3].map((index) => (
-              <div key={`search-${index}`}>
-                <label className={`text-xs mb-1 block ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>
-                  Problem #{index + 1}
-                </label>
-                <input
-                  type="text"
-                  value={problemPatterns.problems?.search?.[index] || ''}
-                  onChange={(e) => handleProblemUpdate('search', index, e.target.value)}
-                  className={inputClass}
-                  placeholder={
-                    index === 0 ? 'Slow or irrelevant search results' :
-                    index === 1 ? 'Limited semantic or vector search' :
-                    index === 2 ? 'Tool sprawl and cost pressure' :
-                    'Difficulty scaling search infrastructure'
-                  }
-                />
-              </div>
-            ))}
           </div>
         </div>
       )}
