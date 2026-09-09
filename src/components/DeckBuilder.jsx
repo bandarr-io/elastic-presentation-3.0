@@ -14,6 +14,7 @@ import {
   faTrash,
   faTableCells,
   faPenToSquare,
+  faPalette,
 } from '@fortawesome/free-solid-svg-icons'
 import { useTheme } from '../context/ThemeContext'
 import { useDebouncedValue } from '../hooks/useDebouncedValue'
@@ -23,6 +24,8 @@ import ErrorBoundary from './ErrorBoundary'
 import SceneThumbnailBooth from './SceneThumbnailBooth'
 import { catalogSpeakerNotes, resolveCatalogScenario } from '../data/catalogScenarios'
 import { getThumbnail, thumbnailFailed, thumbnailKey } from '../utils/sceneThumbnails'
+import { baseSceneId } from '../utils/sceneIdentity'
+import { MODULAR_SCENE_EDITORS } from './sceneEditors'
 
 function parseMinutes(duration) {
   const m = String(duration || '').match(/(\d+)/)
@@ -173,12 +176,13 @@ export default function DeckBuilder({
   onReset,
   onClose,
   initialSceneId,
+  initialViewMode = 'edit',
   totalTime = 0,
 }) {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
   const [rail, setRail] = useState('deck')
-  const [viewMode, setViewMode] = useState('edit')
+  const [viewMode, setViewMode] = useState(initialViewMode)
   const [librarySearch, setLibrarySearch] = useState('')
   const [selectedId, setSelectedId] = useState(initialSceneId || deckScenes[0]?.id || null)
   const [dragOverId, setDragOverId] = useState(null)
@@ -290,6 +294,12 @@ export default function DeckBuilder({
       ? 'bg-white/5 border-white/10 text-white placeholder-white/30'
       : 'bg-white border-elastic-dev-blue/10 text-elastic-dev-blue placeholder-elastic-dev-blue/30'
   }`
+  const textareaClass = `w-full px-3 py-2 text-sm rounded-lg border resize-none ${
+    isDark
+      ? 'bg-white/5 border-white/10 text-white placeholder-white/30'
+      : 'bg-white border-elastic-dev-blue/10 text-elastic-dev-blue placeholder-elastic-dev-blue/30'
+  }`
+  const ContentEditor = selected ? MODULAR_SCENE_EDITORS[baseSceneId(selected.id)] : null
   const tabActive = isDark ? 'bg-elastic-teal text-elastic-dev-blue' : 'bg-elastic-blue text-white'
   const tabIdle = isDark ? 'text-white/60 hover:text-white/80' : 'text-elastic-dev-blue/60 hover:text-elastic-dev-blue/80'
   const stageBg = isDark ? 'bg-elastic-dev-blue' : 'bg-elastic-light-grey'
@@ -376,6 +386,13 @@ export default function DeckBuilder({
               >
                 <FontAwesomeIcon icon={faPenToSquare} />
                 Edit
+              </button>
+              <button
+                onClick={() => setViewMode('content')}
+                className={`px-2.5 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 ${viewMode === 'content' ? tabActive : tabIdle}`}
+              >
+                <FontAwesomeIcon icon={faPalette} />
+                Content
               </button>
               <button
                 onClick={() => setViewMode('sorter')}
@@ -508,6 +525,72 @@ export default function DeckBuilder({
             </div>
           </div>
 
+          {/* Center + right: content mode is a wide form + preview; edit mode
+              is a live preview with a narrow inspector. */}
+          <div className="flex-1 min-w-0 flex">
+          {viewMode === 'content' ? (
+            <>
+              <div
+                className="w-[58%] min-w-0 flex flex-col border-r overflow-hidden"
+                style={{ borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(16,28,63,0.1)' }}
+              >
+                <div className="flex-1 overflow-y-auto">
+                  <Inspector
+                    selected={selected}
+                    selectedIndex={selectedIndex}
+                    deckCount={deckScenes.length}
+                    displayTitle={displayTitle}
+                    durationValue={durationValue}
+                    durationMin={durationMin}
+                    speakerNotes={speakerNotes}
+                    muted={muted}
+                    inputClass={inputClass}
+                    onUpdateSceneMetadata={onUpdateSceneMetadata}
+                    onUpdateDuration={onUpdateDuration}
+                    compactNotes
+                    extra={
+                      ContentEditor ? (
+                        <ContentEditor
+                          sceneMetadata={sceneMetadata}
+                          onUpdateSceneMetadata={onUpdateSceneMetadata}
+                          isDark={isDark}
+                          inputClass={inputClass}
+                          textareaClass={textareaClass}
+                        />
+                      ) : selected ? (
+                        <p className={`text-sm ${muted}`}>
+                          {displayTitle} has no editable content fields yet.
+                        </p>
+                      ) : null
+                    }
+                  />
+                </div>
+              </div>
+              <div className="flex-1 min-w-0 flex flex-col">
+                <div className={`px-4 py-2 text-[10px] uppercase tracking-wider ${muted} border-b ${isDark ? 'border-white/10' : 'border-elastic-dev-blue/10'}`}>
+                  {selected ? `Live preview · ${displayTitle}` : 'Select a scene'}
+                </div>
+                <div className="flex-1 min-h-0 p-4">
+                  {SceneComponent && previewProps ? (
+                    <ErrorBoundary key={selected.id}>
+                      <div className={`h-full rounded-xl overflow-hidden ${isDark ? 'bg-elastic-dev-blue' : 'bg-elastic-light-grey'} ${isDark ? 'ring-1 ring-white/10' : 'ring-1 ring-elastic-dev-blue/10'}`}>
+                        <ScenePreview fill className="h-full">
+                          <div className={`h-full w-full ${stageBg}`}>
+                            <SceneComponent {...previewProps} />
+                          </div>
+                        </ScenePreview>
+                      </div>
+                    </ErrorBoundary>
+                  ) : (
+                    <div className={`h-full rounded-xl border border-dashed flex items-center justify-center text-sm ${muted} ${isDark ? 'border-white/15' : 'border-elastic-dev-blue/15'}`}>
+                      Add a scene from the library to start building.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
           {/* Center — live preview */}
           <div className="flex-1 min-w-0 flex flex-col">
             <div className={`px-4 py-2 text-[10px] uppercase tracking-wider ${muted} border-b ${isDark ? 'border-white/10' : 'border-elastic-dev-blue/10'}`}>
@@ -551,6 +634,9 @@ export default function DeckBuilder({
               onUpdateDuration={onUpdateDuration}
             />
           </div>
+            </>
+          )}
+          </div>
         </div>
         )}
       </div>
@@ -582,6 +668,8 @@ function Inspector({
   inputClass,
   onUpdateSceneMetadata,
   onUpdateDuration,
+  compactNotes = false,
+  extra = null,
 }) {
   if (!selected) {
     return <div className={`p-6 text-sm ${muted}`}>Select a scene to edit notes and timing.</div>
@@ -626,8 +714,8 @@ function Inspector({
         <textarea
           value={speakerNotes}
           onChange={(e) => onUpdateSceneMetadata?.(selected.id, { speakerNotes: e.target.value })}
-          rows={12}
-          className={`${inputClass} resize-y min-h-[12rem]`}
+          rows={compactNotes ? 4 : 12}
+          className={`${inputClass} resize-y ${compactNotes ? 'min-h-[6rem]' : 'min-h-[12rem]'}`}
           placeholder="Talking points for this scene…"
         />
         <p className={`text-[11px] mt-1 ${muted}`}>
@@ -635,6 +723,8 @@ function Inspector({
           {selected.id === 'search-catalog' ? ' Audience pack details live here (not on the slide).' : ''}
         </p>
       </div>
+
+      {extra}
     </div>
   )
 }
