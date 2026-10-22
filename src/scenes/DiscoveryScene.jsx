@@ -97,7 +97,7 @@ const REASONING = [
   'dependency redis latency high', 'redis connection pool exhausted', 'Root cause: Redis',
 ]
 
-const BEATS = [
+export const BEATS = [
   { key: 'ki', step: 'Knowledge', titlePlain: 'Knowledge, ', titleAccent: 'extracted automatically.', subtitle: 'Streams infers entities, dependencies, and schema from telemetry — no configuration, no instrumentation.' },
   { key: 'discovery', step: 'Discovery', titlePlain: 'From events to a ', titleAccent: 'significant event.', subtitle: 'Raw events plus knowledge are correlated, analyzed, and transformed into one understood operational situation.', hold: 4200 },
   { key: 'model', step: 'System Model', titlePlain: "The agent's live ", titleAccent: 'system model.', subtitle: 'Built continuously from telemetry — the agent navigates dependencies to understand impact and find the root cause.', hold: 5200 },

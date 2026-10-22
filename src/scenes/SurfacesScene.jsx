@@ -27,7 +27,7 @@ const MCP_FEATURES = [
   { name: 'Surface-aware rendering', icon: faTableColumns, desc: 'Rich result cards, not raw JSON.' },
 ]
 
-const BEATS = [
+export const BEATS = [
   { key: 'surfaces', step: 'Skills Layer', titlePlain: 'Meet users ', titleAccent: 'where they are.', subtitle: 'One Skills layer defines what to compute and how to present it — the same insight on every surface your team uses.' },
   { key: 'mcp', step: 'Plain English', titlePlain: 'Talk to your systems in ', titleAccent: 'plain English.', subtitle: 'A native MCP server brings full observability into Claude — results rendered as cards, inside your existing workflows.' },
 ]

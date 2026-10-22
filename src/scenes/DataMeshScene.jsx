@@ -1084,7 +1084,7 @@ function DataMeshScene({ scenes = [], onNavigate, metadata = {}, runQuerySignal 
                                 className="absolute flex flex-col items-center"
                                 style={{ left: site.x, top: site.y }}
                               >
-                                <img src="/logo-elastic-glyph-color.png" alt="Elastic" className="w-24 h-24 object-contain" />
+                                <img src="./logo-elastic-glyph-color.png" alt="Elastic" className="w-24 h-24 object-contain" />
                                 <div className="my-4">
                                   <FontAwesomeIcon icon={faArrowUp} className="text-2xl" style={{ color: c }} />
                                 </div>

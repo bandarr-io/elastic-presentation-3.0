@@ -496,7 +496,7 @@ function ZeroDowntimeDemo({ isDark, externalPhase = 'idle', dataSources: resolve
                 isDark ? 'border-elastic-teal/40 bg-elastic-teal/10' : 'border-elastic-blue/40 bg-elastic-blue/10'
               }`}>
                 <div className="flex items-center gap-3">
-                  <img src="/logo-elastic-glyph-color.png" alt="Elastic" className="w-10 h-10 object-contain" />
+                  <img src="./logo-elastic-glyph-color.png" alt="Elastic" className="w-10 h-10 object-contain" />
                   <div>
                     <div className={`font-bold text-sm ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>Elastic</div>
                     <div className={`text-xs ${isDark ? 'text-white/50' : 'text-elastic-dev-blue/50'}`}>Receiving data</div>
@@ -536,7 +536,7 @@ function ZeroDowntimeDemo({ isDark, externalPhase = 'idle', dataSources: resolve
                 >
                   {/* Header */}
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <img src="/logo-elastic-glyph-color.png" alt="Elastic" className="w-4 h-4 object-contain" />
+                    <img src="./logo-elastic-glyph-color.png" alt="Elastic" className="w-4 h-4 object-contain" />
                     <span className={`font-bold text-xs ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>Elastic Platform</span>
                     <span className={`ml-auto text-[9px] font-bold flex items-center gap-1 ${isDark ? 'text-elastic-teal' : 'text-elastic-blue'}`}>
                       <FontAwesomeIcon icon={faCheckCircle} />All traffic

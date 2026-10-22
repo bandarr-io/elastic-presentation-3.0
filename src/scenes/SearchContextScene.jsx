@@ -6,7 +6,7 @@ import SceneStepper from '../components/SceneStepper'
 import { useSceneMotion } from '../hooks/useSceneMotion'
 import { useReducedMotion } from '../hooks/useReducedMotion'
 
-const BEATS = [
+export const BEATS = [
   {
     key: 'missing',
     step: 'Missing Layer',
@@ -169,7 +169,7 @@ function InsideLayer({
       style={{ borderColor: accent }}
     >
       <div className="flex items-center gap-2.5 mb-3">
-        <img src="/logo-elastic-glyph-color.png" alt="Elastic" className="w-8 h-8 object-contain" />
+        <img src="./logo-elastic-glyph-color.png" alt="Elastic" className="w-8 h-8 object-contain" />
         <div>
           <div className="text-sm font-bold" style={{ color: accent }}>{title}</div>
           <div className="text-[10px] uppercase tracking-wider" style={{ color: accent, ...mono }}>
@@ -412,7 +412,7 @@ function ConvergeRadiate({
               className="ctx-flow-hub inf-hub relative rounded-full border-2 flex flex-col items-center justify-center text-center px-4 w-[172px] h-[172px]"
               style={{ borderColor: accent, background: `${accent}14`, '--inf-accent': accent }}
             >
-              <img src="/logo-elastic-glyph-color.png" alt="Elastic" className="w-12 h-12 object-contain" />
+              <img src="./logo-elastic-glyph-color.png" alt="Elastic" className="w-12 h-12 object-contain" />
               <div className="text-[10px] uppercase tracking-wider font-semibold mt-1.5" style={{ color: accent, ...mono }}>
                 {hubLabel}
               </div>

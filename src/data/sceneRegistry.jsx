@@ -57,6 +57,8 @@ import VectorScaleScene from '../scenes/VectorScaleScene'
 import GpuVectorPipelineScene from '../scenes/GpuVectorPipelineScene'
 import SearchInferenceScene from '../scenes/SearchInferenceScene'
 import SearchContextScene from '../scenes/SearchContextScene'
+import VideoKnowledgeScene from '../scenes/VideoKnowledgeScene'
+import SceneTourScene from '../scenes/SceneTourScene'
 
 /**
  * Canonical scene registry for the deck. Shared by the main presentation
@@ -71,6 +73,13 @@ export const SCENE_REGISTRY = [
     title: 'Hero',
     duration: '2 min',
     description: ''
+  },
+  {
+    id: 'scene-tour',
+    component: SceneTourScene,
+    title: 'Scene Tour',
+    duration: '2 min',
+    description: 'Self-running loop for a booth or a room filling up. Configurable: pick, order, rename and time the slides in the Deck Builder. By default six slides (About, Platform Overview, Data Explosion, Unstructured Challenge, Context Layer, Knowledge From Video) rotate on their own',
   },
   {
     id: 'agenda',
@@ -161,6 +170,13 @@ export const SCENE_REGISTRY = [
     duration: '4 min',
     description: 'Multimodal vector search — image embeddings into 3D space, then text kNN (Jina v5 Omni narrative)',
     defaultDisabled: true,
+  },
+  {
+    id: 'video-knowledge',
+    component: VideoKnowledgeScene,
+    title: 'Knowledge From Video',
+    duration: '3 min',
+    description: 'Executive one-pager for the video search demo — the gap today, then plain-language questions answered with the clip, the timestamp, and the evidence',
   },
   {
     id: 'search-gpu',

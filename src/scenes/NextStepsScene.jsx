@@ -198,7 +198,7 @@ function NextStepsScene({ metadata = {} }) {
             {/* Elastic logo footer */}
             <div className="flex items-center justify-between mt-3 pt-3 border-t flex-shrink-0" style={{ borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(11,100,221,0.1)' }}>
               <img
-                src={isDark ? '/Elastic-Logo-tagline-secondary-white.svg' : '/Elastic-Logo-tagline-secondary-black.png'}
+                src={isDark ? './Elastic-Logo-tagline-secondary-white.svg' : './Elastic-Logo-tagline-secondary-black.png'}
                 alt="Elastic"
                 className="h-8 w-auto"
               />

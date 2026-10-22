@@ -39,7 +39,7 @@ const SUB_GROUPS = [
 const ENTITIES = ['AWS', 'GCP', 'Azure', 'k8s', 'EKS', 'GKE', 'Docker', 'nginx', 'envoy', 'traefik', 'istio', 'postgres', 'redis', 'mongodb', 'mysql', 'kafka', 'rabbitmq', 'nats', 'pulsar', 'prometheus', 'grafana', 'consul']
 const EVENTS = ['Severe errors & crashes', 'Version updates', 'Change in pattern distribution']
 
-const BEATS = [
+export const BEATS = [
   { key: 'pipeline', step: 'Pipeline', titlePlain: 'Five stages. ', titleAccent: 'One pipeline.', subtitle: 'Every signal from any source to Elasticsearch — parsed, routed, and tiered along the way.' },
   { key: 'insight', step: 'Raw → Insight', titlePlain: 'From raw data to ', titleAccent: 'immediate insight.', subtitle: 'Always up-to-date, real-time, zero configuration — telemetry becomes agent-ready significant events.', hold: 4600 },
 ]

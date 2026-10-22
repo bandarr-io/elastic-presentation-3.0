@@ -37,4 +37,23 @@ describe('buildPreviewProps', () => {
     expect(props.metadata.eyebrow).toBe('Copy')
     expect(props.externalStage).toBe(2)
   })
+
+  it('gives the scene tour the full deck copy map and its own metadata', () => {
+    const tourCtx = {
+      sceneMetadata: {
+        'scene-tour': { eyebrow: 'Tour copy' },
+        'scene-tour~2': { eyebrow: 'Copy two' },
+        a: { label: 'from-deck' },
+      },
+      orderedScenes: [],
+      customDurations: {},
+      enabledScenes: [],
+    }
+
+    for (const id of ['scene-tour', 'scene-tour~2']) {
+      const props = buildPreviewProps(id, tourCtx)
+      expect(props.sceneMetadata).toBe(tourCtx.sceneMetadata)
+      expect(props.metadata).toBe(tourCtx.sceneMetadata[id])
+    }
+  })
 })

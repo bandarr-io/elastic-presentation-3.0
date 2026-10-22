@@ -24,7 +24,7 @@ const SEV = {
   minor:    { color: '#3b82f6', label: 'minor' },
 }
 
-const BEATS = [
+export const BEATS = [
   { key: 'health',   step: 'Health Summary' },
   { key: 'explorer', step: 'Anomaly Explorer' },
   { key: 'explainer', step: 'Explainer' },

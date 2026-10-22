@@ -40,14 +40,13 @@ const CLUSTER_X_FRACTIONS = [0.125, 0.375, 0.625, 0.875]
 
 // ─── Stage 1 data ──────────────────────────────────────────────────────────────
 const DEFAULT_SITES = [
-  { name: 'HQ Data Center',   type: 'onprem',   region: 'US-East',  docs: '2.4M' },
-  { name: 'AWS us-east-1',    type: 'cloud',    region: 'US-East',  docs: '8.1M' },
-  { name: 'Azure West EU',    type: 'cloud',    region: 'EU-West',  docs: '3.7M' },
-  { name: 'GCP Asia Pacific', type: 'cloud',    region: 'APAC',     docs: '1.9M' },
-  { name: 'DR Backup',        type: 'server',   region: 'US-West',  docs: '2.4M' },
-  { name: 'Edge — LATAM',     type: 'network',  region: 'SA-East',  docs: '0.9M' },
-  { name: 'On-Prem EU',       type: 'onprem',   region: 'EU-East',  docs: '1.5M' },
-  { name: 'Singapore DC',     type: 'database', region: 'AP-South', docs: '2.1M' },
+  { name: 'ATO',   type: 'onprem',   region: 'Canberra DC',  docs: '14.2M' },
+  { name: 'Services AU',    type: 'cloud',    region: 'AWS ap-southeast-2',  docs: '28.1M' },
+  { name: 'Medicare',    type: 'database',    region: 'Azure australiaeast',  docs: '42.7M' },
+  { name: 'NSW BDM',        type: 'database',   region: 'GovDC Silverwater',  docs: '6.4M' },
+  { name: 'NSW Health',     type: 'network',  region: 'GovDC Unanderra',  docs: '11.9M' },
+  { name: 'Dept. of Education',       type: 'onprem',   region: 'Parramatta DC',  docs: '1.5M' },
+  { name: 'NSW Concessions',     type: 'server', region: 'Sydney Edge', docs: '2.1M' },
 ]
 
 const SITE_DARK_COLORS  = ['#48EFCF', '#FF9900', '#60A5FA', '#F04E98', '#FEC514', '#FF957D', '#A78BFA', '#34D399']
@@ -129,10 +128,10 @@ function CrossClusterScene({ metadata = {} }) {
   }))
 
   // ── Metadata: Stage 1 ────────────────────────────────────────────────────
-  const hubName     = metadata.stage1HubName     || 'Your Organization'
+  const hubName     = metadata.stage1HubName     || 'MyEntitlements Hub'
   const hubSubtitle = metadata.stage1HubSubtitle || 'Main Elastic Cluster'
   const searchQuery = metadata.stage1Query       || 'GET _remote/*:logs-*/_search'
-  const siteCount   = Math.max(2, Math.min(8, parseInt(metadata.siteCount) || 8))
+  const siteCount   = Math.max(2, Math.min(8, parseInt(metadata.siteCount) || 7))
 
   const resolvedSites = useMemo(() =>
     Array.from({ length: siteCount }, (_, i) => {
@@ -632,7 +631,7 @@ function CrossClusterScene({ metadata = {} }) {
           eyebrow={eyebrow}
           titlePlain={titlePart1}
           titleAccent={titlePart2}
-          subtitle="Elastic powers distributed data access with secure, low-latency cross-cluster operations"
+          subtitle="Securely unlock data where it lives without the friction of centralisation"
         />
 
         {/* ── Main row: stage content + right-side navigator ───────────── */}
@@ -703,7 +702,7 @@ function CrossClusterScene({ metadata = {} }) {
                     }`}
                     style={{ opacity: 0 }}
                   >
-                    <img src="/logo-elastic-glyph-color.png" alt="Elastic" className="w-9 h-9 object-contain" />
+                    <img src="./logo-elastic-glyph-color.png" alt="Elastic" className="w-9 h-9 object-contain" />
                     <div>
                       <div className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>elastic</div>
                       <div className={`text-xs ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>Main Cluster</div>
@@ -919,7 +918,7 @@ function CrossClusterScene({ metadata = {} }) {
                 }`}
                 style={{ left: `${HUB_X}%`, top: `${HUB_Y}%`, transform: 'translate(-50%, -50%)', opacity: 0 }}
               >
-                <img src="/logo-elastic-glyph-color.png" alt="Elastic" className="w-10 h-10 object-contain" />
+                <img src="./logo-elastic-glyph-color.png" alt="Elastic" className="w-10 h-10 object-contain" />
                 <div>
                   <div className={`text-sm font-bold ${isDark ? 'text-white' : 'text-elastic-dev-blue'}`}>{hubName}</div>
                   <div className={`text-xs ${isDark ? 'text-white/40' : 'text-elastic-dev-blue/40'}`}>{hubSubtitle}</div>

@@ -7,7 +7,7 @@ import CountUp from '../components/CountUp'
 import { useSceneMotion } from '../hooks/useSceneMotion'
 import { useReducedMotion } from '../hooks/useReducedMotion'
 
-const BEATS = [
+export const BEATS = [
   {
     key: 'bottleneck',
     step: 'Bottleneck',

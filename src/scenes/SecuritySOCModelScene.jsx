@@ -13,7 +13,7 @@ import {
 // Slide 4 — "Your SOC has to evolve": the triage pyramid morphs into the
 // diamond model. Beats 0/1 reshape one figure; beat 2 shows both side by side.
 
-const BEATS = [
+export const BEATS = [
   {
     key: 'pyramid', step: 'Pyramid', figLabel: 'Triage Pyramid',
     titlePlain: 'The triage ', titleAccent: 'pyramid.',

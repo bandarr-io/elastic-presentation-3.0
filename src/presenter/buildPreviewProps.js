@@ -35,6 +35,8 @@ export function buildPreviewProps(sceneId, { sceneMetadata, orderedScenes, custo
       return { isRunning: false, setIsRunning: noop, resetSignal: 0, metadata }
     case 'consolidation':
       return { tools: metadata.tools, metadata }
+    case 'scene-tour':
+      return { metadata, sceneMetadata }
     default:
       return { metadata }
     }

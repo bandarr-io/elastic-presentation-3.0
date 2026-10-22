@@ -37,6 +37,9 @@ export const DECK_PRESETS = [
       'services',
       'platform-value',
       'next-steps',
+      // Sits after the close on purpose: it runs itself, so it is what you
+      // leave on screen while the room empties or fills.
+      'scene-tour',
     ],
   },
   {

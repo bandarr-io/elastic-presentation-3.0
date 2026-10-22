@@ -19,8 +19,14 @@ import { presenterBridge } from '../presenter/presenterBridge'
  * @param {Object} [opts]
  * @param {number} [opts.holdMs=3400] - default dwell time per beat while auto-playing
  * @param {boolean} [opts.loop=false] - restart from the first beat after the last
+ * @param {boolean} [opts.shortenForReducedMotion=true] - cut dwell time right down
+ *   under `prefers-reduced-motion`. Set false where the dwell is reading time
+ *   rather than animation time, so the beats stay legible.
  */
-export function useSceneMotion(beats = [], { holdMs = 3400, loop = false } = {}) {
+export function useSceneMotion(
+  beats = [],
+  { holdMs = 3400, loop = false, shortenForReducedMotion = true } = {},
+) {
   const count = Array.isArray(beats) ? beats.length : beats
   const beatList = Array.isArray(beats) ? beats : []
   const { prefersReducedMotion } = useReducedMotion()
@@ -77,7 +83,7 @@ export function useSceneMotion(beats = [], { holdMs = 3400, loop = false } = {})
   useEffect(() => {
     if (!isPlaying) return undefined
     const hold = beatList[beat]?.hold || holdMs
-    const delay = prefersReducedMotion ? Math.min(hold, 700) : hold
+    const delay = prefersReducedMotion && shortenForReducedMotion ? Math.min(hold, 700) : hold
 
     clearTimer()
     timerRef.current = setTimeout(() => {
@@ -99,7 +105,7 @@ export function useSceneMotion(beats = [], { holdMs = 3400, loop = false } = {})
     }, delay)
 
     return clearTimer
-  }, [isPlaying, beat, playKey, count, holdMs, loop, prefersReducedMotion, beatList])
+  }, [isPlaying, beat, playKey, count, holdMs, loop, shortenForReducedMotion, prefersReducedMotion, beatList])
 
   useEffect(() => clearTimer, [])
 

@@ -49,7 +49,7 @@ const MATURITY = [
     parts: ['Unified', 'No approval'] },
 ]
 
-const BEATS = [
+export const BEATS = [
   { key: 'why-now',  step: 'Why Now',      title: 'The world has changed.',          accentTitle: '',                        subtitle: 'Nation-state capabilities are now commodity. AI has collapsed the cost of attack. Breakout times are measured in seconds, not hours.' },
   { key: 'taxes',    step: 'The Taxes',    title: 'The industry taxes your SOC. ',   accentTitle: "It doesn't secure it.",   subtitle: 'The adversary follows the money — slipping through every gap the status quo leaves open.' },
   { key: 'agentic',  step: 'Agentic SOC',  title: "You can't bolt on an ",           accentTitle: 'agentic SOC.',            subtitle: 'Machine speed with human judgment requires a platform where data, AI, and automation are native — not stitched together.' },

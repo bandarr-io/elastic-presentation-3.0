@@ -7,7 +7,7 @@ polished animated scenes — all running locally in the browser with no backend.
 **Quick facts** (for humans and LLMs):
 
 - Single-page React 18 + Vite app, hash-routed (`/#/<scene-id>`), no server or database.
-- A presentation is an ordered, enabled subset of **52 registered scenes** (`src/data/sceneRegistry.jsx`).
+- A presentation is an ordered, enabled subset of **60 registered scenes** (`src/data/sceneRegistry.jsx`).
 - **Deck presets** (`src/data/deckPresets.js`) are out-of-the-box flows: New Prospect (default), Technical Deep-Dive, Whiteboard, Observability, Security, Search, All Scenes, No Scenes.
 - Scenes can have internal animation steps ("**beats**" via the `useSceneMotion` hook, or lifted "**stages**" managed in `App.jsx`).
 - A **presenter view** (`/#/presenter`) opens in a second tab and drives the audience tab over `BroadcastChannel`, with speaker notes and live previews.
@@ -23,6 +23,7 @@ polished animated scenes — all running locally in the browser with no backend.
 - [Core Concepts](#core-concepts)
 - [Out-of-the-Box Flows (Deck Presets)](#out-of-the-box-flows-deck-presets)
 - [Scene Library](#scene-library)
+- [Scene Tour (Reusable Self-Running Slide)](#scene-tour-reusable-self-running-slide)
 - [Presenter View](#presenter-view)
 - [Architecture Whiteboard](#architecture-whiteboard)
 - [Customization (Settings Panel)](#customization-settings-panel)
@@ -103,7 +104,7 @@ content edits are preserved when switching presets. The default preset is
 
 ## Scene Library
 
-All 59 scenes, grouped as they appear in `src/data/sceneRegistry.jsx`. "Default"
+All 60 scenes, grouped as they appear in `src/data/sceneRegistry.jsx`. "Default"
 indicates whether the scene ships enabled before any preset/customization is
 applied (the New Prospect preset governs the actual default flow).
 
@@ -115,6 +116,7 @@ applied (the New Prospect preset governs the actual default flow).
 | Agenda | `agenda` | Auto-generated agenda from enabled scenes, adaptive grid layout |
 | Team Introductions | `team` | The people in the room, pulled from Team Settings |
 | About Elastic | `about` | Who we are and what we do — company stats |
+| Scene Tour | `scene-tour` | Self-running loop of slides you choose. See the Scene Tour section |
 | Desired Outcomes | `business-value` | Key areas where Elastic delivers value |
 | Metrics Dashboard | `elastic-value` | Configurable layout — hero stat cards, stat grid, bottom-line banner |
 | Card Grid | `value-by-team` | Configurable layout — icon cards with an impact banner |
@@ -140,6 +142,7 @@ applied (the New Prospect preset governs the actual default flow).
 | Unstructured Challenge | `search-challenge` | 80% unstructured data — tip of the iceberg vs depth below the waterline |
 | Vector Database Scale | `search-vector-scale` | Elasticsearch as a vector DB — four scaling factors and DiskBBQ |
 | Vector Search | `search-vector` | Multimodal DOW-style demo: image → Jina embeddings into 3D space, then text kNN with cosine neighbours |
+| Knowledge From Video | `video-knowledge` | Elevator pitch for the video search demo — three beats (the gap today, the shift, then the Elastic close and demo hand-off), with on-slide keywords and a technical pivot rail. Ships enabled, unlike the rest of this group |
 | GPU Vector Pipeline | `search-gpu` | CPU indexing bottleneck cleared by NVIDIA cuVS (CAGRA → HNSW) |
 | Inference Any Model | `search-inference` | Provider mosaic + sovereign `/_inference` topology |
 | Context Layer | `search-context` | Missing layer reveal, Agent Builder / Context Engine, sources → benefits |
@@ -185,6 +188,151 @@ applied (the New Prospect preset governs the actual default flow).
 | Elastic Overview | `elastic-overview` | The visualization, data, and ETL planes with optional management plane |
 | Enterprise Deployment | `enterprise-deployment` | Full reference architecture — sources, ingest, tiered cluster, consumers, monitoring |
 | Architecture Whiteboard | `whiteboard` | Live drag-and-drop canvas for whiteboarding, sizing, and presenting Elastic architectures ([full docs](src/components/whiteboard/README.md)) |
+
+---
+
+## Scene Tour (Reusable Self-Running Slide)
+
+The Scene Tour is a self-running slide. It shows a loop of embedded slides, one
+after another, and repeats forever. Each page is a normal slide from the tour
+registry.
+
+The engine has four parts:
+
+- `src/scenes/tour/SceneTour.jsx`: autoplay loop, page rail of pills, pause
+  toggle in the nav bar, and jump-to-page by clicking a pill.
+- `src/scenes/tour/tourSteps.js`: pure helpers (`buildTourSteps`,
+  `clampStepHold`, `resolvePages`).
+- `src/data/tourPageRegistry.js`: `TOUR_PAGE_REGISTRY` and `DEFAULT_TOUR_PAGES`.
+- `src/scenes/SceneTourScene.jsx`: passes the registry, default pages, eyebrow
+  and `sceneMetadata` to `SceneTour`.
+
+### Renamed from Platform Tour
+
+The slide was called Platform Tour (`platform-tour`) before. Old decks, deck
+files, cross-tab sync and deep links (`/#/platform-tour`) still work.
+`src/utils/sceneIdAliases.js` maps old ids to current ones when the saved
+config loads. When you rename a scene, add an alias. Never remove one.
+
+### Which slides can be added
+
+A slide can join the tour only if it works with a `metadata` prop alone. Slides
+that need state lifted into `src/App.jsx` stay out. I checked these in
+`App.jsx`: business-value, data-mesh, security, schema, esql, services,
+elastic-overview, data-tiering and agenda.
+
+Three slides are templates that ship with placeholder copy (Metrics Dashboard,
+Value by Team and Security Use Cases). Their titles end in "(template)". Fill
+in their copy on the slide first, then add them to the tour.
+
+Not included yet: search-catalog (App.jsx injects a default `scenarioId`),
+enterprise-deployment (its controls live in the App.jsx nav bar), and team
+(reads the team context). These are not reviewed for tour use yet: logsdb,
+cross-cluster, licensing, pricing-rom, next-steps, panel, access-control,
+consolidation and whiteboard.
+
+### Adding a slide to the tour
+
+1. Add an entry to `TOUR_PAGE_REGISTRY` in `src/data/tourPageRegistry.js`. Each
+   entry has `title`, `group` and `component`, and optionally `beats`,
+   `stepProps` and `hold`. Groups are listed in `TOUR_PAGE_GROUPS`: Opening,
+   Value, Platform, Search, Security and Observability.
+2. If the slide steps through its own beats with `useSceneMotion`, export its
+   `BEATS` array from the scene file and set `beats` on the entry.
+3. Run `src/data/tourPageRegistry.mount.test.jsx`. It checks that every entry
+   mounts with only `metadata`, and that `beats.length` equals the slide's live
+   beat count. A mismatch fails the test.
+
+### Metadata
+
+Stored under the scene id `scene-tour`. Timings are in milliseconds.
+
+| Key | Purpose |
+|---|---|
+| `eyebrow` | Small label before the page rail |
+| `pages` | Ordered list of `{ sceneId, enabled?, title?, hold? }` |
+| `minHold`, `maxHold` | Clamp for each beat's hold. Defaults 5000 and 10000 |
+| `pageHold` | Hold for a page with no beats. Default 12000 |
+| `pageMetadata` | `{ [sceneId]: {...} }`, an override layered on top of that slide's saved copy. Metadata only, no editor |
+
+Embedded slides show the deck's saved copy (`sceneMetadata[sceneId]`), so
+editing a slide on the slide updates the tour.
+
+Rules for `pages`:
+
+- If any entry has a string `sceneId`, that list is used in order. Unknown
+  ids are ignored and disabled pages are skipped.
+- If nothing is left, the default list is used.
+- Duplicate ids are allowed in `pages`. Slides are looked up by their plain
+  scene id, so a duplicate such as `about~2` in the deck does not feed the tour.
+- Without any `sceneId` entries, the list is legacy: each entry partially
+  overrides the default page at the same index.
+
+### Timing
+
+- A page whose registry entry has `beats` steps through each beat. Each beat
+  uses its own `hold`, clamped to `[minHold, maxHold]`.
+- A page with `stepProps`, or with neither `beats` nor `stepProps`, uses its
+  `hold` (default `pageHold`) for each step. These holds are not clamped, but a
+  per-slide `hold` set in `pages` is ignored if it is under 1000 ms.
+
+### Editing it
+
+Select the tour in the Deck Builder and use its inspector. The editor
+(`SceneTourEditor`) only selects slides. You can turn slides on or off, reorder
+them, remove them, add one from a dropdown grouped by group, give it a custom
+title, and set a hold in seconds. The hold field is disabled for slides with
+beats, because the beats set their timing. The editor does not expose
+`minHold`, `maxHold` or `pageHold`.
+
+The editor does not edit slide content. To change what a slide says, edit it on
+the slide itself. The tour picks up the change.
+
+### Second tour
+
+Duplicate the Scene Tour slide in the Deck Builder. The copy keeps its own slide
+list and eyebrow. Use this when you want a second tour with different slides.
+
+### Build another tour
+
+1. Add scene entries to `TOUR_PAGE_REGISTRY`, or make a separate registry
+   object.
+2. Create `src/scenes/MyTourScene.jsx`:
+
+```jsx
+import SceneTour from './tour/SceneTour'
+import { TOUR_PAGE_REGISTRY } from '../data/tourPageRegistry'
+
+// Keep this at module level. A new array on every render would reset the
+// autoplay timer each time the deck re-renders.
+const MY_TOUR_PAGES = [{ sceneId: 'about' }, { sceneId: 'data-explosion' }]
+
+export default function MyTourScene({ metadata = {}, sceneMetadata = {} }) {
+  return (
+    <SceneTour
+      metadata={metadata}
+      registry={TOUR_PAGE_REGISTRY}
+      defaultPages={MY_TOUR_PAGES}
+      eyebrow="Elastic · My Tour"
+      sceneMetadata={sceneMetadata}
+    />
+  )
+}
+```
+
+3. Register it in `src/data/sceneRegistry.jsx` with an `id`, `component`,
+   `title`, `duration` and `description`, the same way `scene-tour` is set up.
+4. In `src/App.jsx`, add a branch to the `sceneProps` chain, like the
+   `scene-tour` branch. It must pass `sceneMetadata` as well as `metadata`.
+5. In `src/presenter/buildPreviewProps.js`, add a case next to the
+   `'scene-tour'` case. It must also pass `sceneMetadata`.
+6. Register an editor in `src/components/sceneEditors/index.js` under
+   `MODULAR_SCENE_EDITORS`.
+
+Caveat: `SceneTourEditor` is not generic. It reads `DEFAULT_TOUR_PAGES` and
+`TOUR_PAGE_REGISTRY` directly and is hard-coded to the `scene-tour` id. A new
+tour needs its own editor copy, or a generalised editor. Duplicating the slide
+is easier.
 
 ---
 
@@ -482,13 +630,13 @@ elastic-presentation-3.0/
 │   ├── App.jsx                    # Scene orchestration, nav bar, lifted stages, presenter integration
 │   ├── index.css                  # Tailwind base, fonts, custom keyframes
 │   ├── data/
-│   │   ├── sceneRegistry.jsx      # All 52 scene definitions (id, component, title, description)
+│   │   ├── sceneRegistry.jsx      # All 60 scene definitions (id, component, title, description)
 │   │   ├── deckPresets.js         # Out-of-the-box flows (New Prospect, Technical, Obs, Security, …)
 │   │   ├── agendaDefaults.js      # Agenda slide defaults
 │   │   ├── iconOptions.js         # Icon picker catalog for scene editors
 │   │   ├── knowledge/             # The curated Elastic corpus the AI retrieves from and cites
 │   │   └── whiteboardTypes.js / whiteboardTemplates.js  # Whiteboard component catalog & patterns
-│   ├── scenes/                    # All 57 scene components (+ _backup/ archive)
+│   ├── scenes/                    # All 61 scene components (+ _backup/ archive)
 │   ├── presenter/                 # Presenter view: cross-tab sync, previews, notes, click forwarding
 │   ├── components/
 │   │   ├── SceneSettings.jsx      # Settings panel + useSceneConfiguration hook + preset logic

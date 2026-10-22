@@ -6,7 +6,7 @@ import SceneStepper from '../components/SceneStepper'
 import { useSceneMotion } from '../hooks/useSceneMotion'
 import { useReducedMotion } from '../hooks/useReducedMotion'
 
-const BEATS = [
+export const BEATS = [
   {
     key: 'providers',
     step: 'Any Model',
@@ -552,7 +552,7 @@ function InferenceHub({ accent, mono, size = 'md', children }) {
       }}
     >
       <img
-        src="/logo-elastic-glyph-color.png"
+        src="./logo-elastic-glyph-color.png"
         alt="Elastic"
         className={`${glyph} object-contain`}
       />

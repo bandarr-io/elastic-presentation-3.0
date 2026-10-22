@@ -168,7 +168,7 @@ const FUNNEL = [
   { name: 'Significant Events', scale: 'Kilobytes', sym: 'KB', icon: faBolt, width: 26, note: 'Correlated RCA, blast radius, severity — what matters', llm: true },
 ]
 
-const BEATS = [
+export const BEATS = [
   { key: 'context', step: 'Context Layer', titlePlain: 'The context layer ', titleAccent: 'above every stack.', subtitle: 'It connects to the monitoring tools and data stores already in your environment — no migration required.', hold: 4600 },
   { key: 'arch', step: 'Architecture', titlePlain: 'A flywheel inside ', titleAccent: 'your cluster.', subtitle: 'Telemetry feeds a self-updating Context Layer; the agent reasons over it and reaches out to your tools — no direct infra access.' },
   { key: 'brain', step: 'Elastic Brain', eyebrow: 'Observability · Elastic Brain', titlePlain: 'What’s yours. ', titleAccent: 'What’s shared.', subtitle: 'The memory layer behind Nightshift — learns from every incident, gets smarter every time.' },

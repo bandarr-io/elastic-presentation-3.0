@@ -179,7 +179,7 @@ function LogsDBScene({ metadata = {} }) {
                   style={{ color: active ? (key === 'logsdb' ? '#fff' : headTextColor(isDark)) : (isDark ? 'rgba(255,255,255,0.5)' : 'rgba(11,28,56,0.55)') }}
                 >
                   {key === 'logsdb' && (
-                    <img src="/logo-elastic-glyph-color.png" alt="" className="h-4 w-4 object-contain" />
+                    <img src="./logo-elastic-glyph-color.png" alt="" className="h-4 w-4 object-contain" />
                   )}
                   {modes[key].label}
                 </button>
@@ -254,7 +254,7 @@ function LogsDBScene({ metadata = {} }) {
                   border: `1px solid ${toolingColor}40`,
                 }}
               >
-                <img src="/logo-elastic-glyph-color.png" alt="Elastic" className="h-8 w-8 object-contain" />
+                <img src="./logo-elastic-glyph-color.png" alt="Elastic" className="h-8 w-8 object-contain" />
                 <div className={`text-base font-bold ${headText}`}>One Elastic Platform</div>
               </div>
             </div>

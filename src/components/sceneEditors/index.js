@@ -1,5 +1,6 @@
 import HeroEditor from './HeroEditor'
 import AboutEditor from './AboutEditor'
+import SceneTourEditor from './SceneTourEditor'
 import BusinessValueEditor from './BusinessValueEditor'
 import ElasticValueEditor from './ElasticValueEditor'
 import ValueByTeamEditor from './ValueByTeamEditor'
@@ -42,6 +43,7 @@ import EnterpriseDeploymentEditor from './EnterpriseDeploymentEditor'
 export const MODULAR_SCENE_EDITORS = {
   hero: HeroEditor,
   about: AboutEditor,
+  'scene-tour': SceneTourEditor,
   'business-value': BusinessValueEditor,
   'elastic-value': ElasticValueEditor,
   'value-by-team': ValueByTeamEditor,

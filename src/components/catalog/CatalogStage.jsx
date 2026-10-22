@@ -1344,7 +1344,7 @@ function ShardsBeat({ scenario, phase, accent, isDark, headText, mutedText, pane
                 }`}
               >
                 <img
-                  src="/logo-elastic-glyph-color.png"
+                  src="./logo-elastic-glyph-color.png"
                   alt="Elastic"
                   className="w-9 h-9 object-contain"
                 />
@@ -1646,7 +1646,7 @@ function ScatterBeat({ scenario, phase, accent, isDark, headText, mutedText, pan
           }}
         >
           <img
-            src="/logo-elastic-glyph-color.png"
+            src="./logo-elastic-glyph-color.png"
             alt="Elastic"
             className="w-9 h-9 object-contain"
           />
@@ -1976,7 +1976,7 @@ function ReplicasBeat({ phase, accent, danger, isDark, headText, panel, reduce, 
               <div className="relative flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <img
-                    src="/logo-elastic-glyph-color.png"
+                    src="./logo-elastic-glyph-color.png"
                     alt=""
                     className="w-7 h-7 sm:w-8 sm:h-8 object-contain shrink-0"
                     style={{ opacity: isDown ? 0.45 : 1, filter: isDown ? 'grayscale(1)' : 'none' }}
@@ -2072,7 +2072,7 @@ function ReplicasBeat({ phase, accent, danger, isDark, headText, panel, reduce, 
             <div className="relative flex items-center justify-between mb-3">
               <div className="flex items-center gap-2.5 min-w-0">
                 <img
-                  src="/logo-elastic-glyph-color.png"
+                  src="./logo-elastic-glyph-color.png"
                   alt=""
                   className="w-7 h-7 sm:w-8 sm:h-8 object-contain shrink-0"
                 />
@@ -2368,7 +2368,7 @@ function LibraryBeat({ scenario, phase, accent, isDark, headText, mutedText, pan
                 </div>
                 <div className="flex items-center gap-3">
                   <img
-                    src="/logo-elastic-glyph-color.png"
+                    src="./logo-elastic-glyph-color.png"
                     alt=""
                     className="w-9 h-9 sm:w-10 sm:h-10 object-contain shrink-0"
                     style={{ opacity: showEs ? 1 : 0.35 }}

@@ -8,13 +8,13 @@ import { useReducedMotion } from '../hooks/useReducedMotion'
 
 const MONO = { fontFamily: 'Space Mono, ui-monospace, monospace' }
 
-const BEATS = [
+export const BEATS = [
   {
     key: 'tip',
     step: 'Surface',
     titlePlain: 'What you can see ',
     titleAccent: 'is the tip.',
-    subtitle: 'Structured, indexed, governed — a thin slice above the waterline.',
+    subtitle: 'Structured, indexed, governed. A thin slice above the waterline.',
     hold: 5000,
   },
   {

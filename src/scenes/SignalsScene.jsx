@@ -89,7 +89,7 @@ const METRICS_CARDS = [
   },
 ]
 
-const BEATS = [
+export const BEATS = [
   { key: 'signals', step: 'Signals', titlePlain: 'Every observability experience, ', titleAccent: 'one platform.', subtitle: 'Logs, Metrics, Traces, Synthetics, and Profiles — unified, correlated, and ready for the agent.' },
   { key: 'logs', step: 'Logs', titlePlain: 'Best-in-class efficiency for ', titleAccent: 'logs.', subtitle: 'Three compounding engineering bets: LogsDB, a columnar datastore, and ~40% faster queries since Jan 2026.', hold: 4200 },
   { key: 'metrics', step: 'Metrics', titlePlain: 'Best-in-class efficiency for ', titleAccent: 'metrics.', subtitle: 'Elasticsearch 9.4 benchmarks — faster investigations at a lower bill, with zero-friction Prometheus migration.', hold: 4200 },

@@ -48,7 +48,7 @@ const DEFAULT_BRIEFING = {
   ],
 }
 
-const BEATS = [
+export const BEATS = [
   { key: 'meet', step: 'Meet Nightshift', titlePlain: 'Meet your ', titleAccent: 'AI SRE.', subtitle: 'Autonomous detection, investigation, and remediation — around the clock, without a page.', hold: 4200 },
   { key: 'arcs', step: 'Three Arcs', titlePlain: 'One SRE across ', titleAccent: 'three arcs.', subtitle: 'Developer, Reliability, and Infrastructure — Nightshift closes the loop from signal to fix in each.', hold: 4200 },
   { key: 'reveal', step: 'The Payoff', titlePlain: 'Wake up to ', titleAccent: 'this.', subtitle: 'You’re not buying observability. You’re buying the end of on-call.' },

@@ -12,6 +12,7 @@ import { SCENE_REGISTRY } from './data/sceneRegistry'
 import { usePresenterSync } from './presenter/usePresenterSync'
 import PresenterView from './presenter/PresenterView'
 import { baseSceneId } from './utils/sceneIdentity'
+import { resolveSceneId } from './utils/sceneIdAliases'
 
 function AppContent() {
   const { theme, toggleTheme } = useTheme()
@@ -42,7 +43,8 @@ function AppContent() {
 
   const scenes = enabledScenes
 
-  const sceneIdFromUrl = location.pathname.slice(1)
+  const rawSceneIdFromUrl = location.pathname.slice(1)
+  const sceneIdFromUrl = resolveSceneId(rawSceneIdFromUrl)
   const currentScene = (() => {
     const idx = scenes.findIndex(s => s.id === sceneIdFromUrl)
     return idx >= 0 ? idx : 0
@@ -51,10 +53,15 @@ function AppContent() {
   // Redirect to first enabled scene if URL is missing or unrecognised
   useEffect(() => {
     const idx = scenes.findIndex(s => s.id === sceneIdFromUrl)
+    // Old deep link (a renamed scene id): rewrite to the current id when it resolves.
+    if (idx !== -1 && rawSceneIdFromUrl !== sceneIdFromUrl) {
+      navigate(`/${sceneIdFromUrl}`, { replace: true })
+      return
+    }
     if (idx === -1 && scenes.length > 0) {
       navigate(`/${scenes[0].id}`, { replace: true })
     }
-  }, [sceneIdFromUrl, scenes, navigate])
+  }, [rawSceneIdFromUrl, sceneIdFromUrl, scenes, navigate])
 
   const navigateToScene = (index) => {
     const clamped = Math.max(0, Math.min(index, scenes.length - 1))
@@ -126,6 +133,8 @@ function AppContent() {
     sceneProps = { metadata: currentMeta }
   } else if (currentBaseId === 'about') {
     sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'scene-tour') {
+    sceneProps = { metadata: currentMeta, sceneMetadata }
   } else if (currentBaseId === 'business-value') {
     sceneProps = {
       selectedCard: businessValueSelectedCard,
@@ -287,6 +296,8 @@ function AppContent() {
   } else if (currentBaseId === 'search-vector-scale') {
     sceneProps = { metadata: currentMeta }
   } else if (currentBaseId === 'search-vector') {
+    sceneProps = { metadata: currentMeta }
+  } else if (currentBaseId === 'video-knowledge') {
     sceneProps = { metadata: currentMeta }
   } else if (currentBaseId === 'search-gpu') {
     sceneProps = { metadata: currentMeta }

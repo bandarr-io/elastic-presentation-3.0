@@ -8,7 +8,7 @@ import { useReducedMotion } from '../hooks/useReducedMotion'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faShieldHalved, faShuffle, faHardDrive, faBolt, faPlay, faRotateRight } from '@fortawesome/free-solid-svg-icons'
 
-const BEATS = [
+export const BEATS = [
   {
     key: 'claim',
     step: 'Vector DB',

@@ -435,8 +435,8 @@ function HeroScene() {
           <div className="answer-logo mb-8" style={{ opacity: 0 }}>
             <img 
               src={isDark 
-                ? "/Elastic-Logo-tagline-secondary-white.svg" 
-                : "/Elastic-Logo-tagline-secondary-black.png"
+                ? "./Elastic-Logo-tagline-secondary-white.svg"
+                : "./Elastic-Logo-tagline-secondary-black.png"
               }
               alt="Elastic - The Search AI Company" 
               className="h-16 w-auto mx-auto object-contain"

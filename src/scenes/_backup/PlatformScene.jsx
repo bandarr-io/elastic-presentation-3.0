@@ -482,7 +482,7 @@ function PlatformScene() {
               
               {/* Elastic logo */}
               <img 
-                src="/logo-elastic-glyph-color.png" 
+                src="./logo-elastic-glyph-color.png"
                 alt="Elastic" 
                 className="w-40 h-auto"
               />

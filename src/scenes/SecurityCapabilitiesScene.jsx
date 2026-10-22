@@ -86,7 +86,7 @@ const SUMMARY_BEAT = {
   subtitle: 'Three capabilities a platform must have natively to operate at machine speed.',
 }
 
-const BEATS = [
+export const BEATS = [
   ...LAYERS.map((l) => ({
     key: l.key, step: l.step, titlePlain: l.titlePlain, titleAccent: l.titleAccent, subtitle: l.subtitle,
   })),

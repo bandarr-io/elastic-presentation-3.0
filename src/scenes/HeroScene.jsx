@@ -124,7 +124,7 @@ const HeroScene = ({ metadata = {} }) => {
           {/* Elastic Logo */}
           <div className="mb-12">
             <img 
-              src={isDark ? '/Elastic-Logo-tagline-secondary-white.svg' : '/Elastic-Logo-tagline-secondary-black.png'}
+              src={isDark ? './Elastic-Logo-tagline-secondary-white.svg' : './Elastic-Logo-tagline-secondary-black.png'}
               alt="Elastic - The Search AI Company" 
               className={`h-16 ${align === 'center' ? 'mx-auto' : ''}`}
             />

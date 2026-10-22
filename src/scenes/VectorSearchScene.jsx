@@ -8,7 +8,7 @@ import { useSceneMotion } from '../hooks/useSceneMotion'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import { faBolt, faArrowRight } from '@fortawesome/free-solid-svg-icons'
 
-const BEATS = [
+export const BEATS = [
   {
     key: 'embed',
     step: 'Embed',
