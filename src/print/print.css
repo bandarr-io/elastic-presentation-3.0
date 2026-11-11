@@ -1,0 +1,119 @@
+/* Slide printing. Loaded only with the lazy print page. Selectors are scoped to
+   .print-root; @page is global by nature, so it lives here with the page.
+
+   One slide per page, sized like PowerPoint 16:9 (13.333 x 7.5 in), which is
+   1280 x 720 CSS px. Slides are laid out on a 1920 x 1080 stage, the size they
+   are designed for on a projector, then scaled to two thirds to fill the page. */
+@page { size: 13.333in 7.5in; margin: 0; }
+
+.print-root {
+  min-height: 100vh;
+  background: #cfd5df;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.print-root * { box-sizing: border-box; }
+
+/* Toolbar: screen only */
+.print-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #f4f6f9;
+  border-bottom: 1px solid #c9d1dc;
+  font-size: 14px;
+  color: #111;
+}
+.print-toolbar select,
+.print-toolbar button {
+  font: inherit;
+  padding: 6px 12px;
+  border: 1px solid #8a96a8;
+  border-radius: 6px;
+  background: #fff;
+  color: #111;
+}
+.print-toolbar button.print-primary {
+  background: #0b64dd;
+  border-color: #0b64dd;
+  color: #fff;
+  cursor: pointer;
+}
+.print-toolbar button:disabled { opacity: 0.6; cursor: default; }
+.print-toolbar label { display: inline-flex; align-items: center; gap: 6px; }
+.print-toolbar a { color: #0b64dd; }
+.print-status { color: #444; }
+.print-status[data-warn="true"] { color: #a30000; }
+
+.print-root .print-message {
+  max-width: 180mm;
+  margin: 16mm auto;
+  padding: 8mm;
+  background: #fff;
+  color: #111;
+  border-radius: 8px;
+}
+.print-root .print-message a { color: #0b64dd; }
+
+/* Slides. The box takes the scaled size on screen; the stage is always 1920 x 1080. */
+.print-slides { padding: 16px 0; }
+.print-slide { display: flex; justify-content: center; margin-bottom: 16px; }
+.print-slide-box {
+  position: relative;
+  width: calc(1920px * var(--print-scale, 1));
+  height: calc(1080px * var(--print-scale, 1));
+  overflow: hidden;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+.print-slide-stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  transform: scale(var(--print-scale, 1));
+  transform-origin: top left;
+}
+.print-missing {
+  margin: 24px;
+  padding: 12px;
+  border: 1px dashed #a30000;
+  color: #a30000;
+}
+
+/* Slides settle on their final state: no entrance fades, pulses or stepper controls. */
+.print-slide-stage .reveal { opacity: 1 !important; transform: none !important; }
+.print-slide-stage *, .print-slide-stage *::before, .print-slide-stage *::after {
+  animation: none !important;
+  transition: none !important;
+}
+.print-slide-stage [data-print-hide="true"] { display: none !important; }
+
+@media print {
+  .print-toolbar { display: none; }
+  .print-root { background: transparent; --print-scale: 0.666667 !important; }
+  .print-slides { padding: 0; }
+  /* 719px, not 720px: a rounding sliver would otherwise spill onto a blank page. */
+  .print-slide {
+    display: block;
+    margin: 0;
+    height: 719px;
+    overflow: hidden;
+    break-after: page;
+    page-break-after: always;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .print-slide:last-child { break-after: auto; page-break-after: auto; }
+  .print-slide-box { width: 1280px; height: 719px; box-shadow: none; }
+  /* zoom, not transform: the printer paginates by layout size, and a 1080px
+     layout scaled down by transform would still be split across two pages. */
+  .print-slide-stage { transform: none; zoom: 0.666667; }
+}

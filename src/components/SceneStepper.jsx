@@ -61,7 +61,7 @@ function SceneStepper({ beats = [], beat = 0, onGo, onReplay, isPlaying = false,
   if (!showPills) return null
 
   return (
-    <div className="flex-shrink-0 flex items-center justify-center gap-2 pt-3">
+    <div className="flex-shrink-0 flex items-center justify-center gap-2 pt-3" data-print-hide="true">
       {showPills &&
         beats.map((b, i) => {
           const isActive = i === beat

@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, lazy, Suspense } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Analytics } from '@vercel/analytics/react'
 import { ThemeProvider, useTheme } from './context/ThemeContext'
 import { TeamProvider } from './context/TeamContext'
 import { SceneMotionProvider, useSceneMotionControls } from './context/SceneMotionContext'
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
-import { faSun, faMoon, faMagnifyingGlass, faGear, faShield, faForwardStep, faPlay, faPause, faRotateRight, faChevronRight, faChevronLeft, faBolt, faLayerGroup, faTimes, faCircleNodes, faChalkboardUser } from '@fortawesome/free-solid-svg-icons'
+import { faSun, faMoon, faMagnifyingGlass, faGear, faShield, faForwardStep, faPlay, faPause, faRotateRight, faChevronRight, faChevronLeft, faBolt, faLayerGroup, faTimes, faCircleNodes, faChalkboardUser, faPrint } from '@fortawesome/free-solid-svg-icons'
 import SceneSettings, { useSceneConfiguration } from './components/SceneSettings'
 import HeroScene from './scenes/HeroScene'
 import { SCENE_REGISTRY } from './data/sceneRegistry'
@@ -589,6 +589,19 @@ function AppContent() {
               <FontAwesomeIcon icon={faChalkboardUser} className="text-base" />
             </button>
 
+            <button
+              onClick={() => navigate('/print')}
+              className={`w-10 h-10 rounded-full flex items-center justify-center transition-all hover:scale-110 ${
+                theme === 'dark' 
+                  ? 'bg-elastic-teal/20 hover:bg-elastic-teal/30 text-elastic-teal' 
+                  : 'bg-elastic-blue/10 hover:bg-elastic-blue/20 text-elastic-blue'
+              }`}
+              title="Print handout"
+              aria-label="Print handout"
+            >
+              <FontAwesomeIcon icon={faPrint} className="text-base" />
+            </button>
+
             {/* Custom content toggle - only scenes that repurpose the toggle with a
                 bespoke icon (e.g. reveal/hide). Generic auto-play is not shown. */}
             {motionControls?.onTogglePlay && motionControls?.toggleIcon && (
@@ -1098,15 +1111,21 @@ function AppContent() {
   )
 }
 
+// Loaded on demand so its print stylesheet only applies on the print route.
+const PrintPage = lazy(() => import('./print/PrintPage'))
+
 function App() {
   const location = useLocation()
   const isPresenterView = location.pathname === '/presenter'
+  const isPrintView = location.pathname === '/print'
 
   return (
     <ThemeProvider>
       <TeamProvider>
         <SceneMotionProvider>
-          {isPresenterView ? <PresenterView /> : <AppContent />}
+          {isPrintView ? (
+            <Suspense fallback={null}><PrintPage /></Suspense>
+          ) : isPresenterView ? <PresenterView /> : <AppContent />}
         </SceneMotionProvider>
         <Analytics />
       </TeamProvider>
