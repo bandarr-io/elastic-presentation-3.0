@@ -3,7 +3,7 @@ import { FontAwesomeIcon } from '@fortawesome/react-fontawesome'
 import {
   faChevronLeft, faChevronRight, faForward, faBackward, faPlay, faPause,
   faRotateRight, faCircle, faUpRightFromSquare, faStopwatch, faBoltLightning,
-  faMagnifyingGlass,
+  faMagnifyingGlass, faGear, faMinus, faPlus,
 } from '@fortawesome/free-solid-svg-icons'
 import { useTheme } from '../context/ThemeContext'
 import { SceneMotionFollow } from '../context/SceneMotionFollowContext'
@@ -14,6 +14,7 @@ import ScenePreview from './ScenePreview'
 import { buildPreviewProps } from './buildPreviewProps'
 import { catalogSpeakerNotes, resolveCatalogScenario } from '../data/catalogScenarios'
 import { baseSceneId } from '../utils/sceneIdentity'
+import { PRESENTER_LAYOUTS, usePresenterLayout } from './presenterLayout'
 
 const LIFTED_STAGE_SCENES = new Set(['security', 'schema', 'esql', 'services', 'elastic-overview'])
 
@@ -30,6 +31,10 @@ function formatElapsed(ms) {
 function PresenterView() {
   const { theme } = useTheme()
   const isDark = theme === 'dark'
+  const presenterLayout = usePresenterLayout()
+  const notesFirst = presenterLayout.layout === 'notes'
+  const fontSize = presenterLayout.fontSize
+  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false)
 
   const {
     enabledScenes,
@@ -248,6 +253,171 @@ function PresenterView() {
       : 'bg-white hover:bg-elastic-blue/10 text-elastic-dev-blue/70 border border-elastic-dev-blue/10'
   }`
 
+  const currentBlock = (
+    <section className="flex flex-col gap-3 min-h-0 flex-[3]">
+      <div className="flex items-baseline justify-between">
+        <h2 className={`text-lg font-bold ${strongText}`}>
+          {currentScene ? sceneTitle(currentScene) : '—'}
+          <span className={`ml-3 text-sm font-mono font-normal tabular-nums ${accentText}`}>
+            {currentIndex + 1} / {enabledScenes.length}
+          </span>
+        </h2>
+        {currentScene?.duration && (
+          <span className={`text-xs font-medium ${mutedText}`}>Target: {customDurations?.[currentScene.id] || currentScene.duration}</span>
+        )}
+      </div>
+
+      <div className={`flex-1 min-h-0 rounded-2xl overflow-hidden ${panelClass}`}>
+        {CurrentComponent && (
+          <SceneMotionFollow beat={beat} playKey={playKey}>
+            <div key={currentScene.id} className="h-full w-full">
+              <ScenePreview
+                fill
+                interactive
+                onClickableClick={(info) => sendCommand('domClick', info)}
+              >
+                <div data-scene-root className="h-full w-full flex items-center justify-center bg-elastic-light-grey dark:bg-elastic-dev-blue">
+                  <CurrentComponent {...buildPreviewProps(currentScene.id, previewContext, currentStage, livePreview)} />
+                </div>
+              </ScenePreview>
+            </div>
+          </SceneMotionFollow>
+        )}
+      </div>
+
+      {/* Beat pills */}
+      {beatCount > 1 && (
+        <div className="flex items-center flex-wrap gap-2">
+          {Array.from({ length: beatCount }, (_, i) => {
+            const isActive = i === beat
+            return (
+              <button
+                key={i}
+                onClick={() => sendCommand('goToBeat', { beatIndex: i })}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                  isActive
+                    ? isDark ? 'bg-elastic-teal/20 text-elastic-teal' : 'bg-elastic-blue/15 text-elastic-blue'
+                    : isDark ? 'text-white/55 hover:text-white/80 bg-white/[0.04]' : 'text-elastic-dev-blue/55 hover:text-elastic-dev-blue/80 bg-white'
+                }`}
+              >
+                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs border ${
+                  isActive
+                    ? isDark ? 'border-elastic-teal' : 'border-elastic-blue'
+                    : isDark ? 'border-white/20' : 'border-elastic-dev-blue/20'
+                }`}>
+                  {i + 1}
+                </span>
+                {beatLabels[i] || `Step ${i + 1}`}
+              </button>
+            )
+          })}
+          {canReplay && (
+            <button
+              onClick={() => sendCommand('replay')}
+              className={`ml-1 px-3 py-1.5 rounded-full text-xs font-semibold ${
+                isDark ? 'text-white/55 hover:text-white/80 bg-white/[0.04]' : 'text-elastic-dev-blue/55 hover:text-elastic-dev-blue/80 bg-white'
+              }`}
+              title="Replay current step's animation"
+            >
+              <FontAwesomeIcon icon={faRotateRight} className="mr-1.5 text-[10px]" />
+              Replay
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* In-scene triggers (animations, demos) available right now */}
+      {sceneActions.length > 0 && (
+        <div className="flex items-center flex-wrap gap-2">
+          <span className={`text-[11px] font-bold uppercase tracking-eyebrow ${mutedText}`}>Triggers</span>
+          {sceneActions.map((action) => (
+            <button
+              key={action.id}
+              onClick={() => sendCommand('sceneAction', { actionId: action.id })}
+              disabled={action.disabled}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all disabled:opacity-40 ${
+                isDark
+                  ? 'border-elastic-teal/40 text-elastic-teal bg-elastic-teal/10 hover:bg-elastic-teal/20'
+                  : 'border-elastic-blue/30 text-elastic-blue bg-elastic-blue/5 hover:bg-elastic-blue/15'
+              }`}
+            >
+              <FontAwesomeIcon icon={faBoltLightning} className="text-[10px]" />
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+
+  const nextBlock = (
+    <div className={`flex flex-col gap-2 ${notesFirst ? 'flex-[2] min-h-0' : ''}`}>
+      <h3 className={`text-xs font-bold uppercase tracking-eyebrow ${mutedText}`}>
+        Next scene{nextScene ? `: ${sceneTitle(nextScene)}` : ''}
+      </h3>
+      <div className={`rounded-xl overflow-hidden ${notesFirst ? 'flex-1 min-h-0' : ''} ${panelClass}`}>
+        {NextComponent ? (
+          <div key={nextScene.id} className={notesFirst ? 'h-full' : undefined}>
+            <ScenePreview fill={notesFirst}>
+              <div className="h-full w-full flex items-center justify-center bg-elastic-light-grey dark:bg-elastic-dev-blue">
+                <NextComponent {...buildPreviewProps(nextScene.id, previewContext)} />
+              </div>
+            </ScenePreview>
+          </div>
+        ) : (
+          <div className={`flex items-center justify-center text-sm font-medium ${mutedText}`} style={notesFirst ? { height: '100%' } : { aspectRatio: '16 / 9' }}>
+            End of deck
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
+  const notesBlock = (
+    <div className={`flex-1 min-h-0 flex flex-col rounded-xl p-4 gap-2 ${panelClass}`}>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className={`text-xs font-bold uppercase tracking-eyebrow ${mutedText}`}>Speaker notes</h3>
+        {hasBeats && (
+          <div className="flex items-center gap-1">
+            {[
+              { id: 'scene', label: 'Scene', hasContent: Boolean(sceneNotes) },
+              { id: 'step', label: beatLabels[beat] || `Step ${beat + 1}`, hasContent: Boolean(beatNote) },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setPinnedNotesTab(tab.id)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all ${
+                  notesTab === tab.id
+                    ? isDark ? 'bg-elastic-teal/20 text-elastic-teal' : 'bg-elastic-blue/15 text-elastic-blue'
+                    : isDark ? 'text-white/45 hover:text-white/75' : 'text-elastic-dev-blue/45 hover:text-elastic-dev-blue/75'
+                }`}
+              >
+                {tab.label}
+                {tab.hasContent && (
+                  <span className={`w-1.5 h-1.5 rounded-full ${isDark ? 'bg-elastic-teal' : 'bg-elastic-blue'}`} />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <textarea
+        key={notesTab === 'step' ? `step-${currentScene?.id}-${beat}` : `scene-${currentScene?.id}`}
+        value={notesTab === 'step' ? beatNote : sceneNotes}
+        onChange={(e) => (notesTab === 'step' ? setBeatNote(e.target.value) : setSceneNotes(e.target.value))}
+        placeholder={
+          notesTab === 'step'
+            ? `Notes for this step (${beatLabels[beat] || `step ${beat + 1}`}) — shown when the step is active.`
+            : 'Notes for this scene — visible only here. Edits are saved to the deck config.'
+        }
+        style={{ fontSize: `${fontSize}px` }}
+        className={`flex-1 min-h-0 w-full resize-none bg-transparent outline-none leading-relaxed ${
+          isDark ? 'text-white placeholder:text-white/25' : 'text-elastic-dark-ink placeholder:text-elastic-dev-blue/30'
+        }`}
+      />
+    </div>
+  )
+
   return (
     <div className="min-h-screen flex flex-col bg-elastic-light-grey dark:bg-elastic-dev-blue transition-colors duration-300">
       {/* ── Header: status, scene position, timer, clock ── */}
@@ -294,6 +464,69 @@ function PresenterView() {
               <FontAwesomeIcon icon={faRotateRight} className="text-xs" />
             </button>
           </div>
+          {/* Layout + notes size */}
+          <div className="relative">
+            <button
+              onClick={() => setLayoutMenuOpen((open) => !open)}
+              className={`w-8 h-8 rounded-full flex items-center justify-center ${isDark ? 'hover:bg-white/10 text-white/60' : 'hover:bg-elastic-dev-blue/10 text-elastic-dev-blue/60'}`}
+              title="Layout and notes size"
+              aria-expanded={layoutMenuOpen}
+            >
+              <FontAwesomeIcon icon={faGear} className="text-sm" />
+            </button>
+            {layoutMenuOpen && (
+              <>
+                <button
+                  className="fixed inset-0 z-40 cursor-default"
+                  aria-hidden="true"
+                  tabIndex={-1}
+                  onClick={() => setLayoutMenuOpen(false)}
+                />
+                <div
+                  className={`absolute right-0 top-full mt-2 z-50 w-72 rounded-2xl border shadow-2xl p-4 flex flex-col gap-4 ${
+                    isDark ? 'bg-elastic-dev-blue border-white/10' : 'bg-white border-elastic-dev-blue/10'
+                  }`}
+                >
+                  <div className="flex flex-col gap-2">
+                    <span className={`text-[11px] font-bold uppercase tracking-eyebrow ${mutedText}`}>Layout</span>
+                    {PRESENTER_LAYOUTS.map((option) => {
+                      const active = option.id === presenterLayout.layout
+                      return (
+                        <button
+                          key={option.id}
+                          onClick={() => presenterLayout.setLayout(option.id)}
+                          aria-pressed={active}
+                          className={`text-left px-3 py-2 rounded-xl border transition-colors ${
+                            active
+                              ? isDark ? 'border-elastic-teal/60 bg-elastic-teal/15' : 'border-elastic-blue/40 bg-elastic-blue/10'
+                              : isDark ? 'border-white/10 hover:bg-white/[0.06]' : 'border-elastic-dev-blue/10 hover:bg-elastic-dev-blue/[0.05]'
+                          }`}
+                        >
+                          <span className={`block text-sm font-semibold ${active ? accentText : strongText}`}>{option.label}</span>
+                          <span className={`block text-xs ${mutedText}`}>{option.hint}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <span className={`text-[11px] font-bold uppercase tracking-eyebrow ${mutedText}`}>Notes text size</span>
+                    <div className="flex items-center gap-2">
+                      <button onClick={presenterLayout.shrinkFont} disabled={!presenterLayout.canShrink} className={controlBtn} title="Smaller notes text">
+                        <FontAwesomeIcon icon={faMinus} className="text-xs" />
+                      </button>
+                      <span className={`flex-1 text-center font-mono text-sm tabular-nums ${strongText}`}>{fontSize}px</span>
+                      <button onClick={presenterLayout.growFont} disabled={!presenterLayout.canGrow} className={controlBtn} title="Larger notes text">
+                        <FontAwesomeIcon icon={faPlus} className="text-xs" />
+                      </button>
+                      <button onClick={presenterLayout.resetFont} className={sceneJumpBtn} title="Use the default size for this layout">
+                        Reset
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
           {/* Wall clock */}
           <span className={`font-mono text-xl tabular-nums font-semibold ${accentText}`}>
             {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -301,171 +534,24 @@ function PresenterView() {
         </div>
       </header>
 
-      {/* ── Main: previews + notes ── */}
-      <main className="flex-1 min-h-0 grid grid-cols-[minmax(0,5fr)_minmax(0,2fr)] gap-4 p-4">
-        {/* Current scene */}
-        <section className="flex flex-col gap-3 min-h-0">
-          <div className="flex items-baseline justify-between">
-            <h2 className={`text-lg font-bold ${strongText}`}>
-              {currentScene ? sceneTitle(currentScene) : '—'}
-              <span className={`ml-3 text-sm font-mono font-normal tabular-nums ${accentText}`}>
-                {currentIndex + 1} / {enabledScenes.length}
-              </span>
-            </h2>
-            {currentScene?.duration && (
-              <span className={`text-xs font-medium ${mutedText}`}>Target: {customDurations?.[currentScene.id] || currentScene.duration}</span>
-            )}
-          </div>
-
-          <div className={`flex-1 min-h-0 rounded-2xl overflow-hidden ${panelClass}`}>
-            {CurrentComponent && (
-              <SceneMotionFollow beat={beat} playKey={playKey}>
-                <div key={currentScene.id} className="h-full w-full">
-                  <ScenePreview
-                    fill
-                    interactive
-                    onClickableClick={(info) => sendCommand('domClick', info)}
-                  >
-                    <div data-scene-root className="h-full w-full flex items-center justify-center bg-elastic-light-grey dark:bg-elastic-dev-blue">
-                      <CurrentComponent {...buildPreviewProps(currentScene.id, previewContext, currentStage, livePreview)} />
-                    </div>
-                  </ScenePreview>
-                </div>
-              </SceneMotionFollow>
-            )}
-          </div>
-
-          {/* Beat pills */}
-          {beatCount > 1 && (
-            <div className="flex items-center flex-wrap gap-2">
-              {Array.from({ length: beatCount }, (_, i) => {
-                const isActive = i === beat
-                return (
-                  <button
-                    key={i}
-                    onClick={() => sendCommand('goToBeat', { beatIndex: i })}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                      isActive
-                        ? isDark ? 'bg-elastic-teal/20 text-elastic-teal' : 'bg-elastic-blue/15 text-elastic-blue'
-                        : isDark ? 'text-white/55 hover:text-white/80 bg-white/[0.04]' : 'text-elastic-dev-blue/55 hover:text-elastic-dev-blue/80 bg-white'
-                    }`}
-                  >
-                    <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs border ${
-                      isActive
-                        ? isDark ? 'border-elastic-teal' : 'border-elastic-blue'
-                        : isDark ? 'border-white/20' : 'border-elastic-dev-blue/20'
-                    }`}>
-                      {i + 1}
-                    </span>
-                    {beatLabels[i] || `Step ${i + 1}`}
-                  </button>
-                )
-              })}
-              {canReplay && (
-                <button
-                  onClick={() => sendCommand('replay')}
-                  className={`ml-1 px-3 py-1.5 rounded-full text-xs font-semibold ${
-                    isDark ? 'text-white/55 hover:text-white/80 bg-white/[0.04]' : 'text-elastic-dev-blue/55 hover:text-elastic-dev-blue/80 bg-white'
-                  }`}
-                  title="Replay current step's animation"
-                >
-                  <FontAwesomeIcon icon={faRotateRight} className="mr-1.5 text-[10px]" />
-                  Replay
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* In-scene triggers (animations, demos) available right now */}
-          {sceneActions.length > 0 && (
-            <div className="flex items-center flex-wrap gap-2">
-              <span className={`text-[11px] font-bold uppercase tracking-eyebrow ${mutedText}`}>Triggers</span>
-              {sceneActions.map((action) => (
-                <button
-                  key={action.id}
-                  onClick={() => sendCommand('sceneAction', { actionId: action.id })}
-                  disabled={action.disabled}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all disabled:opacity-40 ${
-                    isDark
-                      ? 'border-elastic-teal/40 text-elastic-teal bg-elastic-teal/10 hover:bg-elastic-teal/20'
-                      : 'border-elastic-blue/30 text-elastic-blue bg-elastic-blue/5 hover:bg-elastic-blue/15'
-                  }`}
-                >
-                  <FontAwesomeIcon icon={faBoltLightning} className="text-[10px]" />
-                  {action.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* Right column: next scene + notes */}
-        <section className="flex flex-col gap-4 min-h-0">
-          <div className="flex flex-col gap-2">
-            <h3 className={`text-xs font-bold uppercase tracking-eyebrow ${mutedText}`}>
-              Next scene{nextScene ? `: ${sceneTitle(nextScene)}` : ''}
-            </h3>
-            <div className={`rounded-xl overflow-hidden ${panelClass}`}>
-              {NextComponent ? (
-                <div key={nextScene.id}>
-                  <ScenePreview>
-                    <div className="h-full w-full flex items-center justify-center bg-elastic-light-grey dark:bg-elastic-dev-blue">
-                      <NextComponent {...buildPreviewProps(nextScene.id, previewContext)} />
-                    </div>
-                  </ScenePreview>
-                </div>
-              ) : (
-                <div className={`flex items-center justify-center text-sm font-medium ${mutedText}`} style={{ aspectRatio: '16 / 9' }}>
-                  End of deck
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Speaker notes */}
-          <div className={`flex-1 min-h-0 flex flex-col rounded-xl p-4 gap-2 ${panelClass}`}>
-            <div className="flex items-center justify-between gap-2">
-              <h3 className={`text-xs font-bold uppercase tracking-eyebrow ${mutedText}`}>Speaker notes</h3>
-              {hasBeats && (
-                <div className="flex items-center gap-1">
-                  {[
-                    { id: 'scene', label: 'Scene', hasContent: Boolean(sceneNotes) },
-                    { id: 'step', label: beatLabels[beat] || `Step ${beat + 1}`, hasContent: Boolean(beatNote) },
-                  ].map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setPinnedNotesTab(tab.id)}
-                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold transition-all ${
-                        notesTab === tab.id
-                          ? isDark ? 'bg-elastic-teal/20 text-elastic-teal' : 'bg-elastic-blue/15 text-elastic-blue'
-                          : isDark ? 'text-white/45 hover:text-white/75' : 'text-elastic-dev-blue/45 hover:text-elastic-dev-blue/75'
-                      }`}
-                    >
-                      {tab.label}
-                      {tab.hasContent && (
-                        <span className={`w-1.5 h-1.5 rounded-full ${isDark ? 'bg-elastic-teal' : 'bg-elastic-blue'}`} />
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <textarea
-              key={notesTab === 'step' ? `step-${currentScene?.id}-${beat}` : `scene-${currentScene?.id}`}
-              value={notesTab === 'step' ? beatNote : sceneNotes}
-              onChange={(e) => (notesTab === 'step' ? setBeatNote(e.target.value) : setSceneNotes(e.target.value))}
-              placeholder={
-                notesTab === 'step'
-                  ? `Notes for this step (${beatLabels[beat] || `step ${beat + 1}`}) — shown when the step is active.`
-                  : 'Notes for this scene — visible only here. Edits are saved to the deck config.'
-              }
-              className={`flex-1 min-h-0 w-full resize-none bg-transparent outline-none text-lg leading-relaxed ${
-                isDark ? 'text-white placeholder:text-white/25' : 'text-elastic-dark-ink placeholder:text-elastic-dev-blue/30'
-              }`}
-            />
-          </div>
-        </section>
-      </main>
+      {/* ── Main: layout is a presenter preference (see presenterLayout.js) ── */}
+      {notesFirst ? (
+        <main className="flex-1 min-h-0 grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4 p-4">
+          <section className="flex flex-col min-h-0">{notesBlock}</section>
+          <section className="flex flex-col gap-4 min-h-0">
+            {currentBlock}
+            {nextBlock}
+          </section>
+        </main>
+      ) : (
+        <main className="flex-1 min-h-0 grid grid-cols-[minmax(0,5fr)_minmax(0,2fr)] gap-4 p-4">
+          {currentBlock}
+          <section className="flex flex-col gap-4 min-h-0">
+            {nextBlock}
+            {notesBlock}
+          </section>
+        </main>
+      )}
 
       {/* ── Footer: transport controls ── */}
       <footer className={`flex items-center justify-between px-6 py-3 border-t ${isDark ? 'border-white/10' : 'border-elastic-dev-blue/10'}`}>
